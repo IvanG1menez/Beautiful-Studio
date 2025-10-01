@@ -1,0 +1,22 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "batisteo.vscode-django",
+        "ms-python.flake8",
+        "ms-python.black-formatter",
+        "bradlc.vscode-tailwindcss",
+        "ms-vscode.vscode-typescript-next",
+        "esbenp.prettier-vscode",
+        "formulahendry.auto-rename-tag",
+        "christian-kohler.path-intellisense",
+        "ms-vscode.vscode-json",
+        "donjayamanne.githistory",
+        "eamodio.gitlens",
+        "ms-vscode-remote.remote-wsl",
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "rangav.vscode-thunder-client"
+    ]
+}
