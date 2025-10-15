@@ -11,6 +11,9 @@ class User(AbstractUser):
         ("admin", "Administrador"),
         ("empleado", "Empleado"),
         ("cliente", "Cliente"),
+        ("profesional", "Profesional"),
+        ("propietario", "Propietario"),
+        ("superusuario", "Superusuario"),
     ]
 
     email = models.EmailField(unique=True)
@@ -18,7 +21,7 @@ class User(AbstractUser):
         max_length=20, blank=True, null=True, verbose_name="Teléfono"
     )
     role = models.CharField(
-        max_length=10, choices=ROLE_CHOICES, default="cliente", verbose_name="Rol"
+        max_length=15, choices=ROLE_CHOICES, default="cliente", verbose_name="Rol"
     )
     is_active = models.BooleanField(default=True, verbose_name="Activo")
     created_at = models.DateTimeField(

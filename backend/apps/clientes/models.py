@@ -11,18 +11,14 @@ class Cliente(models.Model):
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="cliente_profile",
         verbose_name="Usuario",
     )
     fecha_nacimiento = models.DateField(
         blank=True, null=True, verbose_name="Fecha de nacimiento"
     )
-    direccion = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name="Dirección"
-    )
+    direccion = models.TextField(blank=True, null=True, verbose_name="Dirección")
 
     preferencias = models.TextField(
         blank=True, null=True, verbose_name="Preferencias y notas"
@@ -48,9 +44,8 @@ class Cliente(models.Model):
     def __str__(self):
         """Representación string del cliente"""
         if self.user:
-            nombre = (
-                getattr(self.user, "full_name", None)
-                or getattr(self.user, "username", "Sin usuario")
+            nombre = getattr(self.user, "full_name", None) or getattr(
+                self.user, "username", "Sin usuario"
             )
             return f"Cliente: {nombre}"
         return f"Cliente #{self.pk}"
@@ -59,9 +54,8 @@ class Cliente(models.Model):
     def nombre_completo(self):
         """Propiedad para obtener el nombre completo del cliente"""
         if self.user:
-            return (
-                getattr(self.user, "full_name", None)
-                or getattr(self.user, "username", "Sin usuario")
+            return getattr(self.user, "full_name", None) or getattr(
+                self.user, "username", "Sin usuario"
             )
         return "Sin usuario asignado"
 
@@ -111,10 +105,7 @@ class Cliente(models.Model):
                 raise ValidationError(
                     {
                         "fecha_nacimiento": (
-                            (
-                                "La fecha de nacimiento no puede estar en el "
-                                "futuro."
-                            )
+                            ("La fecha de nacimiento no puede estar en el " "futuro.")
                         )
                     }
                 )
@@ -122,11 +113,7 @@ class Cliente(models.Model):
             # Validar edad mínima (ejemplo: 13 años)
             if self.edad and self.edad < 13:
                 raise ValidationError(
-                    {
-                        "fecha_nacimiento": (
-                            "El cliente debe tener al menos 13 años."
-                        )
-                    }
+                    {"fecha_nacimiento": ("El cliente debe tener al menos 13 años.")}
                 )
 
     def save(self, *args, **kwargs):
