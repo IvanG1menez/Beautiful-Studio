@@ -151,7 +151,7 @@ export default function DashboardAdminPage() {
   // Cargar estadísticas generales
   const loadStats = async () => {
     try {
-      const response = await authenticatedFetch('/api/dashboard/stats/');
+      const response = await authenticatedFetch('/api/servicios/');
 
       if (response.ok) {
         const data = await response.json();
@@ -514,7 +514,7 @@ export default function DashboardAdminPage() {
               </Card>
 
               <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('/admin/servicios')}>
+                onClick={() => router.push('/dashboard-admin/servicios')}>
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Scissors className="w-5 h-5 mr-2" />
