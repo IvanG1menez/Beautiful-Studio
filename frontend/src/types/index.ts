@@ -4,6 +4,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
+  dni?: string;
   first_name: string;
   last_name: string;
   phone?: string;
@@ -116,6 +117,7 @@ export interface LoginResponse {
 export interface RegisterData {
   username: string;
   email: string;
+  dni?: string;
   password: string;
   first_name: string;
   last_name: string;

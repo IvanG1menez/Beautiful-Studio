@@ -230,3 +230,62 @@ def logout_view(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def change_password_view(request):
+    """
+    Vista para cambiar la contraseña del usuario autenticado
+    """
+    user = request.user
+    old_password = request.data.get("old_password")
+    new_password = request.data.get("new_password")
+
+    # Validación de campos requeridos
+    if not old_password or not new_password:
+        return Response(
+            {
+                "error": "Contraseña actual y nueva contraseña son requeridas",
+                "error_code": "MISSING_PASSWORDS",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Verificar que la contraseña actual sea correcta
+    if not user.check_password(old_password):
+        return Response(
+            {
+                "error": "La contraseña actual es incorrecta",
+                "error_code": "INVALID_OLD_PASSWORD",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validar longitud de la nueva contraseña
+    if len(new_password) < 6:
+        return Response(
+            {
+                "error": "La nueva contraseña debe tener al menos 6 caracteres",
+                "error_code": "PASSWORD_TOO_SHORT",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Cambiar la contraseña
+    try:
+        user.set_password(new_password)
+        user.save()
+
+        return Response(
+            {"message": "Contraseña cambiada exitosamente"},
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        return Response(
+            {
+                "error": f"Error al cambiar contraseña: {str(e)}",
+                "error_code": "PASSWORD_CHANGE_ERROR",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

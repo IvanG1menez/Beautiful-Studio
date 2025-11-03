@@ -72,7 +72,7 @@ export default function DashboardAdminPage() {
   // Verificar autenticación y rol de administrador
   useEffect(() => {
     const checkAuth = () => {
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('auth_token'); // ← Corregido: usar 'auth_token'
       const savedUser = localStorage.getItem('user');
 
       if (!token || !savedUser) {
@@ -103,7 +103,7 @@ export default function DashboardAdminPage() {
 
   // Función para obtener el token de autenticación
   const getAuthToken = (): string | null => {
-    return localStorage.getItem('authToken');
+    return localStorage.getItem('auth_token');
   };
 
   // Función para hacer peticiones autenticadas
@@ -484,11 +484,11 @@ export default function DashboardAdminPage() {
           <TabsContent value="gestion" className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('/admin/empleados')}>
+                onClick={() => router.push('dashboard-admin/profesionales')}>
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Users className="w-5 h-5 mr-2" />
-                    Empleados
+                    Profesionales
                   </CardTitle>
                   <CardDescription>Gestionar profesionales y personal</CardDescription>
                 </CardHeader>
@@ -499,7 +499,7 @@ export default function DashboardAdminPage() {
               </Card>
 
               <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('/admin/clientes')}>
+                onClick={() => router.push('/dashboard-admin/clientes')}>
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <UserPlus className="w-5 h-5 mr-2" />

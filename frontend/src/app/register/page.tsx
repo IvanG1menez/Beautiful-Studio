@@ -16,6 +16,7 @@ export default function RegisterPage() {
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
+    dni: '',
     phone: '',
     username: '',
     email: '',
@@ -103,6 +104,7 @@ export default function RegisterPage() {
       const registerData = {
         username: formData.username,
         email: formData.email,
+        dni: formData.dni || undefined,
         password: formData.password,
         first_name: formData.first_name,
         last_name: formData.last_name,
@@ -247,19 +249,34 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Teléfono */}
-              <div className="space-y-2">
-                <Label htmlFor="phone">Teléfono</Label>
-                <Input
-                  id="phone"
-                  name="phone"
-                  type="tel"
-                  value={formData.phone}
-                  onChange={handleInputChange}
-                  placeholder="Tu número de teléfono"
-                  className="focus:ring-purple-500 focus:border-purple-500"
-                  disabled={isLoading}
-                />
+              {/* DNI y Teléfono */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="dni">DNI / Documento</Label>
+                  <Input
+                    id="dni"
+                    name="dni"
+                    type="text"
+                    value={formData.dni}
+                    onChange={handleInputChange}
+                    placeholder="12345678"
+                    className="focus:ring-purple-500 focus:border-purple-500"
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    value={formData.phone}
+                    onChange={handleInputChange}
+                    placeholder="Tu número de teléfono"
+                    className="focus:ring-purple-500 focus:border-purple-500"
+                    disabled={isLoading}
+                  />
+                </div>
               </div>
 
               {/* Nombre de usuario */}

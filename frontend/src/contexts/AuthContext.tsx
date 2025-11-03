@@ -1,7 +1,10 @@
 'use client';
 
+import { SessionTimeoutModal } from '@/components/auth/SessionTimeoutModal';
+import { useSessionTimeout } from '@/hooks/useSessionTimeout';
 import { authService } from '@/services';
 import { LoginCredentials, RegisterData, User } from '@/types';
+import { useRouter } from 'next/navigation';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 interface AuthContextType {
@@ -31,8 +34,28 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
 
   const isAuthenticated = !!user;
+
+  // Sistema de timeout de sesión por inactividad
+  const {
+    isWarning,
+    remainingTime,
+    continueSession,
+  } = useSessionTimeout({
+    idleTime: 15 * 60 * 1000, // 15 minutos de inactividad
+    warningTime: 60 * 1000, // 1 minuto para responder
+    enabled: isAuthenticated, // Solo activo si está autenticado
+    onTimeout: async () => {
+      // Cerrar sesión automáticamente
+      await logout();
+      router.push('/login?session=expired');
+    },
+    onWarning: () => {
+      console.log('⚠️ Advertencia: Sesión por expirar');
+    },
+  });
 
   // Verificar autenticación al cargar la aplicación
   useEffect(() => {
@@ -128,6 +151,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   return (
     <AuthContext.Provider value={value}>
       {children}
+
+      {/* Modal de advertencia de sesión por expirar */}
+      <SessionTimeoutModal
+        isOpen={isWarning}
+        remainingTime={remainingTime}
+        onContinue={continueSession}
+        onLogout={async () => {
+          await logout();
+          router.push('/login?session=expired');
+        }}
+      />
     </AuthContext.Provider>
   );
 };

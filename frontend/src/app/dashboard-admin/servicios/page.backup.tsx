@@ -7,10 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 interface Categoria {
@@ -32,8 +32,6 @@ interface Servicio {
 }
 
 export default function ServiciosAdminPage() {
-  const router = useRouter();
-
   // Estados para categorías
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [categoriaDialogOpen, setCategoriaDialogOpen] = useState(false);
@@ -46,6 +44,16 @@ export default function ServiciosAdminPage() {
 
   // Estados para servicios
   const [servicios, setServicios] = useState<Servicio[]>([]);
+  const [servicioDialogOpen, setServicioDialogOpen] = useState(false);
+  const [editingServicio, setEditingServicio] = useState<Servicio | null>(null);
+  const [servicioForm, setServicioForm] = useState({
+    nombre: '',
+    categoria: '',
+    precio: '',
+    duracion_minutos: '',
+    descripcion: '',
+    is_active: true
+  });
 
   // Estados generales
   const [loading, setLoading] = useState(true);
@@ -54,6 +62,8 @@ export default function ServiciosAdminPage() {
   // Estados para búsqueda y filtros
   const [searchCategoria, setSearchCategoria] = useState('');
   const [searchServicio, setSearchServicio] = useState('');
+  const [sortServicioBy, setSortServicioBy] = useState<'nombre' | 'precio' | 'duracion'>('nombre');
+  const [sortServicioOrder, setSortServicioOrder] = useState<'asc' | 'desc'>('asc');
 
   // Estados para paginación
   const [currentPageCategorias, setCurrentPageCategorias] = useState(1);
@@ -117,12 +127,27 @@ export default function ServiciosAdminPage() {
     );
   };
 
-  const getFilteredServicios = () => {
-    return servicios.filter(serv =>
+  const getFilteredAndSortedServicios = () => {
+    let filtered = servicios.filter(serv =>
       serv.nombre.toLowerCase().includes(searchServicio.toLowerCase()) ||
       serv.categoria_nombre.toLowerCase().includes(searchServicio.toLowerCase()) ||
       (serv.descripcion && serv.descripcion.toLowerCase().includes(searchServicio.toLowerCase()))
     );
+
+    // Ordenamiento
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      if (sortServicioBy === 'nombre') {
+        comparison = a.nombre.localeCompare(b.nombre);
+      } else if (sortServicioBy === 'precio') {
+        comparison = parseFloat(a.precio) - parseFloat(b.precio);
+      } else if (sortServicioBy === 'duracion') {
+        comparison = a.duracion_minutos - b.duracion_minutos;
+      }
+      return sortServicioOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return filtered;
   };
 
   // Funciones de paginación
@@ -133,7 +158,7 @@ export default function ServiciosAdminPage() {
   };
 
   const getPaginatedServicios = () => {
-    const filtered = getFilteredServicios();
+    const filtered = getFilteredAndSortedServicios();
     const startIndex = (currentPageServicios - 1) * itemsPerPage;
     return filtered.slice(startIndex, startIndex + itemsPerPage);
   };
@@ -143,7 +168,7 @@ export default function ServiciosAdminPage() {
   };
 
   const getTotalPagesServicios = () => {
-    return Math.ceil(getFilteredServicios().length / itemsPerPage);
+    return Math.ceil(getFilteredAndSortedServicios().length / itemsPerPage);
   };
 
   // Función para mostrar confirmación modal
@@ -254,6 +279,72 @@ export default function ServiciosAdminPage() {
   };
 
   // Funciones para servicios
+  const handleServicioSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const url = editingServicio
+      ? `http://localhost:8000/api/servicios/${editingServicio.id}/`
+      : 'http://localhost:8000/api/servicios/';
+
+    const method = editingServicio ? 'PUT' : 'POST';
+
+    const dataToSend = {
+      ...servicioForm,
+      categoria: parseInt(servicioForm.categoria),
+      precio: parseFloat(servicioForm.precio),
+      duracion_minutos: parseInt(servicioForm.duracion_minutos)
+    };
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dataToSend)
+      });
+
+      if (response.ok) {
+        showNotification(
+          editingServicio ? 'Servicio actualizado' : 'Servicio creado',
+          editingServicio
+            ? 'Los cambios se han guardado correctamente.'
+            : 'El nuevo servicio ha sido creado exitosamente.',
+          'success'
+        );
+        setServicioDialogOpen(false);
+        setEditingServicio(null);
+        setServicioForm({ nombre: '', categoria: '', precio: '', duracion_minutos: '', descripcion: '', is_active: true });
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        console.error('Error del backend:', errorData);
+        const errorMessage = errorData.detail
+          || errorData.nombre?.[0]
+          || errorData.categoria?.[0]
+          || errorData.precio?.[0]
+          || errorData.duracion_minutos?.[0]
+          || errorData.non_field_errors?.[0]
+          || JSON.stringify(errorData);
+        showNotification('Error al guardar servicio', errorMessage, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', 'error');
+    }
+  };
+
+  const handleEditServicio = (servicio: Servicio) => {
+    setEditingServicio(servicio);
+    setServicioForm({
+      nombre: servicio.nombre || '',
+      categoria: servicio.categoria ? servicio.categoria.toString() : '',
+      precio: servicio.precio ? servicio.precio.toString() : '',
+      duracion_minutos: servicio.duracion_minutos ? servicio.duracion_minutos.toString() : '',
+      descripcion: servicio.descripcion || '',
+      is_active: servicio.is_active ?? true
+    });
+    setServicioDialogOpen(true);
+  };
+
   const handleDeleteServicio = async (servicioId: number, nombreServicio: string) => {
     showConfirmDialog(
       '¿Eliminar servicio?',
@@ -317,7 +408,7 @@ export default function ServiciosAdminPage() {
           </TabsTrigger>
           <TabsTrigger value="servicios" className="flex items-center gap-2">
             <Scissors className="w-4 h-4" />
-            Servicios ({getFilteredServicios().length})
+            Servicios ({getFilteredAndSortedServicios().length})
           </TabsTrigger>
         </TabsList>
 
@@ -493,24 +584,145 @@ export default function ServiciosAdminPage() {
                     Gestiona todos los servicios disponibles en tu salón
                   </CardDescription>
                 </div>
-                <Button onClick={() => router.push('/dashboard-admin/servicios/nuevo')}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Nuevo Servicio
-                </Button>
+                <Dialog open={servicioDialogOpen} onOpenChange={setServicioDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button onClick={() => {
+                      setEditingServicio(null);
+                      setServicioForm({ nombre: '', categoria: '', precio: '', duracion_minutos: '', descripcion: '', is_active: true });
+                    }}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Nuevo Servicio
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>
+                        {editingServicio ? 'Editar Servicio' : 'Nuevo Servicio'}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {editingServicio ? 'Modifica los datos del servicio' : 'Agrega un nuevo servicio a tu catálogo'}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleServicioSubmit} className="space-y-4">
+                      <div>
+                        <Label htmlFor="servicio-nombre">Nombre del servicio *</Label>
+                        <Input
+                          id="servicio-nombre"
+                          value={servicioForm.nombre}
+                          onChange={(e) => setServicioForm({ ...servicioForm, nombre: e.target.value })}
+                          placeholder="Ej: Corte de cabello mujer"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="servicio-categoria">Categoría *</Label>
+                        <Select value={servicioForm.categoria} onValueChange={(value) => setServicioForm({ ...servicioForm, categoria: value })}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona una categoría" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categorias.filter(cat => cat.is_active).map((categoria) => (
+                              <SelectItem key={categoria.id} value={categoria.id.toString()}>
+                                {categoria.nombre}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="servicio-precio">Precio *</Label>
+                          <Input
+                            id="servicio-precio"
+                            type="number"
+                            step="0.01"
+                            value={servicioForm.precio}
+                            onChange={(e) => setServicioForm({ ...servicioForm, precio: e.target.value })}
+                            placeholder="0.00"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="servicio-duracion">Duración (min) *</Label>
+                          <Input
+                            id="servicio-duracion"
+                            type="number"
+                            value={servicioForm.duracion_minutos}
+                            onChange={(e) => setServicioForm({ ...servicioForm, duracion_minutos: e.target.value })}
+                            placeholder="60"
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label htmlFor="servicio-descripcion">Descripción</Label>
+                        <Textarea
+                          id="servicio-descripcion"
+                          value={servicioForm.descripcion}
+                          onChange={(e) => setServicioForm({ ...servicioForm, descripcion: e.target.value })}
+                          placeholder="Descripción opcional del servicio"
+                          rows={3}
+                        />
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="servicio-active"
+                          checked={servicioForm.is_active || false}
+                          onChange={(e) => setServicioForm({ ...servicioForm, is_active: e.target.checked })}
+                          className="w-4 h-4"
+                        />
+                        <Label htmlFor="servicio-active">Servicio activo</Label>
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button type="button" variant="outline" onClick={() => setServicioDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button type="submit">
+                          {editingServicio ? 'Actualizar' : 'Crear'} Servicio
+                        </Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
               </div>
 
-              {/* Barra de búsqueda para servicios */}
-              <div className="relative mt-4">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Buscar servicios..."
-                  value={searchServicio}
-                  onChange={(e) => {
-                    setSearchServicio(e.target.value);
-                    setCurrentPageServicios(1);
-                  }}
-                  className="pl-10"
-                />
+              {/* Barra de búsqueda y filtros para servicios */}
+              <div className="mt-4 space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input
+                    placeholder="Buscar servicios..."
+                    value={searchServicio}
+                    onChange={(e) => {
+                      setSearchServicio(e.target.value);
+                      setCurrentPageServicios(1);
+                    }}
+                    className="pl-10"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2 items-center">
+                  <span className="text-sm text-gray-600">Ordenar por:</span>
+                  <Select value={sortServicioBy} onValueChange={(value: any) => setSortServicioBy(value)}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nombre">Nombre</SelectItem>
+                      <SelectItem value="precio">Precio</SelectItem>
+                      <SelectItem value="duracion">Duración</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSortServicioOrder(sortServicioOrder === 'asc' ? 'desc' : 'asc')}
+                  >
+                    <ArrowUpDown className="w-4 h-4 mr-2" />
+                    {sortServicioOrder === 'asc' ? 'Ascendente' : 'Descendente'}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -537,7 +749,7 @@ export default function ServiciosAdminPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => router.push(`/dashboard-admin/servicios/${servicio.id}/editar`)}
+                        onClick={() => handleEditServicio(servicio)}
                       >
                         <Pencil className="w-4 h-4" />
                       </Button>
@@ -562,7 +774,7 @@ export default function ServiciosAdminPage() {
               {totalPagesServicios > 1 && (
                 <div className="flex items-center justify-between mt-6 pt-4 border-t">
                   <p className="text-sm text-gray-600">
-                    Mostrando {((currentPageServicios - 1) * itemsPerPage) + 1} - {Math.min(currentPageServicios * itemsPerPage, getFilteredServicios().length)} de {getFilteredServicios().length}
+                    Mostrando {((currentPageServicios - 1) * itemsPerPage) + 1} - {Math.min(currentPageServicios * itemsPerPage, getFilteredAndSortedServicios().length)} de {getFilteredAndSortedServicios().length}
                   </p>
                   <div className="flex items-center space-x-2">
                     <Button

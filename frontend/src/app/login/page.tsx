@@ -6,10 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
-import { Eye, EyeOff, Loader2, Scissors } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Loader2, Scissors } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
@@ -18,9 +18,21 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const { login } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Verificar si la sesión expiró
+  useEffect(() => {
+    const sessionParam = searchParams.get('session');
+    if (sessionParam === 'expired') {
+      setSessionExpired(true);
+      // Limpiar el parámetro de la URL después de mostrarlo
+      setTimeout(() => setSessionExpired(false), 5000);
+    }
+  }, [searchParams]);
 
   // Helper para debugging
   const logDebugInfo = (errorData: any) => {
@@ -142,6 +154,16 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Mensaje de sesión expirada */}
+              {sessionExpired && (
+                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
+                  <AlertCircle className="h-4 w-4 text-yellow-600" />
+                  <AlertDescription className="text-yellow-800">
+                    Tu sesión ha expirado por inactividad. Por favor, inicia sesión nuevamente.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>

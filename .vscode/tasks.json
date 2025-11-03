@@ -2,30 +2,30 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Django: Run Server",
-            "type": "shell",
-            "command": "python",
-            "args": [
-                "manage.py",
-                "runserver"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}/backend"
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "new",
-                "showReuseMessage": true,
-                "clear": false
-            },
-            "problemMatcher": []
-        },
+    "label": "Django: Run Server",
+    "type": "shell",
+    "command": "${workspaceFolder}/backend/venv/Scripts/python", // <--- RUTA DIRECTA AL PYTHON DEL VENV
+    "args": [
+        "manage.py",
+        "runserver"
+    ],
+    "options": {
+        "cwd": "${workspaceFolder}/backend" // Mantenemos la ubicación de ejecución
+    },
+    "group": {
+        "kind": "build",
+        "isDefault": true
+    },
+    "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "new",
+        "showReuseMessage": true,
+        "clear": false
+    },
+    "problemMatcher": []
+},
         {
             "label": "Django: Make Migrations",
             "type": "shell",

@@ -17,6 +17,14 @@ class User(AbstractUser):
     ]
 
     email = models.EmailField(unique=True)
+    dni = models.CharField(
+        max_length=20,
+        unique=True,
+        blank=True,
+        null=True,
+        verbose_name="DNI/Documento",
+        help_text="Documento Nacional de Identidad o equivalente",
+    )
     phone = models.CharField(
         max_length=20, blank=True, null=True, verbose_name="Teléfono"
     )

@@ -111,17 +111,17 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
       case 'admin':
       case 'propietario':
       case 'superusuario':
-        router.push('/dashboard-admin');
+        router.push('/dashboard-admin/perfil');
         break;
       case 'empleado':
       case 'profesional':
-        router.push('/dashboard-empleado');
+        router.push('/dashboard-empleado/perfil');
         break;
       case 'cliente':
-        router.push('/dashboard-cliente');
+        router.push('/dashboard-cliente/perfil');
         break;
       default:
-        router.push('/dashboard');
+        router.push('/perfil');
     }
   };
 
@@ -134,25 +134,26 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
     if (role === 'admin' || role === 'propietario' || role === 'superusuario') {
       return [
         { label: 'Dashboard', href: '/dashboard-admin', icon: Home },
-        { label: 'Turnos', href: '/admin/turnos', icon: Calendar },
-        { label: 'Empleados', href: '/admin/empleados', icon: Users },
-        { label: 'Clientes', href: '/admin/clientes', icon: User },
+        { label: 'Turnos', href: '/dashboard-admin/turnos', icon: Calendar },
+        { label: 'Profesionales', href: '/dashboard-admin/profesionales', icon: Users },
+        { label: 'Clientes', href: '/dashboard-admin/clientes', icon: User },
+        { label: 'Servicios', href: '/dashboard-admin/servicios', icon: Scissors },
       ];
     }
 
     if (role === 'empleado' || role === 'profesional') {
       return [
         { label: 'Mi Dashboard', href: '/dashboard-empleado', icon: Home },
-        { label: 'Mis Turnos', href: '/empleado/turnos', icon: Calendar },
-        { label: 'Mi Horario', href: '/empleado/horario', icon: Calendar },
+        { label: 'Mi Agenda', href: '/dashboard-empleado/agenda', icon: Calendar },
+        { label: 'Turnos del Día', href: '/dashboard-empleado/turnos-hoy', icon: Calendar },
       ];
     }
 
     if (role === 'cliente') {
       return [
         { label: 'Mi Dashboard', href: '/dashboard-cliente', icon: Home },
-        { label: 'Reservar Turno', href: '/reservar-turno', icon: Calendar },
-        { label: 'Mis Turnos', href: '/mis-turnos', icon: Calendar },
+        { label: 'Reservar Turno', href: '/dashboard-cliente/turnos/nuevo', icon: Calendar },
+        { label: 'Mis Turnos', href: '/dashboard-cliente/turnos', icon: Calendar },
       ];
     }
 
