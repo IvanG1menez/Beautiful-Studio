@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Empleado
+from .models import Empleado, HorarioEmpleado
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
@@ -161,6 +161,25 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
         source="get_especialidades_display", read_only=True
     )
     biografia = serializers.CharField(read_only=True)
+    nivel_experiencia = serializers.SerializerMethodField()
+
+    def get_nivel_experiencia(self, obj):
+        """Obtener nivel de experiencia para el servicio actual"""
+        request = self.context.get("request")
+        if request:
+            servicio_id = request.query_params.get("servicio")
+            if servicio_id:
+                from .models import EmpleadoServicio
+
+                relacion = EmpleadoServicio.objects.filter(
+                    empleado=obj, servicio_id=servicio_id
+                ).first()
+                if relacion:
+                    return {
+                        "nivel": relacion.nivel_experiencia,
+                        "nivel_display": relacion.get_nivel_experiencia_display(),
+                    }
+        return None
 
     class Meta:
         model = Empleado
@@ -181,6 +200,39 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "comision_porcentaje",
             "is_disponible",
             "biografia",
+            "nivel_experiencia",
             "created_at",
             "updated_at",
         )
+
+
+class HorarioEmpleadoSerializer(serializers.ModelSerializer):
+    """Serializer para horarios detallados de empleados"""
+
+    dia_semana_display = serializers.CharField(
+        source="get_dia_semana_display", read_only=True
+    )
+
+    class Meta:
+        model = HorarioEmpleado
+        fields = [
+            "id",
+            "empleado",
+            "dia_semana",
+            "dia_semana_display",
+            "hora_inicio",
+            "hora_fin",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate(self, data):
+        """Validar que hora_inicio < hora_fin"""
+        if data.get("hora_inicio") and data.get("hora_fin"):
+            if data["hora_inicio"] >= data["hora_fin"]:
+                raise serializers.ValidationError(
+                    {"hora_fin": "La hora de fin debe ser mayor a la hora de inicio"}
+                )
+        return data

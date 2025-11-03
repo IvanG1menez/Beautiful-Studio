@@ -1,4 +1,5 @@
 """Modelos para la app de empleados"""
+
 from django.db import models
 from django.conf import settings
 
@@ -85,9 +86,7 @@ class EmpleadoServicio(models.Model):
     """
 
     empleado = models.ForeignKey(
-        Empleado,
-        on_delete=models.CASCADE,
-        related_name="servicios_disponibles"
+        Empleado, on_delete=models.CASCADE, related_name="servicios_disponibles"
     )
     servicio = models.ForeignKey(
         "servicios.Servicio",
@@ -115,3 +114,55 @@ class EmpleadoServicio(models.Model):
             return f"{self.empleado.nombre_completo} - {self.servicio.nombre}"
         except AttributeError:
             return f"EmpleadoServicio #{self.pk}"
+
+
+class HorarioEmpleado(models.Model):
+    """
+    Horarios detallados de trabajo de empleados por día de la semana.
+    Permite múltiples rangos horarios por día.
+    """
+
+    DIA_SEMANA_CHOICES = [
+        (0, "Lunes"),
+        (1, "Martes"),
+        (2, "Miércoles"),
+        (3, "Jueves"),
+        (4, "Viernes"),
+        (5, "Sábado"),
+        (6, "Domingo"),
+    ]
+
+    empleado = models.ForeignKey(
+        Empleado,
+        on_delete=models.CASCADE,
+        related_name="horarios_detallados",
+        verbose_name="Empleado",
+    )
+    dia_semana = models.IntegerField(
+        choices=DIA_SEMANA_CHOICES, verbose_name="Día de la semana"
+    )
+    hora_inicio = models.TimeField(verbose_name="Hora de inicio")
+    hora_fin = models.TimeField(verbose_name="Hora de fin")
+    is_active = models.BooleanField(default=True, verbose_name="Activo")
+    created_at = models.DateTimeField(
+        auto_now_add=True, verbose_name="Fecha de creación"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True, verbose_name="Fecha de actualización"
+    )
+
+    class Meta:
+        verbose_name = "Horario de Empleado"
+        verbose_name_plural = "Horarios de Empleados"
+        ordering = ["empleado", "dia_semana", "hora_inicio"]
+        unique_together = [["empleado", "dia_semana", "hora_inicio"]]
+
+    def __str__(self):
+        dia = self.get_dia_semana_display()
+        return f"{self.empleado.nombre_completo} - {dia} ({self.hora_inicio.strftime('%H:%M')} - {self.hora_fin.strftime('%H:%M')})"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.hora_inicio >= self.hora_fin:
+            raise ValidationError("La hora de inicio debe ser menor a la hora de fin")

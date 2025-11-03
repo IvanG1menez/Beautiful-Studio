@@ -4,7 +4,6 @@ from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import Cliente
 from .serializers import (
@@ -13,6 +12,7 @@ from .serializers import (
     ClienteCreateSerializer,
     ClienteUpdateSerializer,
 )
+from apps.core.pagination import CustomPageNumberPagination
 
 
 class ClienteViewSet(viewsets.ModelViewSet):
@@ -32,8 +32,8 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
     queryset = Cliente.objects.select_related("user").all()
     permission_classes = [IsAuthenticated]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [
-        DjangoFilterBackend,
         filters.SearchFilter,
         filters.OrderingFilter,
     ]
@@ -164,17 +164,14 @@ class ClienteViewSet(viewsets.ModelViewSet):
 def cliente_me_view(request):
     """
     Vista para obtener y actualizar el perfil del cliente autenticado
+    Crea automáticamente un perfil de cliente si no existe
     """
     try:
         cliente = Cliente.objects.select_related("user").get(user=request.user)
     except Cliente.DoesNotExist:
-        return Response(
-            {
-                "error": "No se encontró un perfil de cliente para este usuario",
-                "error_code": "CLIENTE_NOT_FOUND",
-            },
-            status=status.HTTP_404_NOT_FOUND,
-        )
+        # Crear automáticamente un perfil de cliente para el usuario
+        cliente = Cliente.objects.create(user=request.user, is_vip=False)
+        print(f"Perfil de cliente creado automáticamente para: {request.user.username}")
 
     if request.method == "GET":
         serializer = ClienteDetailSerializer(cliente)
