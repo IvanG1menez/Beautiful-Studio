@@ -35,7 +35,7 @@ export default function ProtectedRoute({
 
     // Si no hay usuario autenticado, redirigir al login
     if (!user) {
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('auth_token');
       const savedUser = localStorage.getItem('user');
 
       if (!token || !savedUser) {
@@ -93,7 +93,7 @@ export default function ProtectedRoute({
 
   // Si no hay usuario autenticado, mostrar loading (la redirección se maneja en useEffect)
   if (!user) {
-    const token = localStorage.getItem('authToken');
+    const token = localStorage.getItem('auth_token');
     if (!token) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50">

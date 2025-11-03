@@ -64,8 +64,10 @@ export interface Empleado {
   biografia?: string;
   created_at: string;
   updated_at: string;
-  nombre_completo: string;
+  first_name: string;
+  last_name: string;
   email: string;
+  user_dni: string;
 }
 
 export interface EmpleadoServicio {

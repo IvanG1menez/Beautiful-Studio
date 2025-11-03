@@ -5,7 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -38,6 +39,13 @@ export default function ClientesAdminPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Estados para filtros
+  const [filterVIP, setFilterVIP] = useState<string>('todos');
+  const [filterActivo, setFilterActivo] = useState<string>('todos');
+  const [sortBy, setSortBy] = useState<'nombre' | 'fecha' | 'edad'>('fecha');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showFilters, setShowFilters] = useState(false);
+
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -63,16 +71,20 @@ export default function ClientesAdminPage() {
     };
   };
 
-  // Cargar clientes
+  // Cargar TODOS los clientes (sin paginación del backend)
   const fetchClientes = async () => {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:8000/api/clientes/', { headers });
+      // Usar page_size=1000 para obtener todos los clientes de una vez
+      const response = await fetch('http://localhost:8000/api/clientes/?page_size=1000', { headers });
 
       if (response.ok) {
         const data = await response.json();
-        setClientes(data.results || data);
+        console.log('📊 Datos recibidos del backend:', data);
+        const clientesData = data.results || data;
+        console.log('👥 Total de clientes cargados:', clientesData.length);
+        setClientes(Array.isArray(clientesData) ? clientesData : []);
       } else {
         showNotification(
           'Error al cargar clientes',
@@ -96,26 +108,84 @@ export default function ClientesAdminPage() {
     fetchClientes();
   }, []);
 
-  // Funciones de filtrado
-  const getFilteredClientes = () => {
-    return clientes.filter(cliente =>
-      cliente.nombre_completo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      cliente.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (cliente.phone && cliente.phone.includes(searchQuery)) ||
-      (cliente.user_dni && cliente.user_dni.includes(searchQuery)) ||
-      (cliente.username && cliente.username.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
+  // Debug: mostrar información en consola
+  useEffect(() => {
+    if (clientes.length > 0) {
+      console.log('📊 Estado actual:');
+      console.log('  - Total clientes en state:', clientes.length);
+      console.log('  - Clientes filtrados:', getFilteredAndSortedClientes().length);
+      console.log('  - Página actual:', currentPage);
+      console.log('  - Total páginas:', getTotalPages());
+    }
+  }, [clientes.length, searchQuery, filterVIP, filterActivo, sortBy, sortOrder, currentPage]);
+
+  // Funciones de filtrado y ordenamiento
+  const getFilteredAndSortedClientes = () => {
+    // Primero filtrar
+    let filtered = clientes.filter(cliente => {
+      const matchesSearch =
+        cliente.nombre_completo.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        cliente.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (cliente.phone && cliente.phone.includes(searchQuery)) ||
+        (cliente.user_dni && cliente.user_dni.includes(searchQuery)) ||
+        (cliente.username && cliente.username.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      const matchesVIP = filterVIP === 'todos' ||
+        (filterVIP === 'vip' && cliente.is_vip) ||
+        (filterVIP === 'no_vip' && !cliente.is_vip);
+
+      const matchesActivo = filterActivo === 'todos' ||
+        (filterActivo === 'activo' && cliente.is_active) ||
+        (filterActivo === 'inactivo' && !cliente.is_active);
+
+      return matchesSearch && matchesVIP && matchesActivo;
+    });
+
+    // Luego ordenar
+    filtered.sort((a, b) => {
+      let comparison = 0;
+
+      if (sortBy === 'nombre') {
+        comparison = a.nombre_completo.localeCompare(b.nombre_completo);
+      } else if (sortBy === 'fecha') {
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else if (sortBy === 'edad') {
+        const edadA = a.edad || 0;
+        const edadB = b.edad || 0;
+        comparison = edadA - edadB;
+      }
+
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+    return filtered;
+  };
+
+  // Limpiar filtros
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterVIP('todos');
+    setFilterActivo('todos');
+    setSortBy('fecha');
+    setSortOrder('desc');
+    setCurrentPage(1);
+  };
+
+  // Verificar si hay filtros activos
+  const hasActiveFilters = () => {
+    return searchQuery !== '' || filterVIP !== 'todos' || filterActivo !== 'todos' ||
+      sortBy !== 'fecha' || sortOrder !== 'desc';
   };
 
   // Paginación
   const getPaginatedClientes = () => {
-    const filtered = getFilteredClientes();
+    const filtered = getFilteredAndSortedClientes();
     const startIndex = (currentPage - 1) * itemsPerPage;
     return filtered.slice(startIndex, startIndex + itemsPerPage);
   };
 
   const getTotalPages = () => {
-    return Math.ceil(getFilteredClientes().length / itemsPerPage);
+    return Math.ceil(getFilteredAndSortedClientes().length / itemsPerPage);
   };
 
   // Función para mostrar confirmación modal
@@ -244,7 +314,8 @@ export default function ClientesAdminPage() {
             <div>
               <CardTitle>Clientes Registrados</CardTitle>
               <CardDescription>
-                Total de {getFilteredClientes().length} cliente{getFilteredClientes().length !== 1 ? 's' : ''}
+                Total de {clientes.length} cliente{clientes.length !== 1 ? 's' : ''}
+                {hasActiveFilters() && ` • Mostrando ${getFilteredAndSortedClientes().length} filtrado${getFilteredAndSortedClientes().length !== 1 ? 's' : ''}`}
               </CardDescription>
             </div>
             <Button onClick={() => router.push('/dashboard-admin/clientes/nuevo')}>
@@ -253,19 +324,117 @@ export default function ClientesAdminPage() {
             </Button>
           </div>
 
-          {/* Barra de búsqueda */}
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <Input
-              placeholder="Buscar por nombre, email, teléfono, DNI..."
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10"
-            />
+          {/* Barra de búsqueda y botón de filtros */}
+          <div className="flex gap-2 mt-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder="Buscar por nombre, email, teléfono, DNI..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10"
+              />
+            </div>
+            <Button
+              variant={showFilters ? "default" : "outline"}
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <Filter className="w-4 h-4 mr-2" />
+              Filtros
+              {hasActiveFilters() && (
+                <Badge variant="destructive" className="ml-2 px-1.5 py-0.5 text-xs">
+                  {[searchQuery !== '', filterVIP !== 'todos', filterActivo !== 'todos'].filter(Boolean).length}
+                </Badge>
+              )}
+            </Button>
           </div>
+
+          {/* Panel de filtros */}
+          {showFilters && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg border space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-sm">Filtros Avanzados</h3>
+                {hasActiveFilters() && (
+                  <Button variant="ghost" size="sm" onClick={clearFilters}>
+                    <X className="w-4 h-4 mr-1" />
+                    Limpiar filtros
+                  </Button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Filtro por VIP */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Estado VIP</label>
+                  <Select value={filterVIP} onValueChange={(value) => {
+                    setFilterVIP(value);
+                    setCurrentPage(1);
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos</SelectItem>
+                      <SelectItem value="vip">Solo VIP</SelectItem>
+                      <SelectItem value="no_vip">No VIP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Filtro por estado activo */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Estado</label>
+                  <Select value={filterActivo} onValueChange={(value) => {
+                    setFilterActivo(value);
+                    setCurrentPage(1);
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todos">Todos</SelectItem>
+                      <SelectItem value="activo">Activos</SelectItem>
+                      <SelectItem value="inactivo">Inactivos</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Ordenar por */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Ordenar por</label>
+                  <Select value={sortBy} onValueChange={(value: 'nombre' | 'fecha' | 'edad') => {
+                    setSortBy(value);
+                    setCurrentPage(1);
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nombre">Nombre</SelectItem>
+                      <SelectItem value="fecha">Fecha de registro</SelectItem>
+                      <SelectItem value="edad">Edad</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Orden */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Orden</label>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-between"
+                    onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  >
+                    {sortOrder === 'asc' ? 'Ascendente' : 'Descendente'}
+                    <ArrowUpDown className="w-4 h-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </CardHeader>
 
         <CardContent>
@@ -372,7 +541,7 @@ export default function ClientesAdminPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-6 pt-4 border-t">
               <p className="text-sm text-gray-600">
-                Mostrando {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, getFilteredClientes().length)} de {getFilteredClientes().length}
+                Mostrando {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, getFilteredAndSortedClientes().length)} de {getFilteredAndSortedClientes().length}
               </p>
               <div className="flex items-center space-x-2">
                 <Button

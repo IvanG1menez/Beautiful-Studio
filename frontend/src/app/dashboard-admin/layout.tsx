@@ -4,12 +4,10 @@ import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  Calendar,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
   Scissors,
-  Settings,
   User,
   Users
 } from 'lucide-react';
@@ -67,22 +65,10 @@ export default function DashboardAdminLayout({
       active: pathname?.startsWith('/dashboard-admin/servicios'),
     },
     {
-      label: 'Turnos',
-      icon: Calendar,
-      href: '/dashboard-admin/turnos',
-      active: pathname?.startsWith('/dashboard-admin/turnos'),
-    },
-    {
       label: 'Mi Perfil',
       icon: User,
       href: '/dashboard-admin/perfil',
       active: pathname?.startsWith('/dashboard-admin/perfil'),
-    },
-    {
-      label: 'Configuración',
-      icon: Settings,
-      href: '/dashboard-admin/configuracion',
-      active: pathname?.startsWith('/dashboard-admin/configuracion'),
     },
   ];
 

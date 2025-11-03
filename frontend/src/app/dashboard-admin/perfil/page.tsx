@@ -100,10 +100,9 @@ export default function PerfilAdminPage() {
       throw new Error('No authentication token found. Please login again.');
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-    // Asegurarse de que la URL tenga /api/ al inicio
-    const apiUrl = url.startsWith('/api/') ? url : `/api${url}`;
-    const fullUrl = apiUrl.startsWith('http') ? apiUrl : `${baseUrl}${apiUrl}`;
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    // La URL base ya incluye /api, solo concatenar la URL
+    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
     console.log(`Making authenticated request to: ${fullUrl}`);
 

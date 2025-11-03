@@ -83,9 +83,10 @@ export default function ServiciosAdminPage() {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
       const [categoriasRes, serviciosRes] = await Promise.all([
-        fetch('http://localhost:8000/api/servicios/categorias/', { headers }),
-        fetch('http://localhost:8000/api/servicios/', { headers })
+        fetch(`${baseUrl}/servicios/categorias/`, { headers }),
+        fetch(`${baseUrl}/servicios/`, { headers })
       ]);
 
       if (categoriasRes.ok) {
@@ -170,9 +171,10 @@ export default function ServiciosAdminPage() {
   const handleCategoriaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
     const url = editingCategoria
-      ? `http://localhost:8000/api/servicios/categorias/${editingCategoria.id}/`
-      : 'http://localhost:8000/api/servicios/categorias/';
+      ? `${baseUrl}/servicios/categorias/${editingCategoria.id}/`
+      : `${baseUrl}/servicios/categorias/`;
 
     const method = editingCategoria ? 'PUT' : 'POST';
 
@@ -227,7 +229,8 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará la categoría "${nombreCategoria}" y todos los servicios asociados quedarán sin categoría.`,
       async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/servicios/categorias/${categoriaId}/`, {
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+          const response = await fetch(`${baseUrl}/servicios/categorias/${categoriaId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
           });
@@ -260,7 +263,8 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará el servicio "${nombreServicio}".`,
       async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/servicios/${servicioId}/`, {
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+          const response = await fetch(`${baseUrl}/servicios/${servicioId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
           });

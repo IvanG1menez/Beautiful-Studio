@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatDate, formatTime } from '@/lib/dateUtils';
 import {
   AlertCircle,
   BarChart3,
@@ -113,7 +114,7 @@ export default function DashboardAdminPage() {
       throw new Error('No authentication token found');
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
     const defaultHeaders = {
@@ -181,20 +182,6 @@ export default function DashboardAdminPage() {
   };
 
   // Función para formatear fecha y hora
-  const formatDateTime = (dateTimeString: string) => {
-    const date = new Date(dateTimeString);
-    const dateFormatted = date.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-    const timeFormatted = date.toLocaleTimeString('es-ES', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-    return { dateFormatted, timeFormatted };
-  };
-
   // Función para obtener el color del badge según el estado
   const getEstadoBadgeVariant = (estado: string) => {
     switch (estado.toLowerCase()) {
@@ -387,7 +374,8 @@ export default function DashboardAdminPage() {
                 ) : turnosRecientes.length > 0 ? (
                   <div className="space-y-4">
                     {turnosRecientes.slice(0, 5).map((turno) => {
-                      const { dateFormatted, timeFormatted } = formatDateTime(turno.fecha_hora);
+                      const dateFormatted = formatDate(turno.fecha_hora);
+                      const timeFormatted = formatTime(turno.fecha_hora);
                       return (
                         <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
                           <div className="flex items-center space-x-4">
@@ -482,34 +470,33 @@ export default function DashboardAdminPage() {
 
           {/* Tab: Gestión */}
           <TabsContent value="gestion" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('dashboard-admin/profesionales')}>
+                onClick={() => router.push('/dashboard-admin/usuarios')}>
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Users className="w-5 h-5 mr-2" />
-                    Profesionales
+                    Usuarios
                   </CardTitle>
-                  <CardDescription>Gestionar profesionales y personal</CardDescription>
+                  <CardDescription>Gestionar clientes y profesionales</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold">{stats?.total_empleados || 0}</p>
-                  <p className="text-sm text-gray-600">Empleados activos</p>
-                </CardContent>
-              </Card>
-
-              <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('/dashboard-admin/clientes')}>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <UserPlus className="w-5 h-5 mr-2" />
-                    Clientes
-                  </CardTitle>
-                  <CardDescription>Administrar base de clientes</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold">{stats?.total_clientes || 0}</p>
-                  <p className="text-sm text-gray-600">Clientes registrados</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-2xl font-bold">{(stats?.total_clientes || 0) + (stats?.total_empleados || 0)}</p>
+                      <p className="text-sm text-gray-600">Usuarios totales</p>
+                    </div>
+                    <div className="space-y-1 text-right">
+                      <div className="flex items-center space-x-2">
+                        <UserPlus className="w-4 h-4 text-blue-600" />
+                        <span className="text-sm font-medium">{stats?.total_clientes || 0} Clientes</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Users className="w-4 h-4 text-purple-600" />
+                        <span className="text-sm font-medium">{stats?.total_empleados || 0} Profesionales</span>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -523,7 +510,11 @@ export default function DashboardAdminPage() {
                   <CardDescription>Configurar servicios y precios</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-gray-600">Gestionar catálogo</p>
+                  <p className="text-sm text-gray-600">Gestionar catálogo de servicios</p>
+                  <Button variant="outline" size="sm" className="mt-3">
+                    <Plus className="w-3 h-3 mr-2" />
+                    Nuevo Servicio
+                  </Button>
                 </CardContent>
               </Card>
             </div>

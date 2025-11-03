@@ -1,7 +1,5 @@
 'use client';
 
-import { SessionTimeoutModal } from '@/components/auth/SessionTimeoutModal';
-import { useSessionTimeout } from '@/hooks/useSessionTimeout';
 import { authService } from '@/services';
 import { LoginCredentials, RegisterData, User } from '@/types';
 import { useRouter } from 'next/navigation';
@@ -34,28 +32,13 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionId] = useState(() => {
+    // Generar un ID único para esta pestaña/sesión
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  });
   const router = useRouter();
 
   const isAuthenticated = !!user;
-
-  // Sistema de timeout de sesión por inactividad
-  const {
-    isWarning,
-    remainingTime,
-    continueSession,
-  } = useSessionTimeout({
-    idleTime: 15 * 60 * 1000, // 15 minutos de inactividad
-    warningTime: 60 * 1000, // 1 minuto para responder
-    enabled: isAuthenticated, // Solo activo si está autenticado
-    onTimeout: async () => {
-      // Cerrar sesión automáticamente
-      await logout();
-      router.push('/login?session=expired');
-    },
-    onWarning: () => {
-      console.log('⚠️ Advertencia: Sesión por expirar');
-    },
-  });
 
   // Verificar autenticación al cargar la aplicación
   useEffect(() => {
@@ -68,6 +51,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // Verificar si el token sigue siendo válido
           try {
             const currentUser = await authService.getProfile();
+
+            // Guardar el sessionId al inicializar (para refrescos de página)
+            sessionStorage.setItem('currentSessionId', sessionId);
+
             setUser(currentUser);
           } catch (error) {
             // Token inválido, limpiar datos
@@ -83,12 +70,95 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
 
     initAuth();
-  }, []);
+  }, [sessionId, router]);
+
+  // Detectar cambios en otras pestañas y cerrar sesión si cambia el usuario
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      // SOLO actuar si hay un usuario logueado en esta pestaña
+      if (!user) return;
+
+      // Si el cambio es en lastLoginSessionId
+      if (e.key === 'lastLoginSessionId') {
+        const newSessionId = e.newValue;
+        const currentSessionIdInTab = sessionStorage.getItem('currentSessionId');
+
+        // Si el nuevo login NO es de esta pestaña y el sessionId es diferente
+        if (newSessionId && currentSessionIdInTab && newSessionId !== currentSessionIdInTab) {
+          // Verificar que realmente sea un usuario diferente
+          const newUser = authService.getCurrentUser();
+          if (newUser && newUser.id !== user.id) {
+            // Otro usuario se logueó en otra pestaña
+            alert('Se ha detectado un inicio de sesión con otra cuenta en otra pestaña. Esta sesión se cerrará.');
+            authService.logout();
+            setUser(null);
+            router.push('/login');
+          }
+        }
+      }
+
+      // Si el cambio es en auth_token (logout en otra pestaña)
+      if (e.key === 'auth_token' && e.newValue === null) {
+        // Se cerró sesión en otra pestaña
+        setUser(null);
+        router.push('/login');
+      }
+    };
+
+    // Escuchar cambios en localStorage desde otras pestañas
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [user, router, sessionId]);
+
+  // Verificación periódica para detectar cambios de usuario (más conservadora)
+  useEffect(() => {
+    if (!user) return;
+
+    const verificarUsuario = () => {
+      const currentUser = authService.getCurrentUser();
+      const currentToken = authService.getToken();
+
+      // Solo cerrar sesión si NO hay token (logout en otra pestaña)
+      // o si el usuario cambió Y hay un sessionId diferente guardado
+      if (!currentToken) {
+        // Se cerró sesión, limpiar
+        setUser(null);
+        router.push('/login');
+        return;
+      }
+
+      if (currentUser && currentUser.id !== user.id) {
+        const lastSessionId = localStorage.getItem('lastLoginSessionId');
+        const currentSessionIdInTab = sessionStorage.getItem('currentSessionId');
+
+        // Solo cerrar si el sessionId indica que fue un login desde otra pestaña
+        if (lastSessionId && currentSessionIdInTab && lastSessionId !== currentSessionIdInTab) {
+          console.log('Cambio de usuario detectado desde otra pestaña');
+          alert('Se ha detectado un cambio de usuario. Esta sesión se cerrará.');
+          setUser(null);
+          router.push('/login');
+        }
+      }
+    };
+
+    // Verificar cada 5 segundos (menos agresivo)
+    const intervalo = setInterval(verificarUsuario, 5000);
+
+    return () => clearInterval(intervalo);
+  }, [user, router]);
 
   const login = async (credentials: LoginCredentials) => {
     try {
       setIsLoading(true);
       const response = await authService.login(credentials);
+
+      // Guardar el sessionId en sessionStorage para esta pestaña
+      sessionStorage.setItem('currentSessionId', sessionId);
+      localStorage.setItem('lastLoginSessionId', sessionId);
+
       setUser(response.user);
     } catch (error: any) {
       // Re-lanzar el error con el mensaje procesado
@@ -151,17 +221,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   return (
     <AuthContext.Provider value={value}>
       {children}
-
-      {/* Modal de advertencia de sesión por expirar */}
-      <SessionTimeoutModal
-        isOpen={isWarning}
-        remainingTime={remainingTime}
-        onContinue={continueSession}
-        onLogout={async () => {
-          await logout();
-          router.push('/login?session=expired');
-        }}
-      />
     </AuthContext.Provider>
   );
 };

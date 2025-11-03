@@ -21,6 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   AlertCircle,
   Briefcase,
+  Calendar,
   CheckCircle,
   Clock,
   DollarSign,
@@ -32,10 +33,31 @@ import {
   Mail,
   Phone,
   Scissors,
-  User,
+  User
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+
+interface RangoHorario {
+  hora_inicio: string;
+  hora_fin: string;
+}
+
+interface DiaConfig {
+  activo: boolean;
+  rangos: RangoHorario[];
+}
+
+interface HorariosConfig {
+  [dia: number]: DiaConfig;
+}
+
+interface HorarioEmpleado {
+  id: number;
+  dia_semana: number;
+  hora_inicio: string;
+  hora_fin: string;
+}
 
 interface EmpleadoProfile {
   id: number;
@@ -52,6 +74,16 @@ interface EmpleadoProfile {
   horarios?: string;
 }
 
+const DIAS_SEMANA: { [key: number]: string } = {
+  0: 'Lunes',
+  1: 'Martes',
+  2: 'Miércoles',
+  3: 'Jueves',
+  4: 'Viernes',
+  5: 'Sábado',
+  6: 'Domingo'
+};
+
 export default function PerfilEmpleadoPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -63,6 +95,17 @@ export default function PerfilEmpleadoPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+
+  // Estado de horarios detallados
+  const [horarios, setHorarios] = useState<HorariosConfig>({
+    0: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    1: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    2: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    3: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    4: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    5: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    6: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] }
+  });
 
   // Estados para el formulario de datos personales
   const [formData, setFormData] = useState({
@@ -95,16 +138,61 @@ export default function PerfilEmpleadoPage() {
     loadProfile();
   }, [user, router]);
 
+  // Funciones para manejo de horarios
+  const toggleDia = (dia: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        activo: !prev[dia].activo,
+        rangos: !prev[dia].activo && prev[dia].rangos.length === 0
+          ? [{ hora_inicio: '09:00', hora_fin: '17:00' }]
+          : prev[dia].rangos
+      }
+    }));
+  };
+
+  const agregarRango = (dia: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: [...prev[dia].rangos, { hora_inicio: '09:00', hora_fin: '17:00' }]
+      }
+    }));
+  };
+
+  const eliminarRango = (dia: number, index: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: prev[dia].rangos.filter((_, i) => i !== index)
+      }
+    }));
+  };
+
+  const actualizarRango = (dia: number, index: number, field: 'hora_inicio' | 'hora_fin', value: string) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: prev[dia].rangos.map((r, i) =>
+          i === index ? { ...r, [field]: value } : r
+        )
+      }
+    }));
+  };
+
   const getAuthToken = () => localStorage.getItem('auth_token');
 
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
     const token = getAuthToken();
     if (!token) throw new Error('No authentication token found');
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-    // Asegurarse de que la URL tenga /api/ al inicio
-    const apiUrl = url.startsWith('/api/') ? url : `/api${url}`;
-    const fullUrl = apiUrl.startsWith('http') ? apiUrl : `${baseUrl}${apiUrl}`;
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    // La URL base ya incluye /api, solo concatenar la URL
+    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
     return fetch(fullUrl, {
       ...options,
@@ -134,6 +222,39 @@ export default function PerfilEmpleadoPage() {
           phone: data.user.phone || '',
           dni: data.user.dni || '',
         });
+
+        // Cargar horarios detallados
+        if (data.id) {
+          const horariosResponse = await authenticatedFetch(`/empleados/horarios/?empleado=${data.id}`);
+          if (horariosResponse.ok) {
+            const horariosData: HorarioEmpleado[] = await horariosResponse.json();
+
+            // Agrupar horarios por día
+            const grouped: { [key: number]: RangoHorario[] } = {};
+            horariosData.forEach(h => {
+              if (!grouped[h.dia_semana]) {
+                grouped[h.dia_semana] = [];
+              }
+              grouped[h.dia_semana].push({
+                hora_inicio: h.hora_inicio,
+                hora_fin: h.hora_fin
+              });
+            });
+
+            // Actualizar estado de horarios
+            setHorarios(prev => {
+              const updated = { ...prev };
+              Object.entries(grouped).forEach(([dia, rangos]) => {
+                const diaNum = parseInt(dia);
+                updated[diaNum] = {
+                  activo: true,
+                  rangos: rangos
+                };
+              });
+              return updated;
+            });
+          }
+        }
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error('Error response:', response.status, errorData);
@@ -448,10 +569,11 @@ export default function PerfilEmpleadoPage() {
                   Datos Profesionales
                 </CardTitle>
                 <CardDescription>
-                  Información sobre tu especialidad, comisión y horarios (solo consulta)
+                  Información sobre tu especialidad, comisión y horarios de trabajo
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-6">
+                {/* Especialidad y Comisión (Solo lectura) */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <Label className="text-gray-700">Especialidad</Label>
@@ -474,24 +596,75 @@ export default function PerfilEmpleadoPage() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-gray-700">Horarios de Trabajo</Label>
-                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                    <div className="flex items-start space-x-2">
-                      <Clock className="w-5 h-5 text-gray-600 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-gray-900 whitespace-pre-line">
-                          {profile?.horarios || 'Horarios no configurados'}
-                        </p>
-                      </div>
-                    </div>
+                <Separator />
+
+                {/* Horarios Detallados (Solo lectura) */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-5 h-5 text-primary" />
+                    <Label className="text-base font-semibold">Horarios de Trabajo</Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Estos son tus horarios de trabajo. Para modificarlos, contacta con tu supervisor.
+                  </p>
+
+                  <div className="space-y-3">
+                    {Object.entries(DIAS_SEMANA).map(([diaStr, nombre]) => {
+                      const dia = parseInt(diaStr);
+                      const config = horarios[dia];
+
+                      return (
+                        <div
+                          key={dia}
+                          className={`border rounded-lg p-4 transition-all ${config.activo
+                            ? 'border-primary bg-primary/5'
+                            : 'border-gray-200 bg-gray-50'
+                            }`}
+                        >
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className={`w-3 h-3 rounded-full ${config.activo ? 'bg-green-500' : 'bg-gray-300'
+                              }`} />
+                            <span className={`font-semibold ${config.activo ? 'text-gray-900' : 'text-gray-500'
+                              }`}>
+                              {nombre}
+                            </span>
+                          </div>
+
+                          {config.activo && config.rangos.length > 0 && (
+                            <div className="ml-6 space-y-1">
+                              {config.rangos.map((rango, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center gap-2 text-sm"
+                                >
+                                  <Clock className="w-4 h-4 text-primary" />
+                                  <span className="font-medium text-gray-700">
+                                    {rango.hora_inicio}
+                                  </span>
+                                  <span className="text-gray-500">hasta</span>
+                                  <span className="font-medium text-gray-700">
+                                    {rango.hora_fin}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {!config.activo && (
+                            <p className="ml-6 text-sm text-gray-500 italic">
+                              No trabajas este día
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
                 <Alert className="bg-blue-50 border-blue-200">
                   <AlertCircle className="h-4 w-4 text-blue-600" />
                   <AlertDescription className="text-blue-800">
-                    Los datos profesionales son administrados por el propietario del estudio.
+                    Los datos profesionales y horarios son administrados por el propietario del estudio.
                     Para modificarlos, contacta con tu supervisor.
                   </AlertDescription>
                 </Alert>

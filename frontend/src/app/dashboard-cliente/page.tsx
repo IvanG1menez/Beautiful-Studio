@@ -3,6 +3,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { formatTime, formatDate, formatDateTimeReadable } from '@/lib/dateUtils';
 import {
   AlertCircle,
   Calendar,
@@ -149,23 +150,6 @@ export default function DashboardClientePage() {
     }
   };
 
-  // Función para formatear fecha y hora
-  const formatDateTime = (fechaHora: string) => {
-    const date = new Date(fechaHora);
-    return {
-      dateFormatted: date.toLocaleDateString('es-ES', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }),
-      timeFormatted: date.toLocaleTimeString('es-ES', {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    };
-  };
-
   if (!isClient) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -193,7 +177,7 @@ export default function DashboardClientePage() {
                 <p className="text-sm text-gray-500">Próxima cita</p>
                 <p className="font-semibold">
                   {proximosTurnos.length > 0
-                    ? formatDateTime(proximosTurnos[0].fecha_hora).dateFormatted
+                    ? formatDateTimeReadable(proximosTurnos[0].fecha_hora)
                     : 'Sin citas próximas'
                   }
                 </p>
@@ -229,7 +213,8 @@ export default function DashboardClientePage() {
                     ) : proximosTurnos.length > 0 ? (
                       <div className="space-y-4">
                         {proximosTurnos.map((turno) => {
-                          const { dateFormatted, timeFormatted } = formatDateTime(turno.fecha_hora);
+                          const dateFormatted = formatDate(turno.fecha_hora);
+                          const timeFormatted = formatTime(turno.fecha_hora);
                           return (
                             <div key={turno.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                               <div className="flex justify-between items-start">
@@ -277,7 +262,8 @@ export default function DashboardClientePage() {
                     ) : historialTurnos.length > 0 ? (
                       <div className="space-y-4">
                         {historialTurnos.map((turno) => {
-                          const { dateFormatted, timeFormatted } = formatDateTime(turno.fecha_hora);
+                          const dateFormatted = formatDate(turno.fecha_hora);
+                          const timeFormatted = formatTime(turno.fecha_hora);
                           return (
                             <div key={turno.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                               <div className="flex justify-between items-start">

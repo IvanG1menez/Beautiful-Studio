@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { Empleado, Turno } from '@/types';
+import { formatTime, formatDate, getCurrentDateISO } from '@/lib/dateUtils';
 import {
   AlertCircle,
   Award,
@@ -50,7 +51,7 @@ export default function DashboardEmpleadoPage() {
   // Verificar autenticación y redirigir si es necesario
   useEffect(() => {
     const checkAuth = () => {
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('auth_token');
       const savedUser = localStorage.getItem('user');
 
       if (!token || !savedUser) {
@@ -79,9 +80,19 @@ export default function DashboardEmpleadoPage() {
     }
   }, [router]);
 
+  // Recargar turnos cuando el perfil esté disponible
+  useEffect(() => {
+    if (perfilEmpleado?.id && !loadingData) {
+      console.log('Perfil cargado, recargando turnos...');
+      loadTurnosHoy();
+      loadProximosTurnos();
+      loadStats();
+    }
+  }, [perfilEmpleado?.id]);
+
   // Función para obtener el token de autenticación
   const getAuthToken = (): string | null => {
-    return localStorage.getItem('authToken');
+    return localStorage.getItem('auth_token');
   };
 
   // Función para hacer peticiones autenticadas
@@ -91,8 +102,11 @@ export default function DashboardEmpleadoPage() {
       throw new Error('No authentication token found');
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
-    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    // La URL base ya incluye /api, no agregar nuevamente
+    const fullUrl = url.startsWith('http')
+      ? url
+      : `${baseUrl}${url}`;
 
     const defaultHeaders = {
       'Content-Type': 'application/json',
@@ -114,10 +128,12 @@ export default function DashboardEmpleadoPage() {
     setError(null);
 
     try {
+      // Primero cargar el perfil para obtener el ID del empleado
+      await loadPerfilEmpleado();
+      // Luego cargar el resto con el perfilEmpleado ya disponible
       await Promise.all([
         loadTurnosHoy(),
         loadProximosTurnos(),
-        loadPerfilEmpleado(),
         loadStats()
       ]);
     } catch (error) {
@@ -131,13 +147,19 @@ export default function DashboardEmpleadoPage() {
   // Cargar turnos de hoy del empleado
   const loadTurnosHoy = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      if (!perfilEmpleado?.id) {
+        console.log('Esperando perfil de empleado...');
+        return;
+      }
+
+      const today = getCurrentDateISO();
       const response = await authenticatedFetch(
-        `/api/turnos/?empleado=${user?.id}&fecha=${today}&ordering=fecha_hora`
+        `/turnos/?empleado=${perfilEmpleado.id}&fecha_desde=${today}&fecha_hasta=${today}&ordering=fecha_hora`
       );
 
       if (response.ok) {
         const data = await response.json();
+        console.log('Turnos de hoy:', data);
         setTurnosHoy(data.results || []);
       } else {
         console.error('Error fetching turnos de hoy:', response.status);
@@ -150,18 +172,28 @@ export default function DashboardEmpleadoPage() {
   // Cargar próximos turnos del empleado
   const loadProximosTurnos = async () => {
     try {
+      if (!perfilEmpleado?.id) {
+        console.log('Esperando perfil de empleado...');
+        return;
+      }
+
+      // Usar el nuevo endpoint específico para empleados
       const response = await authenticatedFetch(
-        `/api/turnos/?empleado=${user?.id}&estado=pendiente,confirmado&ordering=fecha_hora&limit=10`
+        `/turnos/empleado/${perfilEmpleado.id}`
       );
 
       if (response.ok) {
         const data = await response.json();
-        // Filtrar solo turnos futuros
+        console.log('Todos los turnos:', data);
+        // Filtrar solo turnos futuros y con estados pendiente/confirmado
         const now = new Date();
-        const turnosFuturos = data.results?.filter((turno: Turno) =>
-          new Date(turno.fecha_hora) > now
-        ) || [];
-        setProximosTurnos(turnosFuturos);
+        const turnosFuturos = data.results?.filter((turno: Turno) => {
+          const turnoDate = new Date(turno.fecha_hora);
+          const estadosValidos = ['pendiente', 'confirmado'];
+          return turnoDate > now && estadosValidos.includes(turno.estado);
+        }) || [];
+        console.log('Turnos futuros filtrados:', turnosFuturos);
+        setProximosTurnos(turnosFuturos.slice(0, 10)); // Limitar a 10
       } else {
         console.error('Error fetching próximos turnos:', response.status);
       }
@@ -173,23 +205,34 @@ export default function DashboardEmpleadoPage() {
   // Cargar perfil del empleado
   const loadPerfilEmpleado = async () => {
     try {
-      const response = await authenticatedFetch(`/api/empleados/${user?.id}/`);
+      // Usar el endpoint /empleados/me/ para obtener el perfil del empleado autenticado
+      const response = await authenticatedFetch(`/empleados/me/`);
 
       if (response.ok) {
         const data = await response.json();
+        console.log('Perfil de empleado cargado:', data);
         setPerfilEmpleado(data);
+        return data; // Retornar para uso inmediato
       } else {
         console.error('Error fetching perfil empleado:', response.status);
+        const errorText = await response.text();
+        console.error('Error details:', errorText);
       }
     } catch (error) {
       console.error('Error loading perfil empleado:', error);
     }
+    return null;
   };
 
   // Cargar estadísticas del empleado
   const loadStats = async () => {
     try {
-      const response = await authenticatedFetch(`/api/empleados/${user?.id}/stats/`);
+      if (!perfilEmpleado?.id) {
+        console.log('Esperando perfil de empleado...');
+        return;
+      }
+
+      const response = await authenticatedFetch(`/empleados/${perfilEmpleado.id}/stats/`);
 
       if (response.ok) {
         const data = await response.json();
@@ -200,21 +243,6 @@ export default function DashboardEmpleadoPage() {
     } catch (error) {
       console.error('Error loading stats:', error);
     }
-  };
-
-  // Función para formatear fecha y hora
-  const formatDateTime = (dateTimeString: string) => {
-    const date = new Date(dateTimeString);
-    const dateFormatted = date.toLocaleDateString('es-ES', {
-      weekday: 'long',
-      day: '2-digit',
-      month: '2-digit'
-    });
-    const timeFormatted = date.toLocaleTimeString('es-ES', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-    return { dateFormatted, timeFormatted };
   };
 
   // Función para obtener el icono según el estado del turno
@@ -334,6 +362,14 @@ export default function DashboardEmpleadoPage() {
                     {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_hoy || 0}
                   </div>
                   <p className="text-xs text-muted-foreground">Citas programadas</p>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="mt-2 p-0 h-auto text-blue-600"
+                    onClick={() => router.push('/dashboard-empleado/turnos-hoy')}
+                  >
+                    Ver todos →
+                  </Button>
                 </CardContent>
               </Card>
 
@@ -380,13 +416,24 @@ export default function DashboardEmpleadoPage() {
             {/* Turnos de Hoy */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Calendar className="w-5 h-5 mr-2" />
-                  Turnos de Hoy
-                </CardTitle>
-                <CardDescription>
-                  Tus citas programadas para hoy
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center">
+                      <Calendar className="w-5 h-5 mr-2" />
+                      Turnos de Hoy
+                    </CardTitle>
+                    <CardDescription>
+                      Tus citas programadas para hoy
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push('/dashboard-empleado/turnos-hoy')}
+                  >
+                    Ver todos
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 {loadingData ? (
@@ -397,7 +444,7 @@ export default function DashboardEmpleadoPage() {
                 ) : turnosHoy.length > 0 ? (
                   <div className="space-y-4">
                     {turnosHoy.map((turno) => {
-                      const { timeFormatted } = formatDateTime(turno.fecha_hora);
+                      const timeFormatted = formatTime(turno.fecha_hora);
                       return (
                         <div key={turno.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                           <div className="flex justify-between items-start">
@@ -405,29 +452,34 @@ export default function DashboardEmpleadoPage() {
                               <div className="flex items-center space-x-2 mb-2">
                                 {getEstadoIcon(turno.estado)}
                                 <h3 className="font-semibold text-lg">
-                                  {turno.servicio.nombre}
+                                  {(turno as any).servicio_nombre || turno.servicio?.nombre || 'Servicio'}
                                 </h3>
                                 <Badge variant={getEstadoBadgeVariant(turno.estado)}>
                                   {turno.estado.charAt(0).toUpperCase() + turno.estado.slice(1)}
                                 </Badge>
                               </div>
                               <p className="text-gray-600 mb-1">
-                                <strong>Cliente:</strong> {turno.cliente.nombre_completo}
+                                <strong>Cliente:</strong> {(turno as any).cliente_nombre || turno.cliente?.nombre_completo || (turno as any).cliente_email || 'Cliente'}
                               </p>
                               <p className="text-gray-600 mb-1">
                                 <strong>Hora:</strong> {timeFormatted}
                               </p>
                               <p className="text-gray-600">
-                                <strong>Duración:</strong> {turno.servicio.duracion_minutos} min
+                                <strong>Duración:</strong> {(turno as any).servicio_duracion || turno.servicio?.duracion_minutos || 0} min
                               </p>
                             </div>
                             <div className="text-right">
                               <p className="font-semibold text-green-600">
-                                ${turno.precio_final || turno.servicio.precio}
+                                ${turno.precio_final || (turno as any).servicio_precio || turno.servicio?.precio || '0'}
                               </p>
                               {turno.estado === 'pendiente' && (
-                                <Button size="sm" variant="outline" className="mt-2">
-                                  Confirmar
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="mt-2"
+                                  onClick={() => router.push('/dashboard-empleado/turnos-hoy')}
+                                >
+                                  Ver Turnos Hoy
                                 </Button>
                               )}
                             </div>
@@ -466,24 +518,25 @@ export default function DashboardEmpleadoPage() {
                 ) : proximosTurnos.length > 0 ? (
                   <div className="space-y-3">
                     {proximosTurnos.slice(0, 5).map((turno) => {
-                      const { dateFormatted, timeFormatted } = formatDateTime(turno.fecha_hora);
+                      const dateFormatted = formatDate(turno.fecha_hora);
+                      const timeFormatted = formatTime(turno.fecha_hora);
                       return (
                         <div key={turno.id} className="border rounded-lg p-3 bg-gray-50">
                           <div className="flex justify-between items-center">
                             <div>
                               <div className="flex items-center space-x-2 mb-1">
                                 {getEstadoIcon(turno.estado)}
-                                <span className="font-medium">{turno.servicio.nombre}</span>
+                                <span className="font-medium">{(turno as any).servicio_nombre || turno.servicio?.nombre || 'Servicio'}</span>
                                 <Badge variant={getEstadoBadgeVariant(turno.estado)}>
                                   {turno.estado}
                                 </Badge>
                               </div>
                               <p className="text-sm text-gray-600">
-                                {turno.cliente.nombre_completo} • {dateFormatted} • {timeFormatted}
+                                {(turno as any).cliente_nombre || turno.cliente?.nombre_completo || 'Cliente'} • {dateFormatted} • {timeFormatted}
                               </p>
                             </div>
                             <span className="font-semibold text-green-600">
-                              ${turno.precio_final || turno.servicio.precio}
+                              ${turno.precio_final || (turno as any).servicio_precio || turno.servicio?.precio || '0'}
                             </span>
                           </div>
                         </div>

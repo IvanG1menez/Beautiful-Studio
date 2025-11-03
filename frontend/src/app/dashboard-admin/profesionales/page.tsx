@@ -1,341 +1,149 @@
 'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { empleadosService } from '@/services/empleados';
+import { Empleado } from '@/types';
+import { ChevronLeft, ChevronRight, Edit, Filter, Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-interface Empleado {
-  id: number;
-  user: string;
-  username?: string;
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  user_dni?: string;
-  especialidades: 'corte' | 'color' | 'tratamientos' | 'unas' | 'maquillaje' | 'general';
-  especialidad_display: string;
-  fecha_ingreso: string;
-  horario_entrada: string;
-  horario_salida: string;
-  dias_trabajo: string;
-  comision_porcentaje: string;
-  is_disponible: boolean;
-  biografia?: string;
-  created_at: string;
-  updated_at: string;
-}
+const DIAS_MAP: { [key: string]: string } = {
+  'L': 'Lun',
+  'M': 'Mar',
+  'X': 'Mier',
+  'J': 'Jue',
+  'V': 'Vie',
+  'S': 'Sab',
+  'D': 'Dom'
+};
 
-export default function ProfesionalesAdminPage() {
+export default function ProfesionalesPage() {
   const router = useRouter();
-
-  // Estados para empleados
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
-  const [empleadoDialogOpen, setEmpleadoDialogOpen] = useState(false);
-  const [editingEmpleado, setEditingEmpleado] = useState<Empleado | null>(null);
-  const [empleadoForm, setEmpleadoForm] = useState({
-    username: '',
-    email: '',
-    dni: '',
-    password: '',
-    first_name: '',
-    last_name: '',
-    especialidades: '',
-    fecha_ingreso: '',
-    horario_entrada: '',
-    horario_salida: '',
-    dias_trabajo: '',
-    comision_porcentaje: '',
-    is_disponible: true,
-    biografia: ''
-  });
-
-  // Estados generales
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterEspecialidad, setFilterEspecialidad] = useState<string>('all');
+  const [filterDisponible, setFilterDisponible] = useState<string>('all');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [empleadoToDelete, setEmpleadoToDelete] = useState<Empleado | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const itemsPerPage = 10;
 
-  // Estados para búsqueda y filtros
-  const [searchEmpleado, setSearchEmpleado] = useState('');
-  const [filterEspecialidad, setFilterEspecialidad] = useState<string>('todos');
-  const [filterDisponibilidad, setFilterDisponibilidad] = useState<string>('todos');
-  const [sortEmpleadoBy, setSortEmpleadoBy] = useState<'user' | 'especialidad' | 'fecha_ingreso'>('user');
-  const [sortEmpleadoOrder, setSortEmpleadoOrder] = useState<'asc' | 'desc'>('asc');
-
-  // Estados para paginación
-  const [currentPageEmpleados, setCurrentPageEmpleados] = useState(1);
-  const itemsPerPage = 5;
-
-  // Estados para modales de confirmación y notificación
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
-  const [confirmMessage, setConfirmMessage] = useState({ title: '', description: '' });
-
-  // Estados para modal de notificación (éxito/error)
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
-  const [notificationMessage, setNotificationMessage] = useState({ title: '', description: '', type: 'success' as 'success' | 'error' });
-
-  // Función para obtener token y headers correctos
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
-  // Cargar datos iniciales
-  const fetchData = async () => {
-    setLoading(true);
+  const loadEmpleados = async (page = 1) => {
     try {
-      const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:8000/api/empleados/', { headers });
-
-      if (response.ok) {
-        const empleadosData = await response.json();
-        setEmpleados(empleadosData.results || empleadosData);
-      } else {
-        const errorData = await response.json();
-        console.error('Error fetching empleados:', errorData);
-        showNotification('Error al cargar empleados', 'No se pudieron cargar los empleados. Por favor, intenta nuevamente.', 'error');
-      }
-    } catch (error) {
-      console.error('Error fetching empleados:', error);
-      showNotification('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', 'error');
+      setLoading(true);
+      setError(null);
+      // Cargar TODOS los empleados de una vez (sin paginación del backend)
+      const response = await empleadosService.list({ page: 1, page_size: 1000 });
+      console.log('Empleados recibidos:', response.results);
+      setEmpleados(response.results);
+      // La paginación se hará en el frontend
+    } catch (err: any) {
+      console.error('Error loading empleados:', err);
+      setError(err.message || 'Error al cargar los profesionales');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    loadEmpleados();
   }, []);
 
-  // Funciones de filtrado y ordenamiento
-  const getFilteredAndSortedEmpleados = () => {
-    let filtered = empleados.filter(empleado => {
-      const matchesSearch = empleado.user.toLowerCase().includes(searchEmpleado.toLowerCase()) ||
-        empleado.especialidad_display.toLowerCase().includes(searchEmpleado.toLowerCase()) ||
-        (empleado.user_dni && empleado.user_dni.toLowerCase().includes(searchEmpleado.toLowerCase())) ||
-        (empleado.biografia && empleado.biografia.toLowerCase().includes(searchEmpleado.toLowerCase()));
+  // Resetear a página 1 cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterEspecialidad, filterDisponible]);
 
-      const matchesEspecialidad = filterEspecialidad === 'todos' || empleado.especialidades === filterEspecialidad;
-      const matchesDisponibilidad = filterDisponibilidad === 'todos' ||
-        (filterDisponibilidad === 'disponible' && empleado.is_disponible) ||
-        (filterDisponibilidad === 'no_disponible' && !empleado.is_disponible);
-
-      return matchesSearch && matchesEspecialidad && matchesDisponibilidad;
-    });
-
-    // Ordenamiento
-    filtered.sort((a, b) => {
-      let comparison = 0;
-      if (sortEmpleadoBy === 'user') {
-        comparison = a.user.localeCompare(b.user);
-      } else if (sortEmpleadoBy === 'especialidad') {
-        comparison = a.especialidad_display.localeCompare(b.especialidad_display);
-      } else if (sortEmpleadoBy === 'fecha_ingreso') {
-        comparison = new Date(a.fecha_ingreso).getTime() - new Date(b.fecha_ingreso).getTime();
-      }
-      return sortEmpleadoOrder === 'asc' ? comparison : -comparison;
-    });
-
-    return filtered;
+  const parseDiasTrabajo = (dias: string): string[] => {
+    if (!dias) return [];
+    return dias.split(',').map(d => d.trim()).filter(d => d);
   };
 
-  // Funciones de paginación
-  const getPaginatedEmpleados = () => {
-    const filtered = getFilteredAndSortedEmpleados();
-    const startIndex = (currentPageEmpleados - 1) * itemsPerPage;
-    return filtered.slice(startIndex, startIndex + itemsPerPage);
+  // Filtrar empleados localmente
+  const filteredEmpleados = empleados.filter((emp) => {
+    // Filtro de búsqueda (nombre, email, DNI)
+    const matchesSearch = searchTerm === '' ||
+      emp.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      emp.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      emp.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      emp.user_dni?.toLowerCase().includes(searchTerm.toLowerCase());
+
+    // Filtro de especialidad
+    const matchesEspecialidad = filterEspecialidad === 'all' ||
+      emp.especialidades?.toLowerCase().includes(filterEspecialidad.toLowerCase());
+
+    // Filtro de disponibilidad
+    const matchesDisponible = filterDisponible === 'all' ||
+      (filterDisponible === 'disponible' && emp.is_disponible) ||
+      (filterDisponible === 'no_disponible' && !emp.is_disponible);
+
+    return matchesSearch && matchesEspecialidad && matchesDisponible;
+  });
+
+  // Obtener especialidades únicas para el filtro
+  const especialidadesUnicas = Array.from(
+    new Set(empleados.map(emp => emp.especialidades).filter(Boolean))
+  );
+
+  // Calcular paginación en el frontend
+  const totalFilteredItems = filteredEmpleados.length;
+  const totalPages = Math.ceil(totalFilteredItems / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedEmpleados = filteredEmpleados.slice(startIndex, endIndex);
+
+  const handleDeleteClick = (empleado: Empleado) => {
+    setEmpleadoToDelete(empleado);
+    setDeleteDialogOpen(true);
   };
 
-  const getTotalPagesEmpleados = () => {
-    return Math.ceil(getFilteredAndSortedEmpleados().length / itemsPerPage);
-  };
+  const handleDeleteConfirm = async () => {
+    if (!empleadoToDelete) return;
 
-  // Función para mostrar confirmación modal
-  const showConfirmDialog = (title: string, description: string, action: () => void) => {
-    setConfirmMessage({ title, description });
-    setConfirmAction(() => action);
-    setConfirmDialogOpen(true);
-  };
-
-  const handleConfirmAction = () => {
-    if (confirmAction) {
-      confirmAction();
-    }
-    setConfirmDialogOpen(false);
-  };
-
-  // Función para mostrar notificación modal
-  const showNotification = (title: string, description: string, type: 'success' | 'error') => {
-    setNotificationMessage({ title, description, type });
-    setNotificationDialogOpen(true);
-  };
-
-  // Funciones para empleados
-  const handleEmpleadoSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const url = editingEmpleado
-      ? `http://localhost:8000/api/empleados/${editingEmpleado.id}/`
-      : 'http://localhost:8000/api/empleados/';
-
-    const method = editingEmpleado ? 'PUT' : 'POST';
-
-    // Preparar datos según si es creación o edición
-    let dataToSend: any = {
-      especialidades: empleadoForm.especialidades,
-      fecha_ingreso: empleadoForm.fecha_ingreso,
-      horario_entrada: empleadoForm.horario_entrada,
-      horario_salida: empleadoForm.horario_salida,
-      dias_trabajo: empleadoForm.dias_trabajo,
-      comision_porcentaje: parseFloat(empleadoForm.comision_porcentaje),
-      is_disponible: empleadoForm.is_disponible,
-      biografia: empleadoForm.biografia
-    };
-
-    // Solo incluir datos de usuario en creación (POST)
-    if (!editingEmpleado) {
-      dataToSend = {
-        ...dataToSend,
-        username: empleadoForm.username,
-        email: empleadoForm.email,
-        dni: empleadoForm.dni,
-        first_name: empleadoForm.first_name,
-        last_name: empleadoForm.last_name,
-        password: empleadoForm.password || 'empleado123' // Contraseña por defecto
-      };
-    }
-
+    setDeleting(true);
     try {
-      const response = await fetch(url, {
-        method,
-        headers: getAuthHeaders(),
-        body: JSON.stringify(dataToSend)
-      });
+      await empleadosService.delete(empleadoToDelete.id);
 
-      if (response.ok) {
-        showNotification(
-          editingEmpleado ? 'Profesional actualizado' : 'Profesional creado',
-          editingEmpleado
-            ? 'Los cambios se han guardado correctamente.'
-            : 'El nuevo profesional ha sido creado exitosamente.',
-          'success'
-        );
-        setEmpleadoDialogOpen(false);
-        setEditingEmpleado(null);
-        setEmpleadoForm({
-          username: '',
-          email: '',
-          dni: '',
-          password: '',
-          first_name: '',
-          last_name: '',
-          especialidades: '',
-          fecha_ingreso: '',
-          horario_entrada: '',
-          horario_salida: '',
-          dias_trabajo: '',
-          comision_porcentaje: '',
-          is_disponible: true,
-          biografia: ''
-        });
-        fetchData();
-      } else {
-        const errorData = await response.json();
-        console.error('Error del backend:', errorData);
-        const errorMessage = errorData.detail
-          || errorData.username?.[0]
-          || errorData.email?.[0]
-          || errorData.first_name?.[0]
-          || errorData.last_name?.[0]
-          || errorData.especialidades?.[0]
-          || errorData.non_field_errors?.[0]
-          || JSON.stringify(errorData);
-        showNotification('Error al guardar profesional', errorMessage, 'error');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      showNotification('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', 'error');
+      // Recargar la lista de empleados
+      await loadEmpleados();
+
+      setDeleteDialogOpen(false);
+      setEmpleadoToDelete(null);
+    } catch (err: any) {
+      console.error('Error deleting empleado:', err);
+      setError(err.message || 'Error al eliminar el profesional');
+    } finally {
+      setDeleting(false);
     }
   };
 
-  const handleEditEmpleado = (empleado: Empleado) => {
-    setEditingEmpleado(empleado);
-    setEmpleadoForm({
-      username: empleado.username || '',
-      email: empleado.email || '',
-      dni: empleado.user_dni || '',
-      password: '',
-      first_name: empleado.first_name || '',
-      last_name: empleado.last_name || '',
-      especialidades: empleado.especialidades || '',
-      fecha_ingreso: empleado.fecha_ingreso || '',
-      horario_entrada: empleado.horario_entrada || '',
-      horario_salida: empleado.horario_salida || '',
-      dias_trabajo: empleado.dias_trabajo || '',
-      comision_porcentaje: empleado.comision_porcentaje || '',
-      is_disponible: empleado.is_disponible ?? true,
-      biografia: empleado.biografia || ''
-    });
-    setEmpleadoDialogOpen(true);
-  };
-
-  const handleDeleteEmpleado = async (empleadoId: number, nombreEmpleado: string) => {
-    showConfirmDialog(
-      '¿Eliminar profesional?',
-      `Esta acción no se puede deshacer. Se eliminará al profesional "${nombreEmpleado}" y toda su información.`,
-      async () => {
-        try {
-          const response = await fetch(`http://localhost:8000/api/empleados/${empleadoId}/`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-          });
-
-          if (response.ok || response.status === 204) {
-            showNotification(
-              'Profesional eliminado',
-              `El profesional "${nombreEmpleado}" ha sido eliminado correctamente.`,
-              'success'
-            );
-            fetchData();
-          } else {
-            const errorData = await response.json();
-            console.error('Error al eliminar:', errorData);
-            const errorMessage = errorData.detail || errorData.error || 'No se pudo eliminar el profesional';
-            showNotification('Error al eliminar', errorMessage, 'error');
-          }
-        } catch (error) {
-          console.error('Error:', error);
-          showNotification('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', 'error');
-        }
-      }
-    );
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="w-8 h-8 animate-spin" />
-        <span className="ml-2">Cargando gestión de profesionales...</span>
+        <span className="ml-2">Cargando profesionales...</span>
       </div>
     );
   }
 
-  const paginatedEmpleados = getPaginatedEmpleados();
-  const totalPagesEmpleados = getTotalPagesEmpleados();
-
   return (
     <div className="container mx-auto p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Gestión de Profesionales</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Profesionales</h1>
         <p className="text-gray-600 mt-1">
-          Administra los profesionales de tu salón de belleza
+          Administra los profesionales de tu salon de belleza
         </p>
       </div>
 
@@ -345,7 +153,7 @@ export default function ProfesionalesAdminPage() {
             <div>
               <CardTitle>Profesionales</CardTitle>
               <CardDescription>
-                Gestiona todos los profesionales que trabajan en tu salón
+                Gestiona todos los profesionales que trabajan en tu salÃ³n
               </CardDescription>
             </div>
             <Button onClick={() => router.push('/dashboard-admin/profesionales/nuevo')}>
@@ -353,202 +161,204 @@ export default function ProfesionalesAdminPage() {
               Nuevo Profesional
             </Button>
           </div>
+        </CardHeader>
 
-          {/* Barra de búsqueda y filtros para empleados */}
-          <div className="mt-4 space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Buscar por nombre, DNI, especialidad o biografía..."
-                value={searchEmpleado}
-                onChange={(e) => {
-                  setSearchEmpleado(e.target.value);
-                  setCurrentPageEmpleados(1);
-                }}
-                className="pl-10"
-              />
+        <CardContent>
+          {/* Barra de filtros y búsqueda */}
+          <div className="mb-6 space-y-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <Filter className="w-4 h-4" />
+              <span>Filtros de Búsqueda</span>
             </div>
 
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-sm text-gray-600">Filtros:</span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Búsqueda por texto */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Input
+                  placeholder="Buscar por nombre, email, DNI..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
 
-              <Select value={filterEspecialidad} onValueChange={(value) => {
-                setFilterEspecialidad(value);
-                setCurrentPageEmpleados(1);
-              }}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Especialidad" />
+              {/* Filtro por especialidad */}
+              <Select value={filterEspecialidad} onValueChange={setFilterEspecialidad}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todas las especialidades" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todas las especialidades</SelectItem>
-                  <SelectItem value="corte">Especialista en Corte</SelectItem>
-                  <SelectItem value="color">Colorista</SelectItem>
-                  <SelectItem value="tratamientos">Especialista en Tratamientos</SelectItem>
-                  <SelectItem value="unas">Manicurista/Pedicurista</SelectItem>
-                  <SelectItem value="maquillaje">Maquillador/a</SelectItem>
-                  <SelectItem value="general">Generalista</SelectItem>
+                  <SelectItem value="all">Todas las especialidades</SelectItem>
+                  {especialidadesUnicas.map((esp) => (
+                    <SelectItem key={esp} value={esp || ''}>
+                      {esp}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 
-              <Select value={filterDisponibilidad} onValueChange={(value) => {
-                setFilterDisponibilidad(value);
-                setCurrentPageEmpleados(1);
-              }}>
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="Disponibilidad" />
+              {/* Filtro por disponibilidad */}
+              <Select value={filterDisponible} onValueChange={setFilterDisponible}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todos los estados" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
+                  <SelectItem value="all">Todos los estados</SelectItem>
                   <SelectItem value="disponible">Disponibles</SelectItem>
                   <SelectItem value="no_disponible">No disponibles</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
 
-              <span className="text-sm text-gray-600 ml-4">Ordenar por:</span>
-              <Select value={sortEmpleadoBy} onValueChange={(value: any) => setSortEmpleadoBy(value)}>
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">Nombre</SelectItem>
-                  <SelectItem value="especialidad">Especialidad</SelectItem>
-                  <SelectItem value="fecha_ingreso">Fecha ingreso</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSortEmpleadoOrder(sortEmpleadoOrder === 'asc' ? 'desc' : 'asc')}
-              >
-                <ArrowUpDown className="w-4 h-4 mr-2" />
-                {sortEmpleadoOrder === 'asc' ? 'Ascendente' : 'Descendente'}
-              </Button>
+            {/* Contador de resultados */}
+            <div className="text-sm text-gray-600">
+              Mostrando {startIndex + 1} - {Math.min(endIndex, totalFilteredItems)} de {totalFilteredItems} profesionales
+              {totalFilteredItems !== empleados.length && ` (${empleados.length} totales)`}
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {paginatedEmpleados.map((empleado) => (
-              <div key={empleado.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <h3 className="font-semibold">{empleado.user}</h3>
-                    {empleado.user_dni && (
-                      <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                        DNI: {empleado.user_dni}
-                      </Badge>
-                    )}
-                    <Badge variant="outline">{empleado.especialidad_display}</Badge>
-                    <Badge variant={empleado.is_disponible ? "default" : "secondary"}>
-                      {empleado.is_disponible ? 'Disponible' : 'No disponible'}
-                    </Badge>
-                  </div>
-                  {empleado.biografia && (
-                    <p className="text-sm text-gray-600 mb-2">{empleado.biografia}</p>
-                  )}
-                  <div className="flex items-center gap-4 text-sm text-gray-500">
-                    <span>📅 Ingreso: {new Date(empleado.fecha_ingreso).toLocaleDateString()}</span>
-                    <span>⏰ {empleado.horario_entrada} - {empleado.horario_salida}</span>
-                    <span>💼 {empleado.dias_trabajo}</span>
-                    <span>💰 Comisión: {empleado.comision_porcentaje}%</span>
-                  </div>
-                </div>
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push(`/dashboard-admin/profesionales/${empleado.id}/editar`)}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteEmpleado(empleado.id, empleado.user)}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {paginatedEmpleados.length === 0 && (
-              <p className="text-center text-gray-500 py-8">
-                {searchEmpleado || filterEspecialidad !== 'todos' || filterDisponibilidad !== 'todos'
-                  ? 'No se encontraron profesionales que coincidan con los filtros.'
-                  : 'No hay profesionales registrados. Crea el primer profesional para comenzar.'}
-              </p>
-            )}
-          </div>
 
-          {/* Paginación Empleados */}
-          {totalPagesEmpleados > 1 && (
-            <div className="flex items-center justify-between mt-6 pt-4 border-t">
+          {error ? (
+            <div className="text-center py-8">
+              <p className="text-red-600 mb-4">{error}</p>
+              <Button onClick={() => loadEmpleados()} variant="outline">
+                Reintentar
+              </Button>
+            </div>
+          ) : paginatedEmpleados.length > 0 ? (
+            <div className="space-y-4">
+              {paginatedEmpleados.map((empleado) => (
+                <div
+                  key={empleado.id}
+                  className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-lg">
+                          {empleado.first_name + ' ' + empleado.last_name || 'Sin nombre'}
+                        </h3>
+                        {empleado.user_dni && (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                            DNI: {empleado.user_dni}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-gray-600 capitalize">{empleado.especialidades}</p>
+                      <p className="text-sm text-gray-500">{empleado.email}</p>
+                      {empleado.biografia && (
+                        <p className="text-sm text-gray-400 mt-1 line-clamp-2">{empleado.biografia}</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {parseDiasTrabajo(empleado.dias_trabajo).map((dia, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
+                          >
+                            {DIAS_MAP[dia] || dia}
+                          </span>
+                        ))}
+                        {empleado.is_disponible ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Disponible
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            No disponible
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push(`/dashboard-admin/profesionales/${empleado.id}/editar`)}
+                      >
+                        <Edit className="w-4 h-4 mr-2" />
+                        Editar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteClick(empleado)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-500 mb-4">No hay profesionales registrados</p>
+              <Button onClick={() => router.push('/dashboard-admin/profesionales/nuevo')}>
+                <Plus className="w-4 h-4 mr-2" />
+                Crear Primer Profesional
+              </Button>
+            </div>
+          )}
+        </CardContent>
+
+        {/* Paginación */}
+        {!error && !loading && totalPages > 1 && (
+          <div className="border-t px-6 py-4">
+            <div className="flex items-center justify-between">
               <p className="text-sm text-gray-600">
-                Mostrando {((currentPageEmpleados - 1) * itemsPerPage) + 1} - {Math.min(currentPageEmpleados * itemsPerPage, getFilteredAndSortedEmpleados().length)} de {getFilteredAndSortedEmpleados().length}
+                Página {currentPage} de {totalPages}
               </p>
               <div className="flex items-center space-x-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPageEmpleados(prev => Math.max(1, prev - 1))}
-                  disabled={currentPageEmpleados === 1}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1 || loading}
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-4 h-4 mr-1" />
                   Anterior
                 </Button>
-                <span className="text-sm">
-                  Página {currentPageEmpleados} de {totalPagesEmpleados}
-                </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setCurrentPageEmpleados(prev => Math.min(totalPagesEmpleados, prev + 1))}
-                  disabled={currentPageEmpleados === totalPagesEmpleados}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages || loading}
                 >
                   Siguiente
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
             </div>
-          )}
-        </CardContent>
+          </div>
+        )}
       </Card>
 
-      {/* Modal de confirmación centralizado */}
-      <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+      {/* Dialog de confirmación de eliminación */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{confirmMessage.title}</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar profesional?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmMessage.description}
+              ¿Estás seguro de que deseas eliminar a <strong>{empleadoToDelete?.first_name} {empleadoToDelete?.last_name}</strong>?
+              Esta acción no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmAction} className="bg-red-600 hover:bg-red-700">
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Modal de notificación centralizado (éxito/error) */}
-      <AlertDialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className={notificationMessage.type === 'success' ? 'text-green-600' : 'text-red-600'}>
-              {notificationMessage.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {notificationMessage.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => setNotificationDialogOpen(false)}
-              className={notificationMessage.type === 'success' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}
+              onClick={handleDeleteConfirm}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700"
             >
-              Aceptar
+              {deleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Eliminando...
+                </>
+              ) : (
+                'Eliminar'
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

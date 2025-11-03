@@ -6,8 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -29,6 +30,30 @@ interface Empleado {
   is_disponible: boolean;
   biografia?: string;
 }
+
+interface RangoHorario {
+  hora_inicio: string;
+  hora_fin: string;
+}
+
+interface DiaConfig {
+  activo: boolean;
+  rangos: RangoHorario[];
+}
+
+interface HorariosConfig {
+  [dia: number]: DiaConfig;
+}
+
+const DIAS_SEMANA = [
+  { value: 0, label: 'Lunes', abbr: 'L' },
+  { value: 1, label: 'Martes', abbr: 'M' },
+  { value: 2, label: 'Miércoles', abbr: 'X' },
+  { value: 3, label: 'Jueves', abbr: 'J' },
+  { value: 4, label: 'Viernes', abbr: 'V' },
+  { value: 5, label: 'Sábado', abbr: 'S' },
+  { value: 6, label: 'Domingo', abbr: 'D' },
+];
 
 export default function EditarProfesionalPage() {
   const router = useRouter();
@@ -63,6 +88,18 @@ export default function EditarProfesionalPage() {
     biografia: ''
   });
 
+  // Estado de horarios detallados
+  const [horarios, setHorarios] = useState<HorariosConfig>(() => {
+    const initial: HorariosConfig = {};
+    DIAS_SEMANA.forEach(dia => {
+      initial[dia.value] = {
+        activo: false,
+        rangos: []
+      };
+    });
+    return initial;
+  });
+
   const getAuthHeaders = () => {
     const token = localStorage.getItem('auth_token');
     return {
@@ -76,11 +113,58 @@ export default function EditarProfesionalPage() {
     setNotificationDialogOpen(true);
   };
 
-  // Cargar datos del empleado
+  // Funciones para manejar horarios
+  const toggleDia = (dia: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        activo: !prev[dia].activo,
+        rangos: !prev[dia].activo && prev[dia].rangos.length === 0
+          ? [{ hora_inicio: '09:00', hora_fin: '17:00' }]
+          : prev[dia].rangos
+      }
+    }));
+  };
+
+  const agregarRango = (dia: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: [...prev[dia].rangos, { hora_inicio: '09:00', hora_fin: '17:00' }]
+      }
+    }));
+  };
+
+  const eliminarRango = (dia: number, index: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: prev[dia].rangos.filter((_, i) => i !== index)
+      }
+    }));
+  };
+
+  const actualizarRango = (dia: number, index: number, field: 'hora_inicio' | 'hora_fin', value: string) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: prev[dia].rangos.map((r, i) =>
+          i === index ? { ...r, [field]: value } : r
+        )
+      }
+    }));
+  };
+
+  // Cargar datos del empleado y horarios
   useEffect(() => {
     const fetchEmpleado = async () => {
       setLoadingData(true);
       try {
+        // Cargar datos del empleado
         const response = await fetch(`http://localhost:8000/api/empleados/${empleadoId}/`, {
           headers: getAuthHeaders()
         });
@@ -102,6 +186,39 @@ export default function EditarProfesionalPage() {
             is_disponible: empleado.is_disponible ?? true,
             biografia: empleado.biografia || ''
           });
+
+          // Cargar horarios detallados
+          const horariosResponse = await fetch(
+            `http://localhost:8000/api/empleados/horarios/?empleado=${empleadoId}&page_size=1000`,
+            { headers: getAuthHeaders() }
+          );
+
+          if (horariosResponse.ok) {
+            const horariosData = await horariosResponse.json();
+            const horariosExistentes = horariosData.results || horariosData;
+
+            // Resetear horarios
+            const nuevosHorarios: HorariosConfig = {};
+            DIAS_SEMANA.forEach(dia => {
+              nuevosHorarios[dia.value] = {
+                activo: false,
+                rangos: []
+              };
+            });
+
+            // Agrupar horarios por día
+            horariosExistentes.forEach((h: any) => {
+              if (!nuevosHorarios[h.dia_semana].activo) {
+                nuevosHorarios[h.dia_semana].activo = true;
+              }
+              nuevosHorarios[h.dia_semana].rangos.push({
+                hora_inicio: h.hora_inicio.slice(0, 5),
+                hora_fin: h.hora_fin.slice(0, 5)
+              });
+            });
+
+            setHorarios(nuevosHorarios);
+          }
         } else {
           showNotification(
             'Error al cargar profesional',
@@ -145,13 +262,40 @@ export default function EditarProfesionalPage() {
         return;
       }
 
+      // Generar dias_trabajo basado en horarios activos
+      const diasActivos = DIAS_SEMANA
+        .filter(dia => horarios[dia.value].activo)
+        .map(dia => dia.abbr)
+        .join(',');
+
+      // Obtener primer y último horario para horario_entrada/salida
+      let horarioEntrada = '09:00';
+      let horarioSalida = '17:00';
+
+      const todosLosRangos: Array<{ hora_inicio: string; hora_fin: string }> = [];
+      Object.values(horarios).forEach(dia => {
+        if (dia.activo) {
+          todosLosRangos.push(...dia.rangos);
+        }
+      });
+
+      if (todosLosRangos.length > 0) {
+        horarioEntrada = todosLosRangos
+          .map(r => r.hora_inicio)
+          .sort()[0];
+        horarioSalida = todosLosRangos
+          .map(r => r.hora_fin)
+          .sort()
+          .reverse()[0];
+      }
+
       // Preparar datos para enviar (solo datos de empleado, no de usuario)
       const dataToSend = {
         especialidades: formData.especialidades,
         fecha_ingreso: formData.fecha_ingreso,
-        horario_entrada: formData.horario_entrada,
-        horario_salida: formData.horario_salida,
-        dias_trabajo: formData.dias_trabajo,
+        horario_entrada: horarioEntrada,
+        horario_salida: horarioSalida,
+        dias_trabajo: diasActivos || formData.dias_trabajo,
         comision_porcentaje: formData.comision_porcentaje,
         is_disponible: formData.is_disponible,
         biografia: formData.biografia
@@ -163,18 +307,7 @@ export default function EditarProfesionalPage() {
         body: JSON.stringify(dataToSend)
       });
 
-      if (response.ok) {
-        showNotification(
-          'Profesional actualizado',
-          'Los datos del profesional han sido actualizados exitosamente',
-          'success'
-        );
-
-        // Redirigir después de 1.5 segundos
-        setTimeout(() => {
-          router.push('/dashboard-admin/profesionales');
-        }, 1500);
-      } else {
+      if (!response.ok) {
         const errorData = await response.json();
         const errorMessage = Object.entries(errorData)
           .map(([key, value]) => `${key}: ${value}`)
@@ -183,6 +316,53 @@ export default function EditarProfesionalPage() {
         showNotification(
           'Error al actualizar profesional',
           errorMessage || 'No se pudo actualizar el profesional. Por favor, verifica los datos e intenta nuevamente.',
+          'error'
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Guardar horarios detallados
+      const horariosArray: any[] = [];
+      Object.entries(horarios).forEach(([dia, config]) => {
+        if (config.activo && config.rangos.length > 0) {
+          config.rangos.forEach((rango: RangoHorario) => {
+            if (rango.hora_inicio && rango.hora_fin) {
+              horariosArray.push({
+                dia_semana: parseInt(dia),
+                hora_inicio: rango.hora_inicio,
+                hora_fin: rango.hora_fin,
+                is_active: true
+              });
+            }
+          });
+        }
+      });
+
+      const horariosResponse = await fetch(
+        `http://localhost:8000/api/empleados/${empleadoId}/horarios/bulk/`,
+        {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ horarios: horariosArray })
+        }
+      );
+
+      if (horariosResponse.ok) {
+        showNotification(
+          'Profesional actualizado',
+          'Los datos y horarios del profesional han sido actualizados exitosamente',
+          'success'
+        );
+
+        // Redirigir después de 1.5 segundos
+        setTimeout(() => {
+          router.push('/dashboard-admin/profesionales');
+        }, 1500);
+      } else {
+        showNotification(
+          'Advertencia',
+          'Los datos se actualizaron pero hubo un problema al guardar los horarios',
           'error'
         );
       }
@@ -242,7 +422,7 @@ export default function EditarProfesionalPage() {
           <CardHeader>
             <CardTitle>Datos de Usuario</CardTitle>
             <CardDescription>
-              Información de acceso (solo lectura - contacta al administrador para modificar)
+              Información de acceso (solo lectura)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -299,10 +479,6 @@ export default function EditarProfesionalPage() {
                 />
               </div>
             </div>
-
-            <p className="text-sm text-muted-foreground">
-              ℹ️ Los datos de usuario no pueden modificarse desde aquí por seguridad.
-            </p>
           </CardContent>
         </Card>
 
@@ -346,55 +522,98 @@ export default function EditarProfesionalPage() {
               </div>
             </div>
 
-            {/* Horarios */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="horario_entrada">Hora de Entrada *</Label>
-                <Input
-                  id="horario_entrada"
-                  type="time"
-                  value={formData.horario_entrada}
-                  onChange={(e) => handleInputChange('horario_entrada', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="horario_salida">Hora de Salida *</Label>
-                <Input
-                  id="horario_salida"
-                  type="time"
-                  value={formData.horario_salida}
-                  onChange={(e) => handleInputChange('horario_salida', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="comision_porcentaje">Comisión (%)</Label>
-                <Input
-                  id="comision_porcentaje"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  value={formData.comision_porcentaje}
-                  onChange={(e) => handleInputChange('comision_porcentaje', e.target.value)}
-                />
-              </div>
+            {/* Comisión */}
+            <div className="space-y-2">
+              <Label htmlFor="comision_porcentaje">Comisión (%)</Label>
+              <Input
+                id="comision_porcentaje"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={formData.comision_porcentaje}
+                onChange={(e) => handleInputChange('comision_porcentaje', e.target.value)}
+                className="w-48"
+              />
             </div>
 
-            {/* Días de Trabajo */}
-            <div className="space-y-2">
-              <Label htmlFor="dias_trabajo">Días de Trabajo *</Label>
-              <Input
-                id="dias_trabajo"
-                value={formData.dias_trabajo}
-                onChange={(e) => handleInputChange('dias_trabajo', e.target.value)}
-                placeholder="L,M,M,J,V (Lunes, Martes, Miércoles, Jueves, Viernes)"
-                required
-              />
-              <p className="text-sm text-muted-foreground">
-                Formato: L,M,M,J,V,S,D (separados por comas)
-              </p>
+            {/* Horarios por Día */}
+            <div className="space-y-4">
+              <div>
+                <Label className="text-base font-semibold">Horarios de Trabajo *</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Selecciona los días y horarios en que el profesional estará disponible
+                </p>
+              </div>
+
+              {DIAS_SEMANA.map((dia) => (
+                <div
+                  key={dia.value}
+                  className={`border rounded-lg p-4 transition-all ${horarios[dia.value].activo
+                    ? 'border-primary bg-primary/5'
+                    : 'border-gray-200'
+                    }`}
+                >
+                  {/* Switch del día */}
+                  <div className="flex items-center gap-3 mb-4">
+                    <Switch
+                      id={`dia-${dia.value}`}
+                      checked={horarios[dia.value].activo}
+                      onCheckedChange={() => toggleDia(dia.value)}
+                    />
+                    <label
+                      htmlFor={`dia-${dia.value}`}
+                      className="text-base font-semibold text-gray-900 cursor-pointer select-none"
+                    >
+                      {dia.label}
+                    </label>
+                  </div>
+
+                  {/* Rangos horarios */}
+                  {horarios[dia.value].activo && (
+                    <div className="space-y-3 ml-8">
+                      {horarios[dia.value].rangos.map((rango, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <Input
+                            type="time"
+                            value={rango.hora_inicio}
+                            onChange={(e) => actualizarRango(dia.value, index, 'hora_inicio', e.target.value)}
+                            className="w-32"
+                          />
+                          <span className="text-gray-500">-</span>
+                          <Input
+                            type="time"
+                            value={rango.hora_fin}
+                            onChange={(e) => actualizarRango(dia.value, index, 'hora_fin', e.target.value)}
+                            className="w-32"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => eliminarRango(dia.value, index)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+
+                      {/* Botón agregar horario */}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => agregarRango(dia.value)}
+                        className="text-sm"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Agregar otro horario
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Biografía */}
@@ -410,15 +629,13 @@ export default function EditarProfesionalPage() {
             </div>
 
             {/* Disponibilidad */}
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
+            <div className="flex items-center space-x-3">
+              <Switch
                 id="is_disponible"
                 checked={formData.is_disponible}
-                onChange={(e) => handleInputChange('is_disponible', e.target.checked)}
-                className="h-4 w-4"
+                onCheckedChange={(checked) => handleInputChange('is_disponible', checked)}
               />
-              <Label htmlFor="is_disponible" className="cursor-pointer">
+              <Label htmlFor="is_disponible" className="cursor-pointer font-medium">
                 Disponible para turnos
               </Label>
             </div>

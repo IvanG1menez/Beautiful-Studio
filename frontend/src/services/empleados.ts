@@ -1,15 +1,16 @@
-import { 
-  Empleado, 
+import {
+  ApiResponse,
+  Empleado,
   EmpleadoFormData,
-  EmpleadoServicio,
-  ApiResponse 
+  EmpleadoServicio
 } from '@/types';
-import { get, getWithPagination, post, put, patch, del } from './api';
+import { del, get, getWithPagination, patch, post, put } from './api';
 
 export const empleadosService = {
   // Listar todos los empleados con paginación
   list: async (params?: {
     page?: number;
+    page_size?: number;
     search?: string;
     especialidad?: string;
     is_disponible?: boolean;

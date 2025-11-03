@@ -6,10 +6,35 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+
+interface RangoHorario {
+  hora_inicio: string;
+  hora_fin: string;
+}
+
+interface DiaConfig {
+  activo: boolean;
+  rangos: RangoHorario[];
+}
+
+interface HorariosConfig {
+  [dia: number]: DiaConfig;
+}
+
+const DIAS_SEMANA: { [key: number]: string } = {
+  0: 'Lunes',
+  1: 'Martes',
+  2: 'Miércoles',
+  3: 'Jueves',
+  4: 'Viernes',
+  5: 'Sábado',
+  6: 'Domingo'
+};
 
 export default function NuevoProfesionalPage() {
   const router = useRouter();
@@ -33,12 +58,20 @@ export default function NuevoProfesionalPage() {
     // Datos de empleado
     especialidades: '',
     fecha_ingreso: new Date().toISOString().split('T')[0],
-    horario_entrada: '09:00',
-    horario_salida: '18:00',
-    dias_trabajo: '',
     comision_porcentaje: '15.00',
     is_disponible: true,
     biografia: ''
+  });
+
+  // Estado de horarios detallados
+  const [horarios, setHorarios] = useState<HorariosConfig>({
+    0: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    1: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    2: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    3: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    4: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    5: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] },
+    6: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] }
   });
 
   const getAuthHeaders = () => {
@@ -52,6 +85,52 @@ export default function NuevoProfesionalPage() {
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
+  };
+
+  // Funciones para manejar horarios
+  const toggleDia = (dia: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        activo: !prev[dia].activo,
+        rangos: !prev[dia].activo && prev[dia].rangos.length === 0
+          ? [{ hora_inicio: '09:00', hora_fin: '17:00' }]
+          : prev[dia].rangos
+      }
+    }));
+  };
+
+  const agregarRango = (dia: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: [...prev[dia].rangos, { hora_inicio: '09:00', hora_fin: '17:00' }]
+      }
+    }));
+  };
+
+  const eliminarRango = (dia: number, index: number) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: prev[dia].rangos.filter((_, i) => i !== index)
+      }
+    }));
+  };
+
+  const actualizarRango = (dia: number, index: number, field: 'hora_inicio' | 'hora_fin', value: string) => {
+    setHorarios(prev => ({
+      ...prev,
+      [dia]: {
+        ...prev[dia],
+        rangos: prev[dia].rangos.map((r, i) =>
+          i === index ? { ...r, [field]: value } : r
+        )
+      }
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,22 +159,107 @@ export default function NuevoProfesionalPage() {
         return;
       }
 
+      // Verificar que al menos un día esté activo
+      const diasActivos = Object.values(horarios).filter(h => h.activo);
+      if (diasActivos.length === 0) {
+        showNotification(
+          'Horarios requeridos',
+          'Por favor configura al menos un día de trabajo con su horario',
+          'error'
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Calcular horario_entrada y horario_salida basándose en todos los rangos activos
+      let horaMinima = '23:59';
+      let horaMaxima = '00:00';
+      const diasTrabajoArray: string[] = [];
+
+      Object.entries(horarios).forEach(([diaStr, config]) => {
+        if (config.activo && config.rangos.length > 0) {
+          // Agregar letra del día (L, M, X, J, V, S, D)
+          const letrasDias = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+          diasTrabajoArray.push(letrasDias[parseInt(diaStr)]);
+
+          config.rangos.forEach((rango: RangoHorario) => {
+            if (rango.hora_inicio && rango.hora_fin) {
+              if (rango.hora_inicio < horaMinima) horaMinima = rango.hora_inicio;
+              if (rango.hora_fin > horaMaxima) horaMaxima = rango.hora_fin;
+            }
+          });
+        }
+      });
+
       // Preparar datos para enviar
       const dataToSend = {
         ...formData,
-        password: formData.password || 'empleado123' // Password por defecto si no se especifica
+        password: formData.password || 'empleado123', // Password por defecto si no se especifica
+        horario_entrada: horaMinima,
+        horario_salida: horaMaxima,
+        dias_trabajo: diasTrabajoArray.join(',')
       };
 
-      const response = await fetch('http://localhost:8000/api/empleados/', {
+      console.log('Enviando datos del empleado:', dataToSend);
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${baseUrl}/empleados/`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(dataToSend)
       });
 
       if (response.ok) {
+        const empleadoData = await response.json();
+        const empleadoId = empleadoData.id;
+
+        // Guardar horarios detallados
+        const horariosArray: any[] = [];
+        Object.entries(horarios).forEach(([diaStr, config]) => {
+          const dia = parseInt(diaStr);
+          if (config.activo && config.rangos.length > 0) {
+            config.rangos.forEach((rango: RangoHorario) => {
+              if (rango.hora_inicio && rango.hora_fin) {
+                horariosArray.push({
+                  dia_semana: dia,
+                  hora_inicio: rango.hora_inicio,
+                  hora_fin: rango.hora_fin
+                });
+              }
+            });
+          }
+        });
+
+        // Solo guardar horarios si hay al menos uno configurado
+        if (horariosArray.length > 0) {
+          const horariosResponse = await fetch(
+            `${baseUrl}/empleados/${empleadoId}/horarios/bulk/`,
+            {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ horarios: horariosArray })
+            }
+          );
+
+          if (!horariosResponse.ok) {
+            console.error('Error al guardar horarios:', await horariosResponse.json());
+            showNotification(
+              'Advertencia',
+              'El profesional fue creado pero hubo un problema al guardar los horarios. Puedes editarlos posteriormente.',
+              'error'
+            );
+
+            // Esperar antes de redirigir
+            setTimeout(() => {
+              router.push('/dashboard-admin/profesionales');
+            }, 2500);
+            return;
+          }
+        }
+
         showNotification(
           'Profesional creado',
-          'El profesional ha sido creado exitosamente',
+          'El profesional y sus horarios han sido creados exitosamente',
           'success'
         );
 
@@ -275,54 +439,101 @@ export default function NuevoProfesionalPage() {
               </div>
             </div>
 
-            {/* Horarios */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="horario_entrada">Hora de Entrada *</Label>
-                <Input
-                  id="horario_entrada"
-                  type="time"
-                  value={formData.horario_entrada}
-                  onChange={(e) => handleInputChange('horario_entrada', e.target.value)}
-                  required
-                />
+            {/* Horarios por Día */}
+            <div className="space-y-4">
+              <div>
+                <Label>Horarios por Día de la Semana</Label>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Configura los horarios de trabajo para cada día. Puedes agregar múltiples rangos por día.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="horario_salida">Hora de Salida *</Label>
-                <Input
-                  id="horario_salida"
-                  type="time"
-                  value={formData.horario_salida}
-                  onChange={(e) => handleInputChange('horario_salida', e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="comision_porcentaje">Comisión (%)</Label>
-                <Input
-                  id="comision_porcentaje"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  value={formData.comision_porcentaje}
-                  onChange={(e) => handleInputChange('comision_porcentaje', e.target.value)}
-                />
-              </div>
+              {Object.entries(DIAS_SEMANA).map(([diaStr, nombre]) => {
+                const dia = parseInt(diaStr);
+                const config = horarios[dia];
+                return (
+                  <div
+                    key={dia}
+                    className={`p-4 border rounded-lg transition-all ${config.activo
+                      ? 'border-primary bg-primary/5'
+                      : 'border-gray-200 bg-gray-50/50'
+                      }`}
+                  >
+                    <div className="flex items-center gap-3 mb-3">
+                      <Switch
+                        id={`dia-${dia}`}
+                        checked={config.activo}
+                        onCheckedChange={(checked) => toggleDia(dia)}
+                      />
+                      <Label
+                        htmlFor={`dia-${dia}`}
+                        className="font-semibold cursor-pointer"
+                      >
+                        {nombre}
+                      </Label>
+                    </div>
+
+                    {config.activo && (
+                      <div className="space-y-2 ml-7">
+                        {config.rangos.map((rango, index) => (
+                          <div key={index} className="flex items-center gap-2 flex-wrap">
+                            <Input
+                              type="time"
+                              value={rango.hora_inicio}
+                              onChange={(e) => actualizarRango(dia, index, 'hora_inicio', e.target.value)}
+                              className="w-32"
+                            />
+                            <span className="text-muted-foreground">hasta</span>
+                            <Input
+                              type="time"
+                              value={rango.hora_fin}
+                              onChange={(e) => actualizarRango(dia, index, 'hora_fin', e.target.value)}
+                              className="w-32"
+                            />
+                            {config.rangos.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => eliminarRango(dia, index)}
+                                className="h-8 w-8"
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => agregarRango(dia)}
+                          className="mt-2"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Agregar otro horario
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Días de Trabajo */}
+            {/* Comisión */}
             <div className="space-y-2">
-              <Label htmlFor="dias_trabajo">Días de Trabajo *</Label>
+              <Label htmlFor="comision_porcentaje">Comisión (%)</Label>
               <Input
-                id="dias_trabajo"
-                value={formData.dias_trabajo}
-                onChange={(e) => handleInputChange('dias_trabajo', e.target.value)}
-                placeholder="L,M,M,J,V (Lunes, Martes, Miércoles, Jueves, Viernes)"
-                required
+                id="comision_porcentaje"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                value={formData.comision_porcentaje}
+                onChange={(e) => handleInputChange('comision_porcentaje', e.target.value)}
+                placeholder="15.00"
               />
               <p className="text-sm text-muted-foreground">
-                Formato: L,M,M,J,V,S,D (separados por comas)
+                Porcentaje de comisión que recibe el profesional por cada servicio
               </p>
             </div>
 
@@ -339,15 +550,13 @@ export default function NuevoProfesionalPage() {
             </div>
 
             {/* Disponibilidad */}
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
+            <div className="flex items-center space-x-3">
+              <Switch
                 id="is_disponible"
                 checked={formData.is_disponible}
-                onChange={(e) => handleInputChange('is_disponible', e.target.checked)}
-                className="h-4 w-4"
+                onCheckedChange={(checked) => handleInputChange('is_disponible', checked)}
               />
-              <Label htmlFor="is_disponible" className="cursor-pointer">
+              <Label htmlFor="is_disponible" className="cursor-pointer font-medium">
                 Disponible para turnos
               </Label>
             </div>
