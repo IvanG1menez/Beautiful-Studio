@@ -68,9 +68,8 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
   // Obtener badge de rol
   const getRoleBadge = () => {
     const roleMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-      'admin': { label: 'Administrador', variant: 'destructive' },
       'propietario': { label: 'Propietario', variant: 'destructive' },
-      'empleado': { label: 'Empleado', variant: 'default' },
+      'superusuario': { label: 'Superusuario', variant: 'destructive' },
       'profesional': { label: 'Profesional', variant: 'default' },
       'cliente': { label: 'Cliente', variant: 'outline' },
     };
@@ -88,12 +87,12 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
   const getProfileRoute = () => {
     const role = user?.role?.toLowerCase();
 
-    if (role === 'admin' || role === 'propietario' || role === 'superusuario') {
-      return '/dashboard-admin/perfil';
+    if (role === 'propietario' || role === 'superusuario') {
+      return '/dashboard-propietario/perfil';
     }
 
-    if (role === 'empleado' || role === 'profesional') {
-      return '/dashboard-empleado/perfil';
+    if (role === 'profesional') {
+      return '/dashboard-profesional/perfil';
     }
 
     if (role === 'cliente') {

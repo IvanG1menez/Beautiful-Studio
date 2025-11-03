@@ -62,14 +62,12 @@ export default function ProtectedRoute({
           case 'cliente':
             router.push('/dashboard-cliente');
             break;
-          case 'empleado':
           case 'profesional':
-            router.push('/dashboard-empleado');
+            router.push('/dashboard-profesional');
             break;
           case 'propietario':
           case 'superusuario':
-          case 'admin':
-            router.push('/dashboard-admin');
+            router.push('/dashboard-propietario');
             break;
           default:
             router.push('/dashboard');
@@ -153,14 +151,12 @@ export default function ProtectedRoute({
                     case 'cliente':
                       router.push('/dashboard-cliente');
                       break;
-                    case 'empleado':
                     case 'profesional':
-                      router.push('/dashboard-empleado');
+                      router.push('/dashboard-profesional');
                       break;
                     case 'propietario':
                     case 'superusuario':
-                    case 'admin':
-                      router.push('/dashboard-admin');
+                      router.push('/dashboard-propietario');
                       break;
                     default:
                       router.push('/dashboard');

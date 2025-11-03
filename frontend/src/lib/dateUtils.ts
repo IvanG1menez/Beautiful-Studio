@@ -85,7 +85,7 @@ export const formatDateTimeReadable = (date: string | Date): string => {
     timeZone: TIMEZONE
   });
   const time = formatTime(d);
-  
+
   return `${dayName.charAt(0).toUpperCase() + dayName.slice(1)} ${shortDate} a las ${time}`;
 };
 

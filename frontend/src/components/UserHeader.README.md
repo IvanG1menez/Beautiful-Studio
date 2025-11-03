@@ -131,7 +131,7 @@ Opciones disponibles:
 #### Admin/Propietario/Superusuario:
 
 ```tsx
-- Dashboard → /dashboard-admin
+- Dashboard → /dashboard-propietario
 - Turnos → /admin/turnos
 - Empleados → /admin/empleados
 - Clientes → /admin/clientes

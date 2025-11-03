@@ -85,16 +85,14 @@ export default function LoginPage() {
             console.log('📱 Redirigiendo a dashboard de cliente');
             router.push('/dashboard-cliente');
             break;
-          case 'empleado':
           case 'profesional':
-            console.log('👨‍💼 Redirigiendo a dashboard de empleado');
-            router.push('/dashboard-empleado');
+            console.log('👨‍💼 Redirigiendo a dashboard de profesional');
+            router.push('/dashboard-profesional');
             break;
           case 'propietario':
           case 'superusuario':
-          case 'admin':
-            console.log('👑 Redirigiendo a dashboard de administrador');
-            router.push('/dashboard-admin');
+            console.log('👑 Redirigiendo a dashboard de propietario');
+            router.push('/dashboard-propietario');
             break;
           default:
             console.log('🔄 Rol no reconocido, redirigiendo a dashboard general');

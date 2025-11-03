@@ -3,7 +3,6 @@
 import { AlertCircle, ArrowLeft, Calendar, Check, Clock, Loader2, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { getCurrentDateISO } from '@/lib/dateUtils';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

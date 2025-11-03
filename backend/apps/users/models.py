@@ -8,11 +8,9 @@ class User(AbstractUser):
     """
 
     ROLE_CHOICES = [
-        ("admin", "Administrador"),
-        ("empleado", "Empleado"),
-        ("cliente", "Cliente"),
-        ("profesional", "Profesional"),
         ("propietario", "Propietario"),
+        ("profesional", "Profesional"),
+        ("cliente", "Cliente"),
         ("superusuario", "Superusuario"),
     ]
 
@@ -55,11 +53,11 @@ class User(AbstractUser):
     def full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
 
-    def is_admin(self):
-        return self.role == "admin"
+    def is_propietario(self):
+        return self.role == "propietario" or self.role == "superusuario"
 
-    def is_empleado(self):
-        return self.role == "empleado"
+    def is_profesional(self):
+        return self.role == "profesional"
 
     def is_cliente(self):
         return self.role == "cliente"

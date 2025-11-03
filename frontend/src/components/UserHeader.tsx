@@ -61,11 +61,9 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
   // Obtener el color del badge según el rol
   const getRoleBadgeColor = (role: string) => {
     switch (role?.toLowerCase()) {
-      case 'admin':
       case 'propietario':
       case 'superusuario':
         return 'bg-purple-100 text-purple-800';
-      case 'empleado':
       case 'profesional':
         return 'bg-blue-100 text-blue-800';
       case 'cliente':
@@ -78,14 +76,10 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
   // Obtener texto del rol en español
   const getRoleLabel = (role: string) => {
     switch (role?.toLowerCase()) {
-      case 'admin':
-        return 'Administrador';
       case 'propietario':
         return 'Propietario';
       case 'superusuario':
         return 'Superusuario';
-      case 'empleado':
-        return 'Empleado';
       case 'profesional':
         return 'Profesional';
       case 'cliente':
@@ -108,14 +102,12 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
   // Navegar al perfil según el rol
   const handleProfileClick = () => {
     switch (user?.role?.toLowerCase()) {
-      case 'admin':
       case 'propietario':
       case 'superusuario':
-        router.push('/dashboard-admin/perfil');
+        router.push('/dashboard-propietario/perfil');
         break;
-      case 'empleado':
       case 'profesional':
-        router.push('/dashboard-empleado/perfil');
+        router.push('/dashboard-profesional/perfil');
         break;
       case 'cliente':
         router.push('/dashboard-cliente/perfil');
@@ -131,21 +123,20 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
 
     const role = user.role?.toLowerCase();
 
-    if (role === 'admin' || role === 'propietario' || role === 'superusuario') {
+    if (role === 'propietario' || role === 'superusuario') {
       return [
-        { label: 'Dashboard', href: '/dashboard-admin', icon: Home },
-        { label: 'Turnos', href: '/dashboard-admin/turnos', icon: Calendar },
-        { label: 'Profesionales', href: '/dashboard-admin/profesionales', icon: Users },
-        { label: 'Clientes', href: '/dashboard-admin/clientes', icon: User },
-        { label: 'Servicios', href: '/dashboard-admin/servicios', icon: Scissors },
+        { label: 'Dashboard', href: '/dashboard-propietario', icon: Home },
+        { label: 'Profesionales', href: '/dashboard-propietario/profesionales', icon: Users },
+        { label: 'Clientes', href: '/dashboard-propietario/clientes', icon: User },
+        { label: 'Servicios', href: '/dashboard-propietario/servicios', icon: Scissors },
       ];
     }
 
-    if (role === 'empleado' || role === 'profesional') {
+    if (role === 'profesional') {
       return [
-        { label: 'Mi Dashboard', href: '/dashboard-empleado', icon: Home },
-        { label: 'Mi Agenda', href: '/dashboard-empleado/agenda', icon: Calendar },
-        { label: 'Turnos del Día', href: '/dashboard-empleado/turnos-hoy', icon: Calendar },
+        { label: 'Mi Dashboard', href: '/dashboard-profesional', icon: Home },
+        { label: 'Mi Agenda', href: '/dashboard-profesional/agenda', icon: Calendar },
+        { label: 'Turnos del Día', href: '/dashboard-profesional/turnos-hoy', icon: Calendar },
       ];
     }
 

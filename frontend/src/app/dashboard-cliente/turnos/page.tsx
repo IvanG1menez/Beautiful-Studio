@@ -4,7 +4,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatTime, formatDate, formatDateTimeReadable } from '@/lib/dateUtils';
+import { formatDate, formatDateTimeReadable, formatTime } from '@/lib/dateUtils';
 import { Calendar, Clock, Loader2, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
