@@ -3,14 +3,19 @@ from .models import Empleado, EmpleadoServicio, HorarioEmpleado
 
 
 @admin.register(Empleado)
-class EmpleadoAdmin(admin.ModelAdmin):
+class ProfesionalAdmin(admin.ModelAdmin):
+    """Administración de Profesionales del salón"""
+
     list_display = ["user", "especialidades", "is_disponible", "fecha_ingreso"]
     list_filter = ["especialidades", "is_disponible"]
     search_fields = ["user__first_name", "user__last_name", "user__email"]
+    readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(EmpleadoServicio)
-class EmpleadoServicioAdmin(admin.ModelAdmin):
+class ProfesionalServicioAdmin(admin.ModelAdmin):
+    """Administración de Servicios de Profesionales"""
+
     list_display = ["empleado", "servicio", "nivel_experiencia"]
     list_filter = ["nivel_experiencia"]
     search_fields = [
@@ -21,7 +26,9 @@ class EmpleadoServicioAdmin(admin.ModelAdmin):
 
 
 @admin.register(HorarioEmpleado)
-class HorarioEmpleadoAdmin(admin.ModelAdmin):
+class HorarioProfesionalAdmin(admin.ModelAdmin):
+    """Administración de Horarios de Profesionales"""
+
     list_display = [
         "empleado",
         "dia_semana_display",

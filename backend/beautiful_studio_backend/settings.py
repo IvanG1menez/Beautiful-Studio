@@ -39,6 +39,8 @@ ALLOWED_HOSTS = config(
 # Application definition
 
 INSTALLED_APPS = [
+    "jet.dashboard",
+    "jet",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -182,3 +184,28 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Custom User Model
 AUTH_USER_MODEL = "users.User"
+
+# Django JET Configuration
+JET_DEFAULT_THEME = "light-blue"
+JET_SIDE_MENU_COMPACT = True
+JET_CHANGE_FORM_SIBLING_LINKS = True
+
+JET_THEMES = [
+    {"theme": "default", "color": "#47bac1", "title": "Cyan (Default)"},
+    {"theme": "green", "color": "#44b78b", "title": "Verde Esmeralda"},
+    {"theme": "light-green", "color": "#2faa60", "title": "Verde Claro"},
+    {"theme": "light-violet", "color": "#a464c4", "title": "Violeta"},
+    {"theme": "light-blue", "color": "#5EADDE", "title": "Azul Cielo"},
+    {"theme": "light-gray", "color": "#222", "title": "Gris Oscuro"},
+    # Nuevos temas personalizados
+    {"theme": "orange", "color": "#FF6B35", "title": "Naranja Vibrante"},
+    {"theme": "pink", "color": "#E91E63", "title": "Rosa Fucsia"},
+    {"theme": "purple", "color": "#9C27B0", "title": "Púrpura"},
+    {"theme": "indigo", "color": "#3F51B5", "title": "Índigo"},
+    {"theme": "teal", "color": "#009688", "title": "Verde Azulado"},
+    {"theme": "amber", "color": "#FFC107", "title": "Ámbar"},
+    {"theme": "deep-orange", "color": "#FF5722", "title": "Naranja Profundo"},
+    {"theme": "blue-grey", "color": "#607D8B", "title": "Azul Grisáceo"},
+    {"theme": "red", "color": "#F44336", "title": "Rojo"},
+    {"theme": "lime", "color": "#CDDC39", "title": "Lima"},
+]

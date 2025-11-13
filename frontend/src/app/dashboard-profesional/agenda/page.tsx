@@ -134,7 +134,7 @@ export default function AgendaEmpleadoPage() {
 
   // Formatear fecha
   const formatDate = (date: Date): string => {
-    const dias = ['Domingo', 'Lunes', 'Martes', 'MiÃ©rcoles', 'Jueves', 'Viernes', 'SÃ¡bado'];
+    const dias = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
     const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
     return `${dias[date.getDay()]}, ${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;
@@ -203,7 +203,7 @@ export default function AgendaEmpleadoPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Turnos del DÃ­a</CardTitle>
+              <CardTitle>Turnos del Día</CardTitle>
               <CardDescription>
                 {turnosFiltrados.length} turno{turnosFiltrados.length !== 1 ? 's' : ''} {filtroEstado !== 'todos' ? `(${ESTADO_LABELS[filtroEstado]})` : ''}
               </CardDescription>
@@ -372,7 +372,7 @@ export default function AgendaEmpleadoPage() {
             <div className="text-center py-12">
               <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg">
-                No hay turnos para {filtroEstado !== 'todos' ? `estado "${ESTADO_LABELS[filtroEstado]}"` : 'este dÃ­a'}
+                No hay turnos para {filtroEstado !== 'todos' ? `estado "${ESTADO_LABELS[filtroEstado]}"` : 'este día'}
               </p>
             </div>
           )}

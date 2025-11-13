@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
+from .models import Turno
 
 from .models import Turno, HistorialTurno
 from .serializers import (
@@ -36,6 +37,11 @@ class TurnoViewSet(viewsets.ModelViewSet):
     - POST /api/turnos/:id/cambiar_estado/ - Cambiar estado del turno
     - GET /api/turnos/estadisticas/ - Estadísticas de turnos
     """
+
+    serializer_class = TurnoListSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = CustomPageNumberPagination
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     queryset = Turno.objects.select_related(
         "cliente__user", "empleado__user", "servicio__categoria"
@@ -85,9 +91,9 @@ class TurnoViewSet(viewsets.ModelViewSet):
         if hasattr(user, "cliente_profile"):
             queryset = queryset.filter(cliente=user.cliente_profile)
 
-        # Si es empleado, ver sus turnos asignados
-        elif hasattr(user, "empleado_profile"):
-            queryset = queryset.filter(empleado=user.empleado_profile)
+        # Si es profesional, ver sus turnos asignados
+        elif hasattr(user, "profesional_profile"):
+            queryset = queryset.filter(empleado=user.profesional_profile)
 
         # Admin y propietario ven todos
         # queryset ya tiene todos los turnos
@@ -169,14 +175,14 @@ class TurnoViewSet(viewsets.ModelViewSet):
         """Obtener turnos del usuario actual"""
         user = request.user
 
-        # Determinar si es cliente o empleado
+        # Determinar si es cliente o profesional
         if hasattr(user, "cliente_profile"):
             turnos = self.get_queryset().filter(cliente=user.cliente_profile)
-        elif hasattr(user, "empleado_profile"):
-            turnos = self.get_queryset().filter(empleado=user.empleado_profile)
+        elif hasattr(user, "profesional_profile"):
+            turnos = self.get_queryset().filter(empleado=user.profesional_profile)
         else:
             return Response(
-                {"error": "Usuario no tiene perfil de cliente o empleado"},
+                {"error": "Usuario no tiene perfil de cliente o profesional"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -438,8 +444,8 @@ def historial_turno(request, turno_id):
                 and turno.cliente == user.cliente_profile
             )
             or (
-                hasattr(user, "empleado_profile")
-                and turno.empleado == user.empleado_profile
+                hasattr(user, "profesional_profile")
+                and turno.empleado == user.profesional_profile
             )
         ):
             return Response(

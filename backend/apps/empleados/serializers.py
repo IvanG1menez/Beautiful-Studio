@@ -8,7 +8,8 @@ User = get_user_model()
 
 class EmpleadoSerializer(serializers.ModelSerializer):
     """
-    Serializador completo para Empleado con creación de usuario integrada
+    Serializador completo para Profesional con creación de usuario integrada.
+    Nota: Se mantiene el nombre 'EmpleadoSerializer' por compatibilidad con las vistas.
     """
 
     # Campos de solo lectura para mostrar info del usuario
@@ -22,7 +23,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(write_only=True, required=False)
     dni = serializers.CharField(write_only=True, required=False)
     password = serializers.CharField(
-        write_only=True, required=False, default="empleado123"
+        write_only=True, required=False, default="profesional123"
     )
     first_name = serializers.CharField(write_only=True, required=False)
     last_name = serializers.CharField(write_only=True, required=False)
@@ -35,13 +36,13 @@ class EmpleadoSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         """
-        Crear usuario y empleado en una transacción atómica
+        Crear usuario y profesional en una transacción atómica
         """
         # Extraer datos del usuario
         username = validated_data.pop("username", None)
         email = validated_data.pop("email", None)
         dni = validated_data.pop("dni", None)
-        password = validated_data.pop("password", "empleado123")
+        password = validated_data.pop("password", "profesional123")
         first_name = validated_data.pop("first_name", "")
         last_name = validated_data.pop("last_name", "")
 
@@ -61,7 +62,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
                     {"dni": "Ya existe un usuario con este DNI"}
                 )
 
-            # Crear el usuario
+            # Crear el usuario con rol de profesional
             user = User.objects.create_user(
                 username=username,
                 email=email,
@@ -69,7 +70,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
                 password=password,
                 first_name=first_name,
                 last_name=last_name,
-                role="empleado",  # Asignar rol de empleado
+                role="profesional",  # Asignar rol de profesional
             )
         else:
             raise serializers.ValidationError(
@@ -79,16 +80,16 @@ class EmpleadoSerializer(serializers.ModelSerializer):
                 }
             )
 
-        # Crear el empleado asociado al usuario
+        # Crear el profesional asociado al usuario
         validated_data["user"] = user
-        empleado = Empleado.objects.create(**validated_data)
+        profesional = Empleado.objects.create(**validated_data)
 
-        return empleado
+        return profesional
 
     @transaction.atomic
     def update(self, instance, validated_data):
         """
-        Actualizar empleado y opcionalmente su usuario
+        Actualizar profesional y opcionalmente su usuario
         """
         # Extraer datos del usuario si se proporcionan
         username = validated_data.pop("username", None)
@@ -138,7 +139,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
 
             instance.user.save()
 
-        # Actualizar empleado
+        # Actualizar profesional
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -148,7 +149,8 @@ class EmpleadoSerializer(serializers.ModelSerializer):
 
 class EmpleadoListSerializer(serializers.ModelSerializer):
     """
-    Serializador simplificado para listado de empleados
+    Serializador simplificado para listado de profesionales.
+    Nota: Se mantiene el nombre 'EmpleadoListSerializer' por compatibilidad.
     """
 
     user = serializers.StringRelatedField(read_only=True)
@@ -207,7 +209,10 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
 
 
 class HorarioEmpleadoSerializer(serializers.ModelSerializer):
-    """Serializer para horarios detallados de empleados"""
+    """
+    Serializer para horarios detallados de profesionales.
+    Nota: Se mantiene el nombre 'HorarioEmpleadoSerializer' por compatibilidad.
+    """
 
     dia_semana_display = serializers.CharField(
         source="get_dia_semana_display", read_only=True

@@ -12,23 +12,26 @@ from apps.core.pagination import CustomPageNumberPagination
 
 class IsPropietarioOrAdmin(permissions.BasePermission):
     """
-    Permiso personalizado que solo permite acceso a propietarios y administradores
+    Permiso personalizado que solo permite acceso a propietarios y superusuarios
     """
 
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        return request.user.is_staff or request.user.role in ["admin", "propietario"]
+        return request.user.is_staff or request.user.role in [
+            "propietario",
+            "superusuario",
+        ]
 
 
 class EmpleadoListView(generics.ListCreateAPIView):
     """
-    Vista para listar y crear empleados/profesionales
+    Vista para listar y crear profesionales del salón.
     GET: Accesible para todos los usuarios autenticados (incluyendo clientes)
-    POST: Solo accesible para propietarios y administradores
+    POST: Solo accesible para propietarios y superusuarios
 
     Parámetros de consulta opcionales:
-    - servicio: ID del servicio para filtrar empleados que pueden realizarlo
+    - servicio: ID del servicio para filtrar profesionales que pueden realizarlo
     - disponible: true/false para filtrar por disponibilidad
     """
 
@@ -41,7 +44,7 @@ class EmpleadoListView(generics.ListCreateAPIView):
         # Filtrar por servicio si se proporciona
         servicio_id = self.request.query_params.get("servicio", None)
         if servicio_id:
-            # Filtrar empleados que pueden realizar este servicio
+            # Filtrar profesionales que pueden realizar este servicio
             queryset = queryset.filter(servicios_disponibles__servicio_id=servicio_id)
 
         # Filtrar por disponibilidad
@@ -64,7 +67,7 @@ class EmpleadoListView(generics.ListCreateAPIView):
         return context
 
     def get_permissions(self):
-        # Solo admin/propietario puede crear empleados
+        # Solo propietario/superusuario puede crear profesionales
         if self.request.method == "POST":
             return [IsPropietarioOrAdmin()]
         # GET es accesible para usuarios autenticados
@@ -73,8 +76,8 @@ class EmpleadoListView(generics.ListCreateAPIView):
 
 class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
-    Vista para ver, actualizar y eliminar empleados/profesionales
-    Solo accesible para propietarios y administradores
+    Vista para ver, actualizar y eliminar profesionales del salón.
+    Solo accesible para propietarios y superusuarios.
     """
 
     queryset = Empleado.objects.select_related("user")
@@ -86,15 +89,16 @@ class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
 @permission_classes([permissions.IsAuthenticated])
 def empleado_me_view(request):
     """
-    Vista para obtener y actualizar el perfil del empleado autenticado
+    Vista para obtener y actualizar el perfil del profesional autenticado.
+    Accesible solo para usuarios con rol 'profesional'.
     """
     try:
         empleado = Empleado.objects.select_related("user").get(user=request.user)
     except Empleado.DoesNotExist:
         return Response(
             {
-                "error": "No se encontró un perfil de empleado para este usuario",
-                "error_code": "EMPLEADO_NOT_FOUND",
+                "error": "No se encontró un perfil de profesional para este usuario",
+                "error_code": "PROFESIONAL_NOT_FOUND",
             },
             status=status.HTTP_404_NOT_FOUND,
         )

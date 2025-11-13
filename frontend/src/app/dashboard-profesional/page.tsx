@@ -312,14 +312,14 @@ export default function DashboardEmpleadoPage() {
             </div>
             <div className="flex space-x-3">
               <Button
-                onClick={() => router.push('/calendario')}
+                onClick={() => router.push('/dashboard-profesional/agenda')}
                 variant="outline"
               >
                 <CalendarDays className="w-4 h-4 mr-2" />
                 Mi Calendario
               </Button>
               <Button
-                onClick={() => router.push('/perfil-empleado')}
+                onClick={() => router.push('/dashboard-profesional/perfil')}
                 className="bg-gradient-to-r from-blue-500 to-green-600 hover:from-blue-600 hover:to-green-700"
               >
                 <User className="w-4 h-4 mr-2" />
@@ -649,7 +649,7 @@ export default function DashboardEmpleadoPage() {
                     <Button
                       variant="outline"
                       className="w-full"
-                      onClick={() => router.push('/perfil-empleado')}
+                      onClick={() => router.push('/dashboard-profesional/perfil')}
                     >
                       Editar Perfil
                     </Button>

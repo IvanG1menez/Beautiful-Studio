@@ -23,7 +23,11 @@ from rest_framework.routers import DefaultRouter
 router = DefaultRouter()
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path("jet/", include("jet.urls", "jet")),  # Django JET URLs
+    path(
+        "jet/dashboard/", include("jet.dashboard.urls", "jet-dashboard")
+    ),  # Django JET dashboard
+    path("admin/", admin.site.urls),  # Django admin
     path("api/", include(router.urls)),
     path("api/core/", include("apps.core.urls")),
     path("api/users/", include("apps.users.urls")),

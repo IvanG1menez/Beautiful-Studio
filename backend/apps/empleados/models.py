@@ -1,4 +1,4 @@
-"""Modelos para la app de empleados"""
+"""Modelos para la app de profesionales"""
 
 from django.db import models
 from django.conf import settings
@@ -6,7 +6,9 @@ from django.conf import settings
 
 class Empleado(models.Model):
     """
-    Información de empleados/profesionales del salón
+    Información de profesionales del salón.
+    Nota: El nombre de la clase se mantiene como 'Empleado' por compatibilidad
+    con la base de datos, pero representa a los profesionales del salón.
     """
 
     ESPECIALIDAD_CHOICES = [
@@ -21,7 +23,7 @@ class Empleado(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="empleado_profile",
+        related_name="profesional_profile",
         verbose_name="Usuario",
     )
     especialidades = models.CharField(
@@ -54,8 +56,8 @@ class Empleado(models.Model):
     )
 
     class Meta:
-        verbose_name = "Empleado"
-        verbose_name_plural = "Empleados"
+        verbose_name = "Profesional"
+        verbose_name_plural = "Profesionales"
         ordering = ["user__first_name", "user__last_name"]
 
     def __str__(self):
@@ -63,7 +65,7 @@ class Empleado(models.Model):
             especialidad = self.get_especialidades_display()
             return f"{self.user.full_name} - {especialidad}"
         except AttributeError:
-            return f"Empleado #{self.pk}"
+            return f"Profesional #{self.pk}"
 
     @property
     def nombre_completo(self):
@@ -82,7 +84,9 @@ class Empleado(models.Model):
 
 class EmpleadoServicio(models.Model):
     """
-    Relación muchos a muchos entre empleados y servicios que pueden realizar
+    Relación muchos a muchos entre profesionales y servicios que pueden realizar.
+    Nota: El nombre de la clase se mantiene como 'EmpleadoServicio' por
+    compatibilidad con la base de datos.
     """
 
     empleado = models.ForeignKey(
@@ -91,7 +95,8 @@ class EmpleadoServicio(models.Model):
     servicio = models.ForeignKey(
         "servicios.Servicio",
         on_delete=models.CASCADE,
-        related_name="empleados_disponibles",
+        related_name="profesionales_disponibles",
+        verbose_name="Servicio",
     )
     nivel_experiencia = models.IntegerField(
         choices=[
@@ -101,25 +106,28 @@ class EmpleadoServicio(models.Model):
             (4, "Experto"),
         ],
         default=2,
+        verbose_name="Nivel de experiencia",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ("empleado", "servicio")
-        verbose_name = "Servicio de Empleado"
-        verbose_name_plural = "Servicios de Empleados"
+        verbose_name = "Servicio de Profesional"
+        verbose_name_plural = "Servicios de Profesionales"
 
     def __str__(self):
         try:
             return f"{self.empleado.nombre_completo} - {self.servicio.nombre}"
         except AttributeError:
-            return f"EmpleadoServicio #{self.pk}"
+            return f"ProfesionalServicio #{self.pk}"
 
 
 class HorarioEmpleado(models.Model):
     """
-    Horarios detallados de trabajo de empleados por día de la semana.
+    Horarios detallados de trabajo de profesionales por día de la semana.
     Permite múltiples rangos horarios por día.
+    Nota: El nombre de la clase se mantiene como 'HorarioEmpleado' por
+    compatibilidad con la base de datos.
     """
 
     DIA_SEMANA_CHOICES = [
@@ -136,7 +144,7 @@ class HorarioEmpleado(models.Model):
         Empleado,
         on_delete=models.CASCADE,
         related_name="horarios_detallados",
-        verbose_name="Empleado",
+        verbose_name="Profesional",
     )
     dia_semana = models.IntegerField(
         choices=DIA_SEMANA_CHOICES, verbose_name="Día de la semana"
@@ -152,8 +160,8 @@ class HorarioEmpleado(models.Model):
     )
 
     class Meta:
-        verbose_name = "Horario de Empleado"
-        verbose_name_plural = "Horarios de Empleados"
+        verbose_name = "Horario de Profesional"
+        verbose_name_plural = "Horarios de Profesionales"
         ordering = ["empleado", "dia_semana", "hora_inicio"]
         unique_together = [["empleado", "dia_semana", "hora_inicio"]]
 
