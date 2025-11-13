@@ -69,8 +69,15 @@ interface EmpleadoProfile {
     phone?: string;
     dni?: string;
   };
-  especialidad?: string;
+  especialidades?: string;
+  especialidad_display?: string;
+  dias_trabajo?: string;
+  horario_entrada?: string;
+  horario_salida?: string;
   comision_porcentaje?: number;
+  fecha_ingreso?: string;
+  is_disponible?: boolean;
+  biografia?: string;
   horarios?: string;
 }
 
@@ -227,11 +234,15 @@ export default function PerfilEmpleadoPage() {
         if (data.id) {
           const horariosResponse = await authenticatedFetch(`/empleados/horarios/?empleado=${data.id}`);
           if (horariosResponse.ok) {
-            const horariosData: HorarioEmpleado[] = await horariosResponse.json();
+            const horariosData = await horariosResponse.json();
+            // El backend puede devolver un array directamente o un objeto con paginación
+            const horariosArray: HorarioEmpleado[] = Array.isArray(horariosData) 
+              ? horariosData 
+              : (horariosData.results || []);
 
             // Agrupar horarios por día
             const grouped: { [key: number]: RangoHorario[] } = {};
-            horariosData.forEach(h => {
+            horariosArray.forEach(h => {
               if (!grouped[h.dia_semana]) {
                 grouped[h.dia_semana] = [];
               }
@@ -423,9 +434,10 @@ export default function PerfilEmpleadoPage() {
                   {profile?.user.phone && (
                     <Badge variant="outline">{profile.user.phone}</Badge>
                   )}
-                  {profile?.especialidad && (
+                  {profile?.especialidad_display && (
                     <Badge className="bg-blue-100 text-blue-800">
-                      {profile.especialidad}
+                      <Scissors className="w-3 h-3 mr-1" />
+                      {profile.especialidad_display}
                     </Badge>
                   )}
                 </div>
@@ -580,7 +592,7 @@ export default function PerfilEmpleadoPage() {
                     <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                       <Scissors className="w-5 h-5 text-blue-600" />
                       <span className="text-gray-900 font-medium">
-                        {profile?.especialidad || 'No especificada'}
+                        {profile?.especialidad_display || 'No especificada'}
                       </span>
                     </div>
                   </div>
@@ -595,6 +607,26 @@ export default function PerfilEmpleadoPage() {
                     </div>
                   </div>
                 </div>
+
+                <Separator />
+
+                {/* Días de Trabajo (del modelo Empleado) */}
+                {profile?.dias_trabajo && (
+                  <div className="space-y-2">
+                    <Label className="text-gray-700 flex items-center gap-2">
+                      <Calendar className="w-4 h-4" />
+                      Días de Trabajo
+                    </Label>
+                    <div className="flex items-center space-x-2 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                      <span className="text-gray-900 font-medium">
+                        {profile.dias_trabajo}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 ml-1">
+                      Formato: L (Lunes), M (Martes), Mi (Miércoles), J (Jueves), V (Viernes), S (Sábado), D (Domingo)
+                    </p>
+                  </div>
+                )}
 
                 <Separator />
 

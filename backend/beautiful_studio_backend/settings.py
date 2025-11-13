@@ -178,9 +178,16 @@ CORS_ALLOW_CREDENTIALS = True
 # Additional CORS settings for development
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=bool)
 
-# Static files configuration with WhiteNoise
+# Static files configuration
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Usar WhiteNoise solo en producción, Django estándar en desarrollo
+if DEBUG:
+    # En desarrollo, usar el sistema estándar de Django para mejor compatibilidad con Jet
+    STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+else:
+    # En producción, usar WhiteNoise con compresión
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Custom User Model
 AUTH_USER_MODEL = "users.User"
@@ -197,15 +204,4 @@ JET_THEMES = [
     {"theme": "light-violet", "color": "#a464c4", "title": "Violeta"},
     {"theme": "light-blue", "color": "#5EADDE", "title": "Azul Cielo"},
     {"theme": "light-gray", "color": "#222", "title": "Gris Oscuro"},
-    # Nuevos temas personalizados
-    {"theme": "orange", "color": "#FF6B35", "title": "Naranja Vibrante"},
-    {"theme": "pink", "color": "#E91E63", "title": "Rosa Fucsia"},
-    {"theme": "purple", "color": "#9C27B0", "title": "Púrpura"},
-    {"theme": "indigo", "color": "#3F51B5", "title": "Índigo"},
-    {"theme": "teal", "color": "#009688", "title": "Verde Azulado"},
-    {"theme": "amber", "color": "#FFC107", "title": "Ámbar"},
-    {"theme": "deep-orange", "color": "#FF5722", "title": "Naranja Profundo"},
-    {"theme": "blue-grey", "color": "#607D8B", "title": "Azul Grisáceo"},
-    {"theme": "red", "color": "#F44336", "title": "Rojo"},
-    {"theme": "lime", "color": "#CDDC39", "title": "Lima"},
 ]

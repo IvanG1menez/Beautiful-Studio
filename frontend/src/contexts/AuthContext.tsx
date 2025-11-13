@@ -159,7 +159,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       sessionStorage.setItem('currentSessionId', sessionId);
       localStorage.setItem('lastLoginSessionId', sessionId);
 
-      setUser(response.user);
+      let userData = response.user;
+
+      // Si el usuario es profesional, cargar también su perfil de empleado
+      if (userData.role === 'profesional' || userData.role === 'empleado') {
+        try {
+          const token = localStorage.getItem('auth_token');
+          const empleadoResponse = await fetch('http://localhost:8000/api/empleados/me/', {
+            headers: {
+              'Authorization': `Token ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (empleadoResponse.ok) {
+            const empleadoData = await empleadoResponse.json();
+            // Agregar el empleado_id al objeto de usuario
+            userData = {
+              ...userData,
+              empleado_id: empleadoData.id
+            };
+            // Actualizar el localStorage con el empleado_id
+            localStorage.setItem('user', JSON.stringify(userData));
+          }
+        } catch (error) {
+          console.error('Error al cargar perfil de empleado:', error);
+          // Continuar de todos modos con los datos del usuario
+        }
+      }
+
+      setUser(userData);
     } catch (error: any) {
       // Re-lanzar el error con el mensaje procesado
       const errorMessage = error.message || 'Error al iniciar sesión';

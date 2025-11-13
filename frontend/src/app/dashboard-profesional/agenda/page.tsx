@@ -45,6 +45,7 @@ export default function AgendaEmpleadoPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [filtroEstado, setFiltroEstado] = useState<string>('todos');
+  const [empleadoId, setEmpleadoId] = useState<number | null>(null);
 
   // Estados para cambiar estado de turno
   const [turnoActual, setTurnoActual] = useState<Turno | null>(null);
@@ -53,14 +54,82 @@ export default function AgendaEmpleadoPage() {
   const [notasEmpleado, setNotasEmpleado] = useState('');
   const [procesando, setProcesando] = useState(false);
 
+  // Función para obtener el token de autenticación
+  const getAuthToken = () => localStorage.getItem('auth_token');
+
+  // Función para hacer peticiones autenticadas
+  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+    const token = getAuthToken();
+    if (!token) throw new Error('No authentication token found');
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+
+    return fetch(fullUrl, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Token ${token}`,
+        ...options.headers,
+      },
+    });
+  };
+
+  // Cargar empleado_id del usuario al montar el componente
+  useEffect(() => {
+    const loadEmpleadoId = async () => {
+      try {
+        // Primero intentar obtener del localStorage (si ya se logueó)
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          if (user.empleado_id) {
+            setEmpleadoId(user.empleado_id);
+            console.log('Empleado ID desde localStorage:', user.empleado_id);
+            return;
+          }
+        }
+
+        // Si no está en localStorage, cargar desde el API
+        const response = await authenticatedFetch('/empleados/me/');
+        if (response.ok) {
+          const data = await response.json();
+          setEmpleadoId(data.id);
+          console.log('Empleado ID cargado desde API:', data.id);
+          
+          // Actualizar localStorage para futuras cargas
+          if (userStr) {
+            const user = JSON.parse(userStr);
+            user.empleado_id = data.id;
+            localStorage.setItem('user', JSON.stringify(user));
+          }
+        } else {
+          console.error('Error al cargar perfil de empleado');
+          setError('No se pudo cargar el perfil del empleado');
+        }
+      } catch (err) {
+        console.error('Error loading empleado ID:', err);
+        setError('Error de conexión al cargar el perfil');
+      }
+    };
+
+    loadEmpleadoId();
+  }, []);
+
   // Cargar turnos
   const loadTurnos = async (fecha: Date) => {
+    if (!empleadoId) {
+      console.log('Esperando ID del empleado...');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
       const fechaStr = fecha.toISOString().split('T')[0];
 
       const response = await turnosService.list({
+        empleado: empleadoId,
         fecha_desde: fechaStr,
         fecha_hasta: fechaStr,
       });
@@ -75,8 +144,10 @@ export default function AgendaEmpleadoPage() {
   };
 
   useEffect(() => {
-    loadTurnos(selectedDate);
-  }, [selectedDate]);
+    if (empleadoId) {
+      loadTurnos(selectedDate);
+    }
+  }, [selectedDate, empleadoId]);
 
   // Cambiar fecha
   const changeDate = (days: number) => {
@@ -185,7 +256,7 @@ export default function AgendaEmpleadoPage() {
             </Button>
           </div>
 
-          <div className="flex justify-center mt-4">
+          <div className="flex justify-center items-center gap-4 mt-4">
             <Button
               variant="ghost"
               size="sm"
@@ -194,6 +265,23 @@ export default function AgendaEmpleadoPage() {
             >
               Ir a Hoy
             </Button>
+
+            {/* Date Picker para saltar a cualquier fecha */}
+            <div className="flex items-center gap-2">
+              <label htmlFor="date-picker" className="text-sm font-medium text-gray-700">
+                Ir a fecha:
+              </label>
+              <input
+                id="date-picker"
+                type="date"
+                value={selectedDate.toISOString().split('T')[0]}
+                onChange={(e) => {
+                  const newDate = new Date(e.target.value + 'T12:00:00');
+                  setSelectedDate(newDate);
+                }}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

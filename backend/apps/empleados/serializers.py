@@ -6,6 +6,14 @@ from django.db import transaction
 User = get_user_model()
 
 
+class UserNestedSerializer(serializers.ModelSerializer):
+    """Serializer anidado para mostrar datos completos del usuario"""
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone', 'dni', 'role']
+        read_only_fields = fields
+
+
 class EmpleadoSerializer(serializers.ModelSerializer):
     """
     Serializador completo para Profesional con creación de usuario integrada.
@@ -13,7 +21,7 @@ class EmpleadoSerializer(serializers.ModelSerializer):
     """
 
     # Campos de solo lectura para mostrar info del usuario
-    user = serializers.StringRelatedField(read_only=True)
+    user = UserNestedSerializer(read_only=True)
     especialidad_display = serializers.CharField(
         source="get_especialidades_display", read_only=True
     )
@@ -25,8 +33,10 @@ class EmpleadoSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True, required=False, default="profesional123"
     )
-    first_name = serializers.CharField(write_only=True, required=False)
-    last_name = serializers.CharField(write_only=True, required=False)
+
+    nombre_completo = serializers.CharField(read_only=True)
+    edad = serializers.IntegerField(read_only=True)
+    tiempo_como_cliente = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Empleado

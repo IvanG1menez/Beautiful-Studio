@@ -13,6 +13,7 @@ export interface User {
   created_at: string;
   updated_at: string;
   full_name: string;
+  empleado_id?: number; // ID del perfil de empleado si el usuario es profesional
 }
 
 export interface Cliente {
