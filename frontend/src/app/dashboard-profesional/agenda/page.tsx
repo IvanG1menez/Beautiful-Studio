@@ -96,7 +96,7 @@ export default function AgendaEmpleadoPage() {
           const data = await response.json();
           setEmpleadoId(data.id);
           console.log('Empleado ID cargado desde API:', data.id);
-          
+
           // Actualizar localStorage para futuras cargas
           if (userStr) {
             const user = JSON.parse(userStr);

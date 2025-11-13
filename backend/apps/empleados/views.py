@@ -144,7 +144,7 @@ class HorarioEmpleadoListCreateView(generics.ListCreateAPIView):
     Vista para listar y crear horarios de empleados
     Parámetros opcionales:
     - empleado: ID del empleado para filtrar sus horarios
-    
+
     GET: Accesible para todos los usuarios autenticados
          Los profesionales solo pueden ver sus propios horarios
     POST: Solo propietarios y superusuarios
@@ -163,7 +163,7 @@ class HorarioEmpleadoListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = HorarioEmpleado.objects.select_related("empleado", "empleado__user")
         empleado_id = self.request.query_params.get("empleado", None)
-        
+
         # Si el usuario es profesional, solo puede ver sus propios horarios
         if self.request.user.role == "profesional":
             try:
@@ -174,7 +174,7 @@ class HorarioEmpleadoListCreateView(generics.ListCreateAPIView):
         elif empleado_id:
             # Propietarios/superusuarios pueden filtrar por cualquier empleado
             queryset = queryset.filter(empleado_id=empleado_id)
-            
+
         return queryset
 
 

@@ -2,7 +2,7 @@
 import os
 import django
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'beautiful_studio_backend.settings')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "beautiful_studio_backend.settings")
 django.setup()
 
 from apps.turnos.models import Turno
@@ -15,9 +15,11 @@ print("\n=== TURNOS RECIENTES EN LA BASE DE DATOS ===\n")
 fecha_inicio = datetime.now() - timedelta(days=30)
 fecha_fin = datetime.now() + timedelta(days=30)
 
-turnos = Turno.objects.filter(
-    fecha_hora__range=[fecha_inicio, fecha_fin]
-).select_related('cliente__user', 'empleado__user', 'servicio').order_by('-fecha_hora')
+turnos = (
+    Turno.objects.filter(fecha_hora__range=[fecha_inicio, fecha_fin])
+    .select_related("cliente__user", "empleado__user", "servicio")
+    .order_by("-fecha_hora")
+)
 
 print(f"Total de turnos encontrados: {turnos.count()}\n")
 
@@ -26,7 +28,9 @@ if turnos.exists():
         print(f"{i}. ID: {turno.id}")
         print(f"   Fecha/Hora: {turno.fecha_hora.strftime('%Y-%m-%d %H:%M')}")
         print(f"   Cliente: {turno.cliente.nombre_completo} (ID: {turno.cliente.id})")
-        print(f"   Empleado: {turno.empleado.user.get_full_name()} (Empleado ID: {turno.empleado.id}, User ID: {turno.empleado.user.id})")
+        print(
+            f"   Empleado: {turno.empleado.user.get_full_name()} (Empleado ID: {turno.empleado.id}, User ID: {turno.empleado.user.id})"
+        )
         print(f"   Servicio: {turno.servicio.nombre}")
         print(f"   Estado: {turno.estado}")
         print(f"   Precio: ${turno.precio_final}")
@@ -42,8 +46,7 @@ empleados_con_turnos = Empleado.objects.filter(
 
 for emp in empleados_con_turnos:
     count = Turno.objects.filter(
-        empleado=emp,
-        fecha_hora__range=[fecha_inicio, fecha_fin]
+        empleado=emp, fecha_hora__range=[fecha_inicio, fecha_fin]
     ).count()
     print(f"Empleado ID: {emp.id} | User ID: {emp.user.id}")
     print(f"  Nombre: {emp.user.get_full_name()}")

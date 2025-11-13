@@ -171,7 +171,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               'Content-Type': 'application/json'
             }
           });
-          
+
           if (empleadoResponse.ok) {
             const empleadoData = await empleadoResponse.json();
             // Agregar el empleado_id al objeto de usuario

@@ -2,13 +2,13 @@
 import os
 import django
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'beautiful_studio_backend.settings')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "beautiful_studio_backend.settings")
 django.setup()
 
 from apps.empleados.models import Empleado
 
 print("\n=== EMPLEADOS EN LA BASE DE DATOS ===\n")
-empleados = Empleado.objects.all().select_related('user')
+empleados = Empleado.objects.all().select_related("user")
 
 if empleados.exists():
     for emp in empleados:

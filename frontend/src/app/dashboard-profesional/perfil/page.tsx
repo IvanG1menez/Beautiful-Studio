@@ -236,8 +236,8 @@ export default function PerfilEmpleadoPage() {
           if (horariosResponse.ok) {
             const horariosData = await horariosResponse.json();
             // El backend puede devolver un array directamente o un objeto con paginación
-            const horariosArray: HorarioEmpleado[] = Array.isArray(horariosData) 
-              ? horariosData 
+            const horariosArray: HorarioEmpleado[] = Array.isArray(horariosData)
+              ? horariosData
               : (horariosData.results || []);
 
             // Agrupar horarios por día

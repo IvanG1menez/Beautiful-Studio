@@ -8,9 +8,19 @@ User = get_user_model()
 
 class UserNestedSerializer(serializers.ModelSerializer):
     """Serializer anidado para mostrar datos completos del usuario"""
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone', 'dni', 'role']
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "dni",
+            "role",
+        ]
         read_only_fields = fields
 
 
