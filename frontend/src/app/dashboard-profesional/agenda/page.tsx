@@ -128,13 +128,20 @@ export default function AgendaEmpleadoPage() {
       setError(null);
       const fechaStr = fecha.toISOString().split('T')[0];
 
-      const response = await turnosService.list({
-        empleado: empleadoId,
-        fecha_desde: fechaStr,
-        fecha_hasta: fechaStr,
-      });
+      // Usar el mismo endpoint que el dashboard: /turnos/empleado/{id}
+      const response = await authenticatedFetch(
+        `/turnos/empleado/${empleadoId}?fecha_desde=${fechaStr}&fecha_hasta=${fechaStr}`
+      );
 
-      setTurnos(response.results);
+      if (response.ok) {
+        const data = await response.json();
+        const turnosArray = Array.isArray(data) ? data : (data.results || []);
+        setTurnos(turnosArray);
+        console.log(`Turnos cargados para ${fechaStr}:`, turnosArray.length);
+      } else {
+        console.error('Error al cargar turnos:', response.status);
+        setError('No se pudieron cargar los turnos');
+      }
     } catch (err: any) {
       console.error('Error loading turnos:', err);
       setError(err.message || 'Error al cargar los turnos');
