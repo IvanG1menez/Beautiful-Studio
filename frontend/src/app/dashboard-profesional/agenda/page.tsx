@@ -16,7 +16,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatTime } from '@/lib/dateUtils';
-import { turnosService } from '@/services/turnos';
 import { Turno } from '@/types';
 import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, User, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -189,16 +188,35 @@ export default function AgendaEmpleadoPage() {
     try {
       setProcesando(true);
 
-      // Actualizar el turno usando el método patch del servicio
-      const updateData: any = {
-        estado: nuevoEstado,
-      };
+      console.log('Intentando actualizar turno:', {
+        turnoId: turnoActual.id,
+        nuevoEstado,
+        notasEmpleado,
+        empleadoId
+      });
 
-      if (notasEmpleado) {
-        updateData.notas_empleado = notasEmpleado;
+      // Actualizar el turno usando fetch directamente para mejor control
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`http://localhost:8000/api/turnos/${turnoActual.id}/`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify({
+          estado: nuevoEstado,
+          notas_empleado: notasEmpleado || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error response:', errorData);
+        throw new Error(errorData.detail || errorData.error || 'Error al actualizar');
       }
 
-      await turnosService.patch(turnoActual.id, updateData);
+      const updatedTurno = await response.json();
+      console.log('Turno actualizado exitosamente:', updatedTurno);
 
       setCambioEstadoDialog(false);
       loadTurnos(selectedDate);

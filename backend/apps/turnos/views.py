@@ -83,10 +83,28 @@ class TurnoViewSet(viewsets.ModelViewSet):
             return TurnoDetailSerializer
 
     def get_queryset(self):
-        """Filtrar turnos según el rol del usuario"""
+        """
+        Filtrar turnos según el rol del usuario y la acción.
+
+        Para acciones de detalle (retrieve, update, partial_update, destroy),
+        devolver el queryset completo sin filtros de rol para evitar 404.
+        Para acciones de listado, aplicar filtros por rol.
+        """
         user = self.request.user
         queryset = super().get_queryset()
 
+        # Para acciones de detalle, devolver queryset completo sin filtros de rol
+        # Esto permite que DRF encuentre el objeto por ID sin restricciones
+        if self.action in [
+            "retrieve",
+            "update",
+            "partial_update",
+            "destroy",
+            "cambiar_estado",
+        ]:
+            return queryset  # Sin filtros de rol, solo permisos generales
+
+        # Para acciones de listado, aplicar filtros por rol
         # Si es cliente, solo ver sus propios turnos
         if hasattr(user, "cliente_profile"):
             queryset = queryset.filter(cliente=user.cliente_profile)
@@ -98,17 +116,25 @@ class TurnoViewSet(viewsets.ModelViewSet):
         # Admin y propietario ven todos
         # queryset ya tiene todos los turnos
 
-        # Filtrar por rango de fechas si se proporcionan
-        fecha_desde = self.request.query_params.get("fecha_desde")
-        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        # Solo aplicar filtros de fecha en operaciones de listado
+        if self.action in [
+            "list",
+            "turnos_empleado",
+            "mis_turnos",
+            "disponibilidad",
+            "estadisticas",
+        ]:
+            # Filtrar por rango de fechas si se proporcionan
+            fecha_desde = self.request.query_params.get("fecha_desde")
+            fecha_hasta = self.request.query_params.get("fecha_hasta")
 
-        if fecha_desde:
-            # Filtrar turnos desde el inicio del día
-            queryset = queryset.filter(fecha_hora__date__gte=fecha_desde)
+            if fecha_desde:
+                # Filtrar turnos desde el inicio del día
+                queryset = queryset.filter(fecha_hora__date__gte=fecha_desde)
 
-        if fecha_hasta:
-            # Filtrar turnos hasta el final del día
-            queryset = queryset.filter(fecha_hora__date__lte=fecha_hasta)
+            if fecha_hasta:
+                # Filtrar turnos hasta el final del día
+                queryset = queryset.filter(fecha_hora__date__lte=fecha_hasta)
 
         return queryset
 
