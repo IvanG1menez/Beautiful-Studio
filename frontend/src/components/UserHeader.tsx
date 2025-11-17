@@ -103,14 +103,14 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
   const handleProfileClick = () => {
     switch (user?.role?.toLowerCase()) {
       case 'propietario':
-      case 'superusuario':
-        router.push('/dashboard-propietario/perfil');
+      case 'propietario':
+        router.push('/dashboard/propietario/perfil');
         break;
       case 'profesional':
-        router.push('/dashboard-profesional/perfil');
+        router.push('/dashboard/profesional/perfil');
         break;
       case 'cliente':
-        router.push('/dashboard-cliente/perfil');
+        router.push('/dashboard/cliente/perfil');
         break;
       default:
         router.push('/perfil');
@@ -125,26 +125,26 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
 
     if (role === 'propietario' || role === 'superusuario') {
       return [
-        { label: 'Dashboard', href: '/dashboard-propietario', icon: Home },
-        { label: 'Profesionales', href: '/dashboard-propietario/profesionales', icon: Users },
-        { label: 'Clientes', href: '/dashboard-propietario/clientes', icon: User },
-        { label: 'Servicios', href: '/dashboard-propietario/servicios', icon: Scissors },
+        { label: 'Dashboard', href: '/dashboard/propietario', icon: Home },
+        { label: 'Profesionales', href: '/dashboard/propietario/profesionales', icon: Users },
+        { label: 'Clientes', href: '/dashboard/propietario/clientes', icon: User },
+        { label: 'Servicios', href: '/dashboard/propietario/servicios', icon: Scissors },
       ];
     }
 
     if (role === 'profesional') {
       return [
-        { label: 'Mi Dashboard', href: '/dashboard-profesional', icon: Home },
-        { label: 'Mi Agenda', href: '/dashboard-profesional/agenda', icon: Calendar },
-        { label: 'Turnos del Día', href: '/dashboard-profesional/turnos-hoy', icon: Calendar },
+        { label: 'Mi Dashboard', href: '/dashboard/profesional', icon: Home },
+        { label: 'Mi Agenda', href: '/dashboard/profesional/agenda', icon: Calendar },
+        { label: 'Turnos del Día', href: '/dashboard/profesional/turnos-hoy', icon: Calendar },
       ];
     }
 
     if (role === 'cliente') {
       return [
-        { label: 'Mi Dashboard', href: '/dashboard-cliente', icon: Home },
-        { label: 'Reservar Turno', href: '/dashboard-cliente/turnos/nuevo', icon: Calendar },
-        { label: 'Mis Turnos', href: '/dashboard-cliente/turnos', icon: Calendar },
+        { label: 'Mi Dashboard', href: '/dashboard/cliente', icon: Home },
+        { label: 'Reservar Turno', href: '/dashboard/cliente/turnos/nuevo', icon: Calendar },
+        { label: 'Mis Turnos', href: '/dashboard/cliente/turnos', icon: Calendar },
       ];
     }
 
@@ -160,10 +160,10 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
           {/* Logo y nombre del sistema */}
           <div className="flex items-center">
             <Link href="/" className="flex items-center space-x-3 group">
-              <div className="w-10 h-10 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center group-hover:shadow-lg transition-shadow">
+              <div className="w-10 h-10 bg-linear-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center group-hover:shadow-lg transition-shadow">
                 <Scissors className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold bg-gradient-to-r from-pink-500 to-purple-600 bg-clip-text text-transparent">
+              <span className="text-xl font-bold bg-linear-to-r from-pink-500 to-purple-600 bg-clip-text text-transparent">
                 Beautiful Studio
               </span>
             </Link>
@@ -212,7 +212,7 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
                     className="relative h-10 w-10 rounded-full"
                   >
                     <Avatar className="h-10 w-10 cursor-pointer hover:ring-2 hover:ring-purple-500 transition-all">
-                      <AvatarFallback className="bg-gradient-to-r from-pink-500 to-purple-600 text-white font-semibold">
+                      <AvatarFallback className="bg-linear-to-r from-pink-500 to-purple-600 text-white font-semibold">
                         {getUserInitials()}
                       </AvatarFallback>
                     </Avatar>
@@ -271,7 +271,7 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
               </Button>
               <Button
                 onClick={() => router.push('/register')}
-                className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700"
+                className="bg-linear-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700"
               >
                 Registrarse
               </Button>
@@ -303,7 +303,7 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
             {/* Usuario info móvil */}
             <div className="flex items-center space-x-3 px-4 py-3 mb-2">
               <Avatar className="h-12 w-12">
-                <AvatarFallback className="bg-gradient-to-r from-pink-500 to-purple-600 text-white font-semibold">
+                <AvatarFallback className="bg-linear-to-r from-pink-500 to-purple-600 text-white font-semibold">
                   {getUserInitials()}
                 </AvatarFallback>
               </Avatar>

@@ -7,7 +7,7 @@ from .serializers import (
     EmpleadoListSerializer,
     HorarioEmpleadoSerializer,
 )
-from apps.core.pagination import CustomPageNumberPagination
+from apps.authentication.pagination import CustomPageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.viewsets import ReadOnlyModelViewSet
 

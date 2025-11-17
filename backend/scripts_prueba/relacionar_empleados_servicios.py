@@ -5,7 +5,7 @@ Script para relacionar empleados con servicios según sus especialidades
 import os
 import django
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "beautiful_studio_backend.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 
 from apps.empleados.models import Empleado, EmpleadoServicio

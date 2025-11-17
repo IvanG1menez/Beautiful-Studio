@@ -12,7 +12,7 @@ from .serializers import (
     ClienteCreateSerializer,
     ClienteUpdateSerializer,
 )
-from apps.core.pagination import CustomPageNumberPagination
+from apps.authentication.pagination import CustomPageNumberPagination
 
 
 class ClienteViewSet(viewsets.ModelViewSet):

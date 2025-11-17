@@ -11,7 +11,7 @@ import requests
 import json
 
 # Configurar Django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'beautiful_studio_backend.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 django.setup()
 
 BASE_URL = 'http://127.0.0.1:8000/api/core'

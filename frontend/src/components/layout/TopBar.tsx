@@ -88,15 +88,15 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
     const role = user?.role?.toLowerCase();
 
     if (role === 'propietario' || role === 'superusuario') {
-      return '/dashboard-propietario/perfil';
+      return '/dashboard/propietario/perfil';
     }
 
     if (role === 'profesional') {
-      return '/dashboard-profesional/perfil';
+      return '/dashboard/profesional/perfil';
     }
 
     if (role === 'cliente') {
-      return '/dashboard-cliente/perfil';
+      return '/dashboard/cliente/perfil';
     }
 
     return '/perfil'; // Fallback
@@ -170,7 +170,7 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-2 hover:bg-gray-100">
                   <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white font-semibold">
+                    <AvatarFallback className="bg-linear-to-br from-blue-500 to-purple-600 text-white font-semibold">
                       {getUserInitials()}
                     </AvatarFallback>
                   </Avatar>

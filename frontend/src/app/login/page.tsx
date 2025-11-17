@@ -83,16 +83,16 @@ export default function LoginPage() {
         switch (userRole) {
           case 'cliente':
             console.log('📱 Redirigiendo a dashboard de cliente');
-            router.push('/dashboard-cliente');
+            router.push('/dashboard/cliente');
             break;
           case 'profesional':
             console.log('👨‍💼 Redirigiendo a dashboard de profesional');
-            router.push('/dashboard-profesional');
+            router.push('/dashboard/profesional');
             break;
           case 'propietario':
           case 'superusuario':
             console.log('👑 Redirigiendo a dashboard de propietario');
-            router.push('/dashboard-propietario');
+            router.push('/dashboard/propietario');
             break;
           default:
             console.log('🔄 Rol no reconocido, redirigiendo a dashboard general');
@@ -130,7 +130,7 @@ export default function LoginPage() {
         {/* Logo y título */}
         <div className="text-center">
           <div className="flex justify-center">
-            <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center">
+            <div className="w-16 h-16 bg-linear-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center">
               <Scissors className="w-8 h-8 text-white" />
             </div>
           </div>

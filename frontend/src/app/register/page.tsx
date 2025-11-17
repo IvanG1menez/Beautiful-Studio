@@ -170,7 +170,7 @@ export default function RegisterPage() {
                 </div>
                 <Button
                   onClick={() => router.push('/login')}
-                  className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700"
+                  className="w-full bg-linear-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700"
                 >
                   Ir al Inicio de Sesión
                 </Button>
@@ -188,7 +188,7 @@ export default function RegisterPage() {
         {/* Logo y título */}
         <div className="text-center">
           <div className="flex justify-center">
-            <div className="w-16 h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center">
+            <div className="w-16 h-16 bg-linear-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center">
               <Scissors className="w-8 h-8 text-white" />
             </div>
           </div>
@@ -374,7 +374,7 @@ export default function RegisterPage() {
               {/* Botón de submit */}
               <Button
                 type="submit"
-                className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 transition-all duration-200"
+                className="w-full bg-linear-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 transition-all duration-200"
                 disabled={isLoading}
               >
                 {isLoading ? (

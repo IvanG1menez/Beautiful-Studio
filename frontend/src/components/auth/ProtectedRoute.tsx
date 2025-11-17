@@ -60,14 +60,14 @@ export default function ProtectedRoute({
         // Si el usuario no tiene el rol permitido, redirigir según su rol
         switch (user.role) {
           case 'cliente':
-            router.push('/dashboard-cliente');
+            router.push('/dashboard/cliente');
             break;
           case 'profesional':
-            router.push('/dashboard-profesional');
+            router.push('/dashboard/profesional');
             break;
           case 'propietario':
           case 'superusuario':
-            router.push('/dashboard-propietario');
+            router.push('/dashboard/propietario');
             break;
           default:
             router.push('/dashboard');
@@ -149,14 +149,14 @@ export default function ProtectedRoute({
                   // Redirigir al dashboard apropiado según el rol
                   switch (user.role) {
                     case 'cliente':
-                      router.push('/dashboard-cliente');
+                      router.push('/dashboard/cliente');
                       break;
                     case 'profesional':
-                      router.push('/dashboard-profesional');
+                      router.push('/dashboard/profesional');
                       break;
                     case 'propietario':
                     case 'superusuario':
-                      router.push('/dashboard-propietario');
+                      router.push('/dashboard/propietario');
                       break;
                     default:
                       router.push('/dashboard');

@@ -17,7 +17,7 @@ from .serializers import (
     TurnoUpdateSerializer,
     HistorialTurnoSerializer,
 )
-from apps.core.pagination import CustomPageNumberPagination
+from apps.authentication.pagination import CustomPageNumberPagination
 
 
 class TurnoViewSet(viewsets.ModelViewSet):

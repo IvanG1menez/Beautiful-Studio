@@ -8,7 +8,7 @@ import django
 import json
 from datetime import datetime
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "beautiful_studio_backend.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 
 from apps.empleados.models import Empleado, HorarioEmpleado, EmpleadoServicio
