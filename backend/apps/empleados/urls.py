@@ -6,6 +6,11 @@ urlpatterns = [
     path("", views.EmpleadoListView.as_view(), name="empleado-list"),
     path("me/", views.empleado_me_view, name="empleado-me"),
     path("<int:pk>/", views.EmpleadoDetailView.as_view(), name="empleado-detail"),
+    path(
+        "<int:empleado_id>/dias-trabajo/",
+        views.dias_trabajo_empleado,
+        name="dias-trabajo-empleado",
+    ),
     # Horarios de empleados
     path(
         "horarios/",

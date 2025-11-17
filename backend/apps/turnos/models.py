@@ -58,6 +58,12 @@ class Turno(models.Model):
         null=True,
         verbose_name="Precio final",
     )
+    fecha_hora_completado = models.DateTimeField(
+        blank=True,
+        null=True,
+        verbose_name="Fecha y hora de finalización",
+        help_text="Registra cuándo se marcó el turno como completado"
+    )
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
     )

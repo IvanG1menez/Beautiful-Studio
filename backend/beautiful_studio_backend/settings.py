@@ -205,3 +205,13 @@ JET_THEMES = [
     {"theme": "light-blue", "color": "#5EADDE", "title": "Azul Cielo"},
     {"theme": "light-gray", "color": "#222", "title": "Gris Oscuro"},
 ]
+
+# Looking to send emails in production? Check out our Email API/SMTP product!
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = config('EMAIL_HOST', default='sandbox.smtp.mailtrap.io')
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='3c21f5f8f8562d')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='5cbeba3f934565')
+EMAIL_PORT = config('EMAIL_PORT', default=2525, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Beautiful Studio <noreply@beautifulstudio.com>')

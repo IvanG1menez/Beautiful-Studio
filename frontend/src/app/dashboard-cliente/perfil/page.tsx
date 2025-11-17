@@ -299,7 +299,7 @@ export default function PerfilClientePage() {
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center space-x-6">
-              <Avatar className="h-24 w-24 bg-gradient-to-r from-purple-600 to-pink-600">
+              <Avatar className="h-24 w-24 bg-linear-to-r from-purple-600 to-pink-600">
                 <AvatarFallback className="text-2xl font-bold text-white">
                   {getInitials(profile?.user.first_name, profile?.user.last_name)}
                 </AvatarFallback>
@@ -458,7 +458,7 @@ export default function PerfilClientePage() {
                   <Button
                     type="submit"
                     disabled={isSaving}
-                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                    className="w-full bg-linear-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
                   >
                     {isSaving ? (
                       <>
@@ -650,7 +650,7 @@ export default function PerfilClientePage() {
               <Button
                 type="submit"
                 disabled={isChangingPassword}
-                className="bg-gradient-to-r from-purple-600 to-pink-600"
+                className="bg-linear-to-r from-purple-600 to-pink-600"
               >
                 {isChangingPassword ? (
                   <>

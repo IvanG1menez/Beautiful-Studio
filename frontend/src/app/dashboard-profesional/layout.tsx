@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Calendar,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -60,6 +61,12 @@ export default function DashboardProfesionalLayout({
       active: pathname?.startsWith('/dashboard-profesional/turnos-hoy'),
     },
     {
+      label: 'Completar Turnos',
+      icon: CheckSquare,
+      href: '/dashboard-profesional/completar-turnos',
+      active: pathname?.startsWith('/dashboard-profesional/completar-turnos'),
+    },
+    {
       label: 'Mis Clientes',
       icon: Users,
       href: '/dashboard-profesional/clientes',
@@ -93,7 +100,7 @@ export default function DashboardProfesionalLayout({
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
             ${isMobile ? 'absolute z-40' : 'relative'}
             transition-transform duration-300 ease-in-out
-            w-64 bg-gradient-to-b from-blue-900 to-blue-800 text-white
+            w-64 bg-linear-to-b from-blue-900 to-blue-800 text-white
             flex flex-col
             h-full
           `}

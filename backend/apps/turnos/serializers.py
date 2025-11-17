@@ -47,6 +47,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "categoria_nombre",
             "fecha_hora",
             "fecha_hora_fin",
+            "fecha_hora_completado",
             "estado",
             "estado_display",
             "precio_final",

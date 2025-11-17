@@ -67,6 +67,7 @@ export default function NuevoTurnoPage() {
   const [servicios, setServicios] = useState<Servicio[]>([]);
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [horariosDisponibles, setHorariosDisponibles] = useState<string[]>([]);
+  const [diasTrabajoEmpleado, setDiasTrabajoEmpleado] = useState<number[]>([]);
 
   // Selecciones
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<number | null>(null);
@@ -117,6 +118,13 @@ export default function NuevoTurnoPage() {
       fetchEmpleados();
     }
   }, [servicioSeleccionado]);
+
+  // Cargar días de trabajo cuando se selecciona empleado
+  useEffect(() => {
+    if (empleadoSeleccionado) {
+      fetchDiasTrabajoEmpleado();
+    }
+  }, [empleadoSeleccionado]);
 
   // Cargar horarios disponibles cuando se selecciona empleado y fecha
   useEffect(() => {
@@ -201,6 +209,24 @@ export default function NuevoTurnoPage() {
       setError('Error al cargar los profesionales. Por favor, intenta nuevamente.');
     } finally {
       setLoadingEmpleados(false);
+    }
+  };
+
+  const fetchDiasTrabajoEmpleado = async () => {
+    if (!empleadoSeleccionado) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/empleados/${empleadoSeleccionado.id}/dias-trabajo/`,
+        { headers: getAuthHeaders() }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setDiasTrabajoEmpleado(data.dias_trabajo || []);
+      }
+    } catch (error) {
+      console.error('Error fetching días de trabajo:', error);
     }
   };
 
@@ -310,6 +336,16 @@ export default function NuevoTurnoPage() {
     const maxDate = new Date();
     maxDate.setDate(maxDate.getDate() + 30);
     return maxDate.toISOString().split('T')[0];
+  };
+
+  // Validar si una fecha es día de trabajo del empleado
+  const isValidWorkDay = (dateString: string): boolean => {
+    if (diasTrabajoEmpleado.length === 0) return true; // Si no hay datos, permitir
+    const date = new Date(dateString + 'T12:00:00');
+    const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+    // Convertir de domingo=0 a lunes=0: (dayOfWeek + 6) % 7
+    const adjustedDay = (dayOfWeek + 6) % 7;
+    return diasTrabajoEmpleado.includes(adjustedDay);
   };
 
   // Formatear días de trabajo
@@ -605,7 +641,7 @@ export default function NuevoTurnoPage() {
                         }`}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="w-14 h-14 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
+                        <div className="w-14 h-14 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center shrink-0">
                           <User className="w-7 h-7 text-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -614,7 +650,7 @@ export default function NuevoTurnoPage() {
                               {empleado.first_name} {empleado.last_name}
                             </h3>
                             {empleadoSeleccionado?.id === empleado.id && (
-                              <Check className="w-5 h-5 text-primary flex-shrink-0" />
+                              <Check className="w-5 h-5 text-primary shrink-0" />
                             )}
                           </div>
 
@@ -686,7 +722,7 @@ export default function NuevoTurnoPage() {
             {/* Información del profesional */}
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
+                <div className="w-12 h-12 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
                   <User className="w-6 h-6 text-primary" />
                 </div>
                 <div>
@@ -720,13 +756,20 @@ export default function NuevoTurnoPage() {
                 max={getMaxDate()}
                 value={fechaSeleccionada}
                 onChange={(e) => {
-                  setFechaSeleccionada(e.target.value);
-                  setHorarioSeleccionado('');
+                  const selectedDate = e.target.value;
+                  if (isValidWorkDay(selectedDate)) {
+                    setFechaSeleccionada(selectedDate);
+                    setHorarioSeleccionado('');
+                    setError('');
+                  } else {
+                    setFechaSeleccionada('');
+                    setError(`${empleadoSeleccionado.first_name} no trabaja ese día. Por favor selecciona un día de trabajo: ${formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}`);
+                  }
                 }}
                 className="mt-1"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Puedes agendar hasta 30 días en adelante
+                Días laborables: {formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)} | Hasta 30 días en adelante
               </p>
             </div>
 
@@ -839,7 +882,7 @@ export default function NuevoTurnoPage() {
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase mb-1">Profesional</p>
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
+                    <div className="w-10 h-10 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
                       <User className="w-5 h-5 text-primary" />
                     </div>
                     <div>

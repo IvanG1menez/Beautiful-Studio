@@ -8,6 +8,8 @@ from .serializers import (
     HorarioEmpleadoSerializer,
 )
 from apps.core.pagination import CustomPageNumberPagination
+from rest_framework.decorators import action
+from rest_framework.viewsets import ReadOnlyModelViewSet
 
 
 class IsPropietarioOrAdmin(permissions.BasePermission):
@@ -250,4 +252,52 @@ def bulk_update_horarios(request, empleado_id):
             "horarios": created_horarios,
         },
         status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def dias_trabajo_empleado(request, empleado_id):
+    """
+    Obtener los días de la semana que trabaja un profesional.
+    Retorna un array con los números de días (0=Lunes, 6=Domingo)
+    """
+    try:
+        empleado = Empleado.objects.get(id=empleado_id)
+    except Empleado.DoesNotExist:
+        return Response(
+            {"error": "Empleado no encontrado"}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Obtener días únicos de los horarios del empleado
+    dias_trabajo = (
+        HorarioEmpleado.objects.filter(empleado=empleado, is_active=True)
+        .values_list("dia_semana", flat=True)
+        .distinct()
+        .order_by("dia_semana")
+    )
+
+    # Mapeo de nombres de días
+    dias_nombres = {
+        0: "Lunes",
+        1: "Martes",
+        2: "Miércoles",
+        3: "Jueves",
+        4: "Viernes",
+        5: "Sábado",
+        6: "Domingo",
+    }
+
+    dias_detallados = [
+        {"numero": dia, "nombre": dias_nombres.get(dia, "")} for dia in dias_trabajo
+    ]
+
+    return Response(
+        {
+            "empleado_id": empleado.id,
+            "empleado_nombre": empleado.nombre_completo,
+            "dias_trabajo": list(dias_trabajo),
+            "dias_detallados": dias_detallados,
+        },
+        status=status.HTTP_200_OK,
     )

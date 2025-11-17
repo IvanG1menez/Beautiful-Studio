@@ -77,6 +77,9 @@ export default function TurnosHoyPage() {
   const [selectedTurno, setSelectedTurno] = useState<Turno | null>(null);
   const [showNotasDialog, setShowNotasDialog] = useState(false);
   const [showCancelarDialog, setShowCancelarDialog] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [notas, setNotas] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -276,6 +279,12 @@ export default function TurnosHoyPage() {
   const handleCompletarTurno = async () => {
     if (!selectedTurno) return;
 
+    // Confirmación final
+    const confirmar = confirm('¿Estás seguro de que deseas finalizar este turno?');
+    if (!confirmar) {
+      return;
+    }
+
     try {
       setLoadingAction(selectedTurno.id);
       const response = await authenticatedFetch(`/turnos/${selectedTurno.id}/`, {
@@ -365,10 +374,72 @@ export default function TurnosHoyPage() {
     }
   };
 
+  // Validar fecha del turno
+  const validarFechaTurno = (turno: Turno): { valido: boolean; mensaje: string } => {
+    const fechaTurno = new Date(turno.fecha_hora);
+    const ahora = new Date();
+
+    // Resetear las horas para comparar solo fechas
+    const fechaTurnoSinHora = new Date(fechaTurno.getFullYear(), fechaTurno.getMonth(), fechaTurno.getDate());
+    const hoySinHora = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+
+    if (fechaTurnoSinHora.getTime() > hoySinHora.getTime()) {
+      return { valido: false, mensaje: '⚠️ No puedes completar un turno que aún no ha llegado. La fecha del turno es futura.' };
+    }
+
+    return { valido: true, mensaje: '' };
+  };
+
+  // Validar horario del turno
+  const validarHorarioTurno = (turno: Turno): { valido: boolean; mensaje: string; esAdvertencia: boolean } => {
+    const fechaTurno = new Date(turno.fecha_hora);
+    const ahora = new Date();
+
+    // Si el turno es antes de ahora, está bien
+    if (fechaTurno.getTime() <= ahora.getTime()) {
+      return { valido: true, mensaje: '', esAdvertencia: false };
+    }
+
+    // Si el turno es en el futuro, mostrar advertencia
+    const minutosRestantes = Math.round((fechaTurno.getTime() - ahora.getTime()) / 60000);
+    const horasTurno = fechaTurno.getHours();
+    const minutosTurno = fechaTurno.getMinutes();
+    const horarioTurno = `${horasTurno.toString().padStart(2, '0')}:${minutosTurno.toString().padStart(2, '0')}`;
+
+    return {
+      valido: true,
+      mensaje: `⏰ Aún no es la hora del turno (${horarioTurno}). Faltan ${minutosRestantes} minutos. ¿Estás seguro de querer finalizarlo ahora?`,
+      esAdvertencia: true
+    };
+  };
+
   const openCompletarDialog = (turno: Turno) => {
-    setSelectedTurno(turno);
-    setNotas(turno.notas_empleado || '');
-    setShowNotasDialog(true);
+    // Validar fecha
+    const validacionFecha = validarFechaTurno(turno);
+    if (!validacionFecha.valido) {
+      alert(validacionFecha.mensaje);
+      return;
+    }
+
+    // Validar horario
+    const validacionHorario = validarHorarioTurno(turno);
+
+    if (validacionHorario.esAdvertencia) {
+      // Mostrar advertencia pero permitir continuar
+      setConfirmMessage(validacionHorario.mensaje);
+      setConfirmAction(() => () => {
+        setSelectedTurno(turno);
+        setNotas(turno.notas_empleado || '');
+        setShowNotasDialog(true);
+        setShowConfirmDialog(false);
+      });
+      setShowConfirmDialog(true);
+    } else {
+      // Todo OK, abrir diálogo directamente
+      setSelectedTurno(turno);
+      setNotas(turno.notas_empleado || '');
+      setShowNotasDialog(true);
+    }
   };
 
   const openCancelarDialog = (turno: Turno) => {
@@ -550,6 +621,21 @@ export default function TurnosHoyPage() {
                   </div>
                 </div>
               )}
+
+              {/* Hora de finalización */}
+              {isCompletado && (turno as any).fecha_hora_completado && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="text-sm font-medium text-green-900 mb-1">
+                    ✓ Finalizado:
+                  </div>
+                  <div className="text-sm font-semibold text-green-800">
+                    {new Date((turno as any).fecha_hora_completado).toLocaleTimeString('es-AR', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Acciones */}
@@ -583,7 +669,7 @@ export default function TurnosHoyPage() {
                       ) : (
                         <CheckCircle className="w-4 h-4 mr-2" />
                       )}
-                      Completar
+                      Finalizar
                     </Button>
 
                     <Button
@@ -968,6 +1054,66 @@ export default function TurnosHoyPage() {
                   <XCircle className="w-4 h-4 mr-2" />
                 )}
                 Sí, cancelar turno
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog de Confirmación */}
+        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirmación Requerida</DialogTitle>
+              <DialogDescription className="text-base">
+                {confirmMessage}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowConfirmDialog(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  if (confirmAction) {
+                    confirmAction();
+                  }
+                }}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Sí, continuar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog de Confirmación */}
+        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirmación Requerida</DialogTitle>
+              <DialogDescription className="text-base">
+                {confirmMessage}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowConfirmDialog(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  if (confirmAction) {
+                    confirmAction();
+                  }
+                }}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Sí, continuar
               </Button>
             </DialogFooter>
           </DialogContent>
