@@ -4,6 +4,7 @@ import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  Bell,
   Calendar,
   CheckSquare,
   ChevronLeft,
@@ -77,6 +78,12 @@ export default function DashboardProfesionalLayout({
       icon: DollarSign,
       href: '/dashboard/profesional/comisiones',
       active: pathname?.startsWith('/dashboard/profesional/comisiones'),
+    },
+    {
+      label: 'Notificaciones',
+      icon: Bell,
+      href: '/dashboard/profesional/notificaciones',
+      active: pathname?.startsWith('/dashboard/profesional/notificaciones'),
     },
     {
       label: 'Mi Perfil',

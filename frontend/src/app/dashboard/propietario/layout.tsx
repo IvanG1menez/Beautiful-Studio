@@ -4,6 +4,7 @@ import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  Bell,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -63,6 +64,12 @@ export default function DashboardPropietarioLayout({
       icon: Scissors,
       href: '/dashboard/propietario/servicios',
       active: pathname?.startsWith('/dashboard/propietario/servicios'),
+    },
+    {
+      label: 'Notificaciones',
+      icon: Bell,
+      href: '/dashboard/propietario/notificaciones',
+      active: pathname?.startsWith('/dashboard/propietario/notificaciones'),
     },
     {
       label: 'Mi Perfil',

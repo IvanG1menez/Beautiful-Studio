@@ -26,6 +26,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { NotificationBell } from './NotificationBell';
 
 interface UserHeaderProps {
   className?: string;
@@ -191,6 +192,9 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
           {/* Usuario y menú desplegable - Desktop */}
           {isAuthenticated && user ? (
             <div className="hidden md:flex items-center space-x-4">
+              {/* Campanita de notificaciones */}
+              <NotificationBell />
+
               {/* Información del usuario */}
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">
@@ -280,7 +284,10 @@ export default function UserHeader({ className = '' }: UserHeaderProps) {
 
           {/* Botón de menú móvil */}
           {isAuthenticated && (
-            <div className="md:hidden">
+            <div className="md:hidden flex items-center space-x-2">
+              {/* Campanita de notificaciones móvil */}
+              <NotificationBell />
+
               <Button
                 variant="ghost"
                 size="icon"

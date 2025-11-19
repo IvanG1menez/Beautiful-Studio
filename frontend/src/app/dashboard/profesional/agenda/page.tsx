@@ -12,7 +12,9 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatTime } from '@/lib/dateUtils';
@@ -45,6 +47,7 @@ export default function AgendaEmpleadoPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [filtroEstado, setFiltroEstado] = useState<string>('todos');
   const [empleadoId, setEmpleadoId] = useState<number | null>(null);
+  const [diasTrabajo, setDiasTrabajo] = useState<number[]>([]);
 
   // Estados para cambiar estado de turno
   const [turnoActual, setTurnoActual] = useState<Turno | null>(null);
@@ -77,6 +80,20 @@ export default function AgendaEmpleadoPage() {
     });
   };
 
+  // Cargar días de trabajo del empleado
+  const loadDiasTrabajo = async (empId: number) => {
+    try {
+      const response = await authenticatedFetch(`/empleados/${empId}/dias-trabajo/`);
+      if (response.ok) {
+        const data = await response.json();
+        setDiasTrabajo(data.dias_trabajo || []);
+        console.log('Días de trabajo cargados:', data.dias_trabajo);
+      }
+    } catch (error) {
+      console.error('Error cargando días de trabajo:', error);
+    }
+  };
+
   // Cargar empleado_id del usuario al montar el componente
   useEffect(() => {
     const loadEmpleadoId = async () => {
@@ -88,6 +105,7 @@ export default function AgendaEmpleadoPage() {
           if (user.empleado_id) {
             setEmpleadoId(user.empleado_id);
             console.log('Empleado ID desde localStorage:', user.empleado_id);
+            loadDiasTrabajo(user.empleado_id); // Cargar días de trabajo
             return;
           }
         }
@@ -105,6 +123,9 @@ export default function AgendaEmpleadoPage() {
             user.empleado_id = data.id;
             localStorage.setItem('user', JSON.stringify(user));
           }
+
+          // Cargar días de trabajo
+          loadDiasTrabajo(data.id);
         } else {
           console.error('Error al cargar perfil de empleado');
           setError('No se pudo cargar el perfil del empleado');
@@ -158,11 +179,40 @@ export default function AgendaEmpleadoPage() {
     }
   }, [selectedDate, empleadoId]);
 
-  // Cambiar fecha
+  // Validar si una fecha es día de trabajo
+  const isWorkDay = (date: Date): boolean => {
+    if (diasTrabajo.length === 0) return true;
+    const dayOfWeek = date.getDay();
+    const adjustedDay = (dayOfWeek + 6) % 7; // Convertir domingo=0 a lunes=0
+    return diasTrabajo.includes(adjustedDay);
+  };
+
+  // Encontrar el siguiente día de trabajo
+  const findNextWorkDay = (startDate: Date, direction: number): Date => {
+    const newDate = new Date(startDate);
+    let daysChecked = 0;
+    const maxDays = 14; // Evitar bucle infinito
+
+    do {
+      newDate.setDate(newDate.getDate() + direction);
+      daysChecked++;
+    } while (!isWorkDay(newDate) && daysChecked < maxDays);
+
+    return newDate;
+  };
+
+  // Cambiar fecha (navegar solo por días laborales)
   const changeDate = (days: number) => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + days);
-    setSelectedDate(newDate);
+    if (diasTrabajo.length === 0) {
+      // Si no hay días de trabajo definidos, navegar normalmente
+      const newDate = new Date(selectedDate);
+      newDate.setDate(newDate.getDate() + days);
+      setSelectedDate(newDate);
+    } else {
+      // Navegar al siguiente/anterior día laboral
+      const newDate = findNextWorkDay(selectedDate, days);
+      setSelectedDate(newDate);
+    }
   };
 
   // Ir a hoy
@@ -371,22 +421,32 @@ export default function AgendaEmpleadoPage() {
               Ir a Hoy
             </Button>
 
-            {/* Date Picker para saltar a cualquier fecha */}
-            <div className="flex items-center gap-2">
-              <label htmlFor="date-picker" className="text-sm font-medium text-gray-700">
-                Ir a fecha:
-              </label>
-              <input
-                id="date-picker"
-                type="date"
-                value={selectedDate.toISOString().split('T')[0]}
-                onChange={(e) => {
-                  const newDate = new Date(e.target.value + 'T12:00:00');
-                  setSelectedDate(newDate);
-                }}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
+            {/* Calendar Picker para saltar a cualquier fecha */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Calendar className="w-4 h-4 mr-2" />
+                  Seleccionar fecha
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="center">
+                <CalendarComponent
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(date) => {
+                    if (date) {
+                      setSelectedDate(date);
+                    }
+                  }}
+                  disabled={(date) => {
+                    // Solo deshabilitar días que no son de trabajo si hay días definidos
+                    if (diasTrabajo.length === 0) return false;
+                    return !isWorkDay(date);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </CardContent>
       </Card>

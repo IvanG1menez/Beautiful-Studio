@@ -1,14 +1,15 @@
 'use client';
 
-import { AlertCircle, ArrowLeft, Calendar, Check, Clock, Loader2, User } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, Clock, Loader2, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -109,6 +110,13 @@ export default function NuevoTurnoPage() {
     }
   }, [categoriaSeleccionada]);
 
+  // Auto-avanzar cuando se selecciona un servicio
+  useEffect(() => {
+    if (servicioSeleccionado && step === 1) {
+      setStep(2);
+    }
+  }, [servicioSeleccionado]);
+
   // Cargar empleados cuando se selecciona servicio
   useEffect(() => {
     if (servicioSeleccionado) {
@@ -123,6 +131,13 @@ export default function NuevoTurnoPage() {
   useEffect(() => {
     if (empleadoSeleccionado) {
       fetchDiasTrabajoEmpleado();
+    }
+  }, [empleadoSeleccionado]);
+
+  // Auto-avanzar cuando se selecciona un empleado
+  useEffect(() => {
+    if (empleadoSeleccionado && step === 2) {
+      setStep(3);
     }
   }, [empleadoSeleccionado]);
 
@@ -408,7 +423,7 @@ export default function NuevoTurnoPage() {
                   <span><strong>Profesional:</strong> {empleadoSeleccionado?.first_name} {empleadoSeleccionado?.last_name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4" />
+                  <CalendarIcon className="w-4 h-4" />
                   <span><strong>Fecha:</strong> {fechaSeleccionada && new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
                     weekday: 'long',
                     day: 'numeric',
@@ -463,7 +478,7 @@ export default function NuevoTurnoPage() {
           Volver
         </Button>
         <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-          <Calendar className="w-8 h-8" />
+          <CalendarIcon className="w-8 h-8" />
           Agendar Nuevo Turno
         </h1>
         <p className="text-gray-600 mt-1">
@@ -572,15 +587,6 @@ export default function NuevoTurnoPage() {
                 )}
               </div>
             )}
-
-            <div className="flex justify-end mt-6">
-              <Button
-                onClick={() => setStep(2)}
-                disabled={!servicioSeleccionado}
-              >
-                Continuar
-              </Button>
-            </div>
           </CardContent>
         </Card>
       )}
@@ -682,7 +688,7 @@ export default function NuevoTurnoPage() {
                               </span>
                             </div>
                             <div className="flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
+                              <CalendarIcon className="w-3 h-3" />
                               <span>{formatDiasTrabajo(empleado.dias_trabajo)}</span>
                             </div>
                           </div>
@@ -694,15 +700,9 @@ export default function NuevoTurnoPage() {
               </>
             )}
 
-            <div className="flex justify-between mt-6">
+            <div className="flex justify-start mt-6">
               <Button variant="outline" onClick={() => setStep(1)}>
                 Atrás
-              </Button>
-              <Button
-                onClick={() => setStep(3)}
-                disabled={!empleadoSeleccionado || loadingEmpleados}
-              >
-                Continuar
               </Button>
             </div>
           </CardContent>
@@ -740,7 +740,7 @@ export default function NuevoTurnoPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-gray-700">
-                  <Calendar className="w-4 h-4 text-gray-500" />
+                  <CalendarIcon className="w-4 h-4 text-gray-500" />
                   <span>{formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}</span>
                 </div>
               </div>
@@ -749,25 +749,59 @@ export default function NuevoTurnoPage() {
             {/* Selector de fecha */}
             <div>
               <Label htmlFor="fecha">Fecha</Label>
-              <Input
-                id="fecha"
-                type="date"
-                min={getMinDate()}
-                max={getMaxDate()}
-                value={fechaSeleccionada}
-                onChange={(e) => {
-                  const selectedDate = e.target.value;
-                  if (isValidWorkDay(selectedDate)) {
-                    setFechaSeleccionada(selectedDate);
-                    setHorarioSeleccionado('');
-                    setError('');
-                  } else {
-                    setFechaSeleccionada('');
-                    setError(`${empleadoSeleccionado.first_name} no trabaja ese día. Por favor selecciona un día de trabajo: ${formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}`);
-                  }
-                }}
-                className="mt-1"
-              />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start text-left font-normal mt-1"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {fechaSeleccionada ? (
+                      new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric'
+                      })
+                    ) : (
+                      <span className="text-muted-foreground">Selecciona una fecha</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={fechaSeleccionada ? new Date(fechaSeleccionada + 'T12:00:00') : undefined}
+                    onSelect={(date) => {
+                      if (date) {
+                        const dateString = date.toISOString().split('T')[0];
+                        if (isValidWorkDay(dateString)) {
+                          setFechaSeleccionada(dateString);
+                          setHorarioSeleccionado('');
+                          setError('');
+                        } else {
+                          setError(`${empleadoSeleccionado.first_name} no trabaja ese día. Por favor selecciona un día de trabajo: ${formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}`);
+                        }
+                      }
+                    }}
+                    disabled={(date) => {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const maxDate = new Date();
+                      maxDate.setDate(maxDate.getDate() + 30);
+                      maxDate.setHours(23, 59, 59, 999);
+
+                      // Deshabilitar fechas fuera del rango
+                      if (date < today || date > maxDate) return true;
+
+                      // Deshabilitar días que no son de trabajo
+                      const dateString = date.toISOString().split('T')[0];
+                      return !isValidWorkDay(dateString);
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
               <p className="text-xs text-gray-500 mt-1">
                 Días laborables: {formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)} | Hasta 30 días en adelante
               </p>
@@ -909,7 +943,7 @@ export default function NuevoTurnoPage() {
                   <p className="text-xs font-medium text-gray-500 uppercase mb-1">Fecha y Hora</p>
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-gray-900">
-                      <Calendar className="w-4 h-4 text-primary" />
+                      <CalendarIcon className="w-4 h-4 text-primary" />
                       <span className="font-medium">
                         {new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
                           weekday: 'long',
