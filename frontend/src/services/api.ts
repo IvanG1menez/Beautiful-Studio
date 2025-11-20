@@ -49,28 +49,45 @@ apiClient.interceptors.response.use(
 
 // Función helper para manejar errores de API
 export const handleApiError = (error: any): ApiError => {
+  console.error('🔴 API Error:', error);
+
   if (error.response?.data) {
     // Manejar diferentes formatos de error del backend Django
     let message = 'Error en la solicitud';
     let errors = undefined;
 
-    if (typeof error.response.data === 'string') {
-      message = error.response.data;
-    } else if (error.response.data.error) {
-      // Formato del backend: { error: "mensaje", error_code: "codigo" }
-      message = error.response.data.error;
-    } else if (error.response.data.message) {
-      message = error.response.data.message;
-    } else if (error.response.data.detail) {
-      message = error.response.data.detail;
-    } else if (error.response.data.non_field_errors) {
-      message = Array.isArray(error.response.data.non_field_errors)
-        ? error.response.data.non_field_errors[0]
-        : error.response.data.non_field_errors;
-    } else {
-      // Si hay errores de campo específicos
-      errors = error.response.data;
-      const firstError = Object.values(error.response.data)[0];
+    const data = error.response.data;
+
+    console.log('📦 Error Response Data:', data);
+
+    // Formato 1: String directo
+    if (typeof data === 'string') {
+      message = data;
+    }
+    // Formato 2: { error: "mensaje", error_code: "codigo" } (nuestro backend personalizado)
+    else if (data.error) {
+      message = data.error;
+    }
+    // Formato 3: { message: "mensaje" }
+    else if (data.message) {
+      message = data.message;
+    }
+    // Formato 4: { detail: "mensaje" } (DRF estándar)
+    else if (data.detail) {
+      message = data.detail;
+    }
+    // Formato 5: { non_field_errors: ["error1", "error2"] } (DRF validaciones)
+    else if (data.non_field_errors) {
+      message = Array.isArray(data.non_field_errors)
+        ? data.non_field_errors[0]
+        : data.non_field_errors;
+    }
+    // Formato 6: Errores de campo específicos { email: ["error"], password: ["error"] }
+    else if (typeof data === 'object' && Object.keys(data).length > 0) {
+      errors = data;
+      const firstKey = Object.keys(data)[0];
+      const firstError = data[firstKey];
+
       if (Array.isArray(firstError)) {
         message = firstError[0];
       } else if (typeof firstError === 'string') {
@@ -88,6 +105,13 @@ export const handleApiError = (error: any): ApiError => {
   if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
     return {
       message: 'Error de conexión. Verifica tu conexión a internet.',
+    };
+  }
+
+  // Error sin response (timeout, cancelado, etc.)
+  if (error.code === 'ECONNABORTED') {
+    return {
+      message: 'La solicitud tardó demasiado tiempo. Intenta nuevamente.',
     };
   }
 
@@ -115,7 +139,8 @@ export const get = async <T>(endpoint: string): Promise<T> => {
     const response = await apiClient.get<T>(endpoint);
     return response.data;
   } catch (error) {
-    throw handleApiError(error);
+    const apiError = handleApiError(error);
+    throw new Error(apiError.message);
   }
 };
 
@@ -125,7 +150,8 @@ export const post = async <T>(endpoint: string, data: any): Promise<T> => {
     const response = await apiClient.post<T>(endpoint, data);
     return response.data;
   } catch (error) {
-    throw handleApiError(error);
+    const apiError = handleApiError(error);
+    throw new Error(apiError.message);
   }
 };
 
@@ -135,7 +161,8 @@ export const put = async <T>(endpoint: string, data: any): Promise<T> => {
     const response = await apiClient.put<T>(endpoint, data);
     return response.data;
   } catch (error) {
-    throw handleApiError(error);
+    const apiError = handleApiError(error);
+    throw new Error(apiError.message);
   }
 };
 
@@ -145,7 +172,8 @@ export const patch = async <T>(endpoint: string, data: any): Promise<T> => {
     const response = await apiClient.patch<T>(endpoint, data);
     return response.data;
   } catch (error) {
-    throw handleApiError(error);
+    const apiError = handleApiError(error);
+    throw new Error(apiError.message);
   }
 };
 
@@ -154,7 +182,8 @@ export const del = async (endpoint: string): Promise<void> => {
   try {
     await apiClient.delete(endpoint);
   } catch (error) {
-    throw handleApiError(error);
+    const apiError = handleApiError(error);
+    throw new Error(apiError.message);
   }
 };
 

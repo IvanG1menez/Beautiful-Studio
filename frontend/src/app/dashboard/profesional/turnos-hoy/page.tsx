@@ -279,39 +279,40 @@ export default function TurnosHoyPage() {
   const handleCompletarTurno = async () => {
     if (!selectedTurno) return;
 
-    // Confirmación final
-    const confirmar = confirm('¿Estás seguro de que deseas finalizar este turno?');
-    if (!confirmar) {
-      return;
-    }
+    // Mostrar dialog de confirmación
+    setConfirmMessage('¿Estás seguro de que deseas finalizar este turno?');
+    setConfirmAction(() => async () => {
+      try {
+        setLoadingAction(selectedTurno.id);
+        setShowConfirmDialog(false);
 
-    try {
-      setLoadingAction(selectedTurno.id);
-      const response = await authenticatedFetch(`/turnos/${selectedTurno.id}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          estado: 'completado',
-          notas_empleado: notas || undefined,
-        }),
-      });
+        const response = await authenticatedFetch(`/turnos/${selectedTurno.id}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            estado: 'completado',
+            notas_empleado: notas || undefined,
+          }),
+        });
 
-      if (response.ok) {
-        setShowNotasDialog(false);
-        setNotas('');
-        setSelectedTurno(null);
-        await loadTurnosHoy();
-      } else {
-        const errorData = await response.json();
-        console.error('Error del servidor:', errorData);
-        const errorMessage = errorData.estado?.[0] || errorData.detail || 'Error al completar el turno';
-        throw new Error(errorMessage);
+        if (response.ok) {
+          setShowNotasDialog(false);
+          setNotas('');
+          setSelectedTurno(null);
+          await loadTurnosHoy();
+        } else {
+          const errorData = await response.json();
+          console.error('Error del servidor:', errorData);
+          const errorMessage = errorData.estado?.[0] || errorData.detail || 'Error al completar el turno';
+          throw new Error(errorMessage);
+        }
+      } catch (error: any) {
+        console.error('Error completando turno:', error);
+        alert(error.message || 'No se pudo completar el turno. Por favor, intenta de nuevo.');
+      } finally {
+        setLoadingAction(null);
       }
-    } catch (error: any) {
-      console.error('Error completando turno:', error);
-      alert(error.message || 'No se pudo completar el turno. Por favor, intenta de nuevo.');
-    } finally {
-      setLoadingAction(null);
-    }
+    });
+    setShowConfirmDialog(true);
   };
 
   const handleCancelarTurno = async () => {

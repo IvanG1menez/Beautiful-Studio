@@ -107,16 +107,28 @@ export default function LoginPage() {
       }
     } catch (error: any) {
       // Log completo para debugging
-      logDebugInfo(error);
+      console.group('🔍 Login Error Debug');
+      console.log('Error completo:', error);
+      console.log('Error.message:', error?.message);
+      console.log('Error.response:', error?.response);
+      console.log('Error.response.data:', error?.response?.data);
+      console.groupEnd();
 
       // Extraer el mensaje de error más específico
       let errorMessage = 'Error al iniciar sesión';
 
-      if (error.message) {
+      // El error ya viene procesado por handleApiError
+      if (error?.message) {
         errorMessage = error.message;
       } else if (typeof error === 'string') {
         errorMessage = error;
+      } else if (error?.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error?.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
       }
+
+      console.log('📝 Mensaje final de error:', errorMessage);
 
       setError(errorMessage);
       toast.error(errorMessage);

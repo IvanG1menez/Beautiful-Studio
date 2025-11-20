@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, Clock, Loader2, User } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Clock, Loader2, Search, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -97,6 +98,12 @@ export default function NuevoTurnoPage() {
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  // Estados para búsqueda y paginación de profesionales
+  const [searchEmpleado, setSearchEmpleado] = useState('');
+  const [filterEspecialidad, setFilterEspecialidad] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const empleadosPorPagina = 5;
 
   // Función para obtener headers con autenticación
   const getAuthHeaders = () => {
@@ -520,6 +527,34 @@ export default function NuevoTurnoPage() {
     return agrupados;
   };
 
+  // Filtrar empleados por búsqueda y especialidad
+  const empleadosFiltrados = empleados.filter((emp) => {
+    const matchesSearch = searchEmpleado === '' ||
+      emp.first_name?.toLowerCase().includes(searchEmpleado.toLowerCase()) ||
+      emp.last_name?.toLowerCase().includes(searchEmpleado.toLowerCase()) ||
+      emp.email?.toLowerCase().includes(searchEmpleado.toLowerCase()) ||
+      emp.biografia?.toLowerCase().includes(searchEmpleado.toLowerCase());
+
+    const matchesEspecialidad = filterEspecialidad === 'all' ||
+      emp.especialidades?.toLowerCase().includes(filterEspecialidad.toLowerCase());
+
+    return matchesSearch && matchesEspecialidad;
+  });
+
+  // Obtener especialidades únicas de los empleados
+  const especialidadesUnicas = [...new Set(empleados.map(e => e.especialidad_display).filter(Boolean))];
+
+  // Paginación
+  const totalPaginas = Math.ceil(empleadosFiltrados.length / empleadosPorPagina);
+  const indiceInicio = (currentPage - 1) * empleadosPorPagina;
+  const indiceFin = indiceInicio + empleadosPorPagina;
+  const empleadosPaginados = empleadosFiltrados.slice(indiceInicio, indiceFin);
+
+  // Resetear a página 1 cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchEmpleado, filterEspecialidad]);
+
   // Obtener color del badge de experiencia
   const getExperienciaColor = (nivel: number) => {
     switch (nivel) {
@@ -804,88 +839,185 @@ export default function NuevoTurnoPage() {
               </div>
             ) : (
               <>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                  <p className="text-sm text-blue-900">
-                    <strong>{empleados.length}</strong> {empleados.length === 1 ? 'profesional disponible' : 'profesionales disponibles'} para este servicio
-                  </p>
+                {/* Barra de búsqueda y filtros */}
+                <div className="space-y-4 mb-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Búsqueda por nombre */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input
+                        placeholder="Buscar por nombre, email o biografía..."
+                        value={searchEmpleado}
+                        onChange={(e) => setSearchEmpleado(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+
+                    {/* Filtro por especialidad */}
+                    {especialidadesUnicas.length > 1 && (
+                      <Select value={filterEspecialidad} onValueChange={setFilterEspecialidad}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Todas las especialidades" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas las especialidades</SelectItem>
+                          {especialidadesUnicas.map((esp) => (
+                            <SelectItem key={esp} value={esp.toLowerCase()}>
+                              {esp}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+
+                  {/* Contador de resultados */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <p className="text-sm text-blue-900">
+                      {empleadosFiltrados.length === empleados.length ? (
+                        <>
+                          <strong>{empleados.length}</strong> {empleados.length === 1 ? 'profesional disponible' : 'profesionales disponibles'} para este servicio
+                        </>
+                      ) : (
+                        <>
+                          Mostrando <strong>{empleadosFiltrados.length}</strong> de <strong>{empleados.length}</strong> profesionales
+                        </>
+                      )}
+                    </p>
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {empleados.map((empleado) => (
-                    <div
-                      key={empleado.id}
-                      onClick={() => setEmpleadoSeleccionado(empleado)}
-                      className={`p-4 border rounded-lg cursor-pointer transition-all ${empleadoSeleccionado?.id === empleado.id
-                        ? 'border-primary bg-primary/5 shadow-md'
-                        : 'border-gray-200 hover:border-primary/50 hover:shadow-sm'
-                        }`}
+
+                {/* Lista de profesionales paginada */}
+                {empleadosFiltrados.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <User className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <p className="text-gray-600">
+                      No se encontraron profesionales con los criterios de búsqueda
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearchEmpleado('');
+                        setFilterEspecialidad('all');
+                      }}
+                      className="mt-4"
                     >
-                      <div className="flex items-start gap-3">
-                        <div className="w-14 h-14 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center shrink-0">
-                          <User className="w-7 h-7 text-primary" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between mb-1">
-                            <h3 className="font-semibold text-gray-900">
-                              {empleado.first_name} {empleado.last_name}
-                            </h3>
-                            {empleadoSeleccionado?.id === empleado.id && (
-                              <Check className="w-5 h-5 text-primary shrink-0" />
-                            )}
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            <Badge variant="outline" className="text-xs">
-                              {empleado.especialidad_display}
-                            </Badge>
-                            {empleado.nivel_experiencia && (
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${getExperienciaColor(empleado.nivel_experiencia.nivel)}`}
-                              >
-                                {getExperienciaIcon(empleado.nivel_experiencia.nivel)} {empleado.nivel_experiencia.nivel_display}
-                              </Badge>
-                            )}
-                          </div>
-
-                          {empleado.biografia && (
-                            <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                              {empleado.biografia}
-                            </p>
-                          )}
-
-                          <div className="text-xs text-gray-500 space-y-1">
-                            {empleado.horarios_detallados && empleado.horarios_detallados.length > 0 ? (
-                              <>
-                                <div className="flex items-start gap-1">
-                                  <Clock className="w-3 h-3 mt-0.5 shrink-0" />
-                                  <div className="space-y-0.5">
-                                    {Object.entries(getHorariosAgrupados(empleado)).map(([dia, horarios]) => (
-                                      <div key={dia} className="text-xs">
-                                        <span className="font-medium">{dia}:</span>{' '}
-                                        {formatearRangosHorarios(horarios)}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                <span>
-                                  {empleado.horario_entrada.slice(0, 5)} - {empleado.horario_salida.slice(0, 5)}
-                                </span>
+                      Limpiar filtros
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      {empleadosPaginados.map((empleado) => (
+                        <div
+                          key={empleado.id}
+                          onClick={() => setEmpleadoSeleccionado(empleado)}
+                          className={`p-4 border rounded-lg cursor-pointer transition-all ${empleadoSeleccionado?.id === empleado.id
+                            ? 'border-primary bg-primary/5 shadow-md'
+                            : 'border-gray-200 hover:border-primary/50 hover:shadow-sm'
+                            }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-14 h-14 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center shrink-0">
+                              <User className="w-7 h-7 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between mb-1">
+                                <h3 className="font-semibold text-gray-900">
+                                  {empleado.first_name} {empleado.last_name}
+                                </h3>
+                                {empleadoSeleccionado?.id === empleado.id && (
+                                  <Check className="w-5 h-5 text-primary shrink-0" />
+                                )}
                               </div>
-                            )}
-                            <div className="flex items-center gap-1">
-                              <CalendarIcon className="w-3 h-3" />
-                              <span>{formatDiasTrabajo(empleado.dias_trabajo)}</span>
+
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                <Badge variant="outline" className="text-xs">
+                                  {empleado.especialidad_display}
+                                </Badge>
+                                {empleado.nivel_experiencia && (
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs ${getExperienciaColor(empleado.nivel_experiencia.nivel)}`}
+                                  >
+                                    {getExperienciaIcon(empleado.nivel_experiencia.nivel)} {empleado.nivel_experiencia.nivel_display}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {empleado.biografia && (
+                                <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                                  {empleado.biografia}
+                                </p>
+                              )}
+
+                              <div className="text-xs text-gray-500 space-y-1">
+                                {empleado.horarios_detallados && empleado.horarios_detallados.length > 0 ? (
+                                  <>
+                                    <div className="flex items-start gap-1">
+                                      <Clock className="w-3 h-3 mt-0.5 shrink-0" />
+                                      <div className="space-y-0.5">
+                                        {Object.entries(getHorariosAgrupados(empleado)).map(([dia, horarios]) => (
+                                          <div key={dia} className="text-xs">
+                                            <span className="font-medium">{dia}:</span>{' '}
+                                            {formatearRangosHorarios(horarios)}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    <span>
+                                      {empleado.horario_entrada.slice(0, 5)} - {empleado.horario_salida.slice(0, 5)}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-1">
+                                  <CalendarIcon className="w-3 h-3" />
+                                  <span>{formatDiasTrabajo(empleado.dias_trabajo)}</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+
+                    {/* Controles de paginación */}
+                    {totalPaginas > 1 && (
+                      <div className="flex items-center justify-between border-t pt-4">
+                        <div className="text-sm text-gray-600">
+                          Página {currentPage} de {totalPaginas} • Mostrando {indiceInicio + 1}-{Math.min(indiceFin, empleadosFiltrados.length)} de {empleadosFiltrados.length}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                          >
+                            <ChevronLeft className="w-4 h-4 mr-1" />
+                            Anterior
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(p => Math.min(totalPaginas, p + 1))}
+                            disabled={currentPage === totalPaginas}
+                          >
+                            Siguiente
+                            <ChevronRight className="w-4 h-4 ml-1" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             )}
 

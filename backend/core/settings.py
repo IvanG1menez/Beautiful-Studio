@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "apps.servicios",
     "apps.clientes",
     "apps.empleados",
+    "apps.encuestas",
     "apps.notificaciones",
 ]
 
@@ -193,6 +194,12 @@ else:
 # Custom User Model
 AUTH_USER_MODEL = "users.User"
 
+# Authentication Backends - Usar email para login
+AUTHENTICATION_BACKENDS = [
+    'apps.users.backends.EmailBackend',  # Backend personalizado para email
+    'django.contrib.auth.backends.ModelBackend',  # Fallback al backend por defecto
+]
+
 # Django JET Configuration
 JET_DEFAULT_THEME = "light-blue"
 JET_SIDE_MENU_COMPACT = True
@@ -216,3 +223,6 @@ EMAIL_PORT = config('EMAIL_PORT', default=2525, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Beautiful Studio <noreply@beautifulstudio.com>')
+
+# Frontend URL for email links
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')

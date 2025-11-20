@@ -307,13 +307,22 @@ export default function AgendaEmpleadoPage() {
   const confirmarCambioEstado = async () => {
     if (!turnoActual || !nuevoEstado) return;
 
-    // Confirmación final
+    // Confirmación final usando dialog
     if (nuevoEstado === 'completado') {
-      const confirmar = confirm('¿Estás seguro de que deseas finalizar este turno?');
-      if (!confirmar) {
-        return;
-      }
+      setConfirmMessage('¿Estás seguro de que deseas finalizar este turno?');
+      setConfirmAction(() => async () => {
+        await ejecutarCambioEstado();
+        setShowConfirmDialog(false);
+      });
+      setShowConfirmDialog(true);
+      return;
     }
+
+    await ejecutarCambioEstado();
+  };
+
+  const ejecutarCambioEstado = async () => {
+    if (!turnoActual || !nuevoEstado) return;
 
     try {
       setProcesando(true);
@@ -543,8 +552,8 @@ export default function AgendaEmpleadoPage() {
 
                         {/* Notas del cliente - SIEMPRE visible */}
                         <div className={`text-sm p-3 rounded-lg border ${turno.notas_cliente
-                            ? 'bg-blue-50 border-blue-200'
-                            : 'bg-gray-50 border-gray-200'
+                          ? 'bg-blue-50 border-blue-200'
+                          : 'bg-gray-50 border-gray-200'
                           }`}>
                           <div className="flex items-start gap-2">
                             <span className={`font-semibold ${turno.notas_cliente ? 'text-blue-900' : 'text-gray-600'

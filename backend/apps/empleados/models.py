@@ -2,6 +2,7 @@
 
 from django.db import models
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class Empleado(models.Model):
@@ -48,6 +49,22 @@ class Empleado(models.Model):
     biografia = models.TextField(
         blank=True, null=True, verbose_name="Biografía profesional"
     )
+    
+    # Campos de ranking y métricas (Módulo Inteligente)
+    promedio_calificacion = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        default=5.0,
+        validators=[MinValueValidator(0), MaxValueValidator(10)],
+        verbose_name="Promedio de calificación",
+        help_text="Promedio de todas las encuestas recibidas (0-10)"
+    )
+    total_encuestas = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Total de encuestas",
+        help_text="Número total de encuestas respondidas"
+    )
+    
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
     )

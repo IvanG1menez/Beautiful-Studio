@@ -107,10 +107,13 @@ class Turno(models.Model):
 
     def clean(self):
         """Validaciones personalizadas"""
-        if self.fecha_hora and self.fecha_hora < timezone.now():
-            raise ValidationError(
-                "No se puede programar un turno en el pasado."
-            )
+        # TODO: Reactivar validación de fecha en el futuro
+        # Por ahora está desactivada para permitir finalizar turnos en cualquier momento
+        # if self.fecha_hora and self.fecha_hora < timezone.now():
+        #     raise ValidationError(
+        #         "No se puede programar un turno en el pasado."
+        #     )
+        pass
 
     @property
     def fecha_hora_fin(self):

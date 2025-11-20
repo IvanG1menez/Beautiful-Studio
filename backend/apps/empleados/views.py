@@ -38,10 +38,17 @@ class EmpleadoListView(generics.ListCreateAPIView):
     Parámetros de consulta opcionales:
     - servicio: ID del servicio para filtrar profesionales que pueden realizarlo
     - disponible: true/false para filtrar por disponibilidad
+    - ordering: Campo para ordenar (por defecto: -promedio_calificacion)
+    
+    Módulo Inteligente:
+    - Por defecto ordena por promedio_calificacion descendente (ranking)
+    - Permite ordenar por: promedio_calificacion, total_encuestas, nombre
     """
 
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPageNumberPagination
+    ordering_fields = ['promedio_calificacion', 'total_encuestas', 'user__first_name']
+    ordering = ['-promedio_calificacion']  # Ranking por defecto
 
     def get_queryset(self):
         queryset = Empleado.objects.select_related("user")
@@ -57,6 +64,19 @@ class EmpleadoListView(generics.ListCreateAPIView):
         if disponible is not None:
             is_disponible = disponible.lower() == "true"
             queryset = queryset.filter(is_disponible=is_disponible)
+        
+        # Aplicar ordenamiento (por defecto: ranking descendente)
+        ordering_param = self.request.query_params.get('ordering', '-promedio_calificacion')
+        if ordering_param:
+            # Validar que el campo sea permitido
+            field = ordering_param.lstrip('-')
+            if field in self.ordering_fields or ordering_param in ['-promedio_calificacion', 'promedio_calificacion']:
+                queryset = queryset.order_by(ordering_param)
+            else:
+                # Usar ordenamiento por defecto si el campo no es válido
+                queryset = queryset.order_by('-promedio_calificacion')
+        else:
+            queryset = queryset.order_by('-promedio_calificacion')
 
         return queryset.distinct()
 

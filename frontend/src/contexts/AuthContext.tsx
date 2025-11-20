@@ -191,8 +191,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(userData);
     } catch (error: any) {
       // Re-lanzar el error con el mensaje procesado
-      const errorMessage = error.message || 'Error al iniciar sesión';
-      console.error('Error de login:', error);
+      const errorMessage = error?.message || 'Error al iniciar sesión';
+      console.error('Error de login:', errorMessage);
       throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -206,8 +206,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(response.user);
     } catch (error: any) {
       // Re-lanzar el error con el mensaje procesado
-      const errorMessage = error.message || 'Error al registrar usuario';
-      console.error('Error de registro:', error);
+      const errorMessage = error?.message || 'Error al registrar usuario';
+      console.error('Error de registro:', errorMessage);
       throw new Error(errorMessage);
     } finally {
       setIsLoading(false);

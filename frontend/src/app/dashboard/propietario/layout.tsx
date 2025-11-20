@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
+  MessageSquare,
   Scissors,
   User,
   Users
@@ -64,6 +65,12 @@ export default function DashboardPropietarioLayout({
       icon: Scissors,
       href: '/dashboard/propietario/servicios',
       active: pathname?.startsWith('/dashboard/propietario/servicios'),
+    },
+    {
+      label: 'Encuestas',
+      icon: MessageSquare,
+      href: '/dashboard/propietario/encuestas',
+      active: pathname?.startsWith('/dashboard/propietario/encuestas'),
     },
     {
       label: 'Notificaciones',

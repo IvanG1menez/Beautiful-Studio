@@ -1,0 +1,11 @@
+from django.apps import AppConfig
+
+
+class EncuestasConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.encuestas'
+    verbose_name = 'Encuestas de Satisfacción'
+    
+    def ready(self):
+        """Importar signals cuando la app esté lista"""
+        import apps.encuestas.signals
