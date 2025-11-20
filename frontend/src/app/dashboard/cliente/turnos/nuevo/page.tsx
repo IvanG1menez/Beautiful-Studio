@@ -31,6 +31,16 @@ interface Servicio {
   is_active: boolean;
 }
 
+interface HorarioDetallado {
+  id: number;
+  empleado: number;
+  dia_semana: number;
+  dia_semana_display: string;
+  hora_inicio: string;
+  hora_fin: string;
+  is_active: boolean;
+}
+
 interface Empleado {
   id: number;
   username: string;
@@ -48,6 +58,7 @@ interface Empleado {
     nivel: number;
     nivel_display: string;
   };
+  horarios_detallados?: HorarioDetallado[];
 }
 
 interface HorarioDisponible {
@@ -85,6 +96,7 @@ export default function NuevoTurnoPage() {
   const [loadingHorarios, setLoadingHorarios] = useState(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   // Función para obtener headers con autenticación
   const getAuthHeaders = () => {
@@ -208,9 +220,32 @@ export default function NuevoTurnoPage() {
         const data = await response.json();
         const empleadosDisponibles = data.results || data;
         console.log('Empleados disponibles:', empleadosDisponibles.length);
-        setEmpleados(empleadosDisponibles);
 
-        if (empleadosDisponibles.length === 0) {
+        // Cargar horarios detallados para cada empleado
+        const empleadosConHorarios = await Promise.all(
+          empleadosDisponibles.map(async (empleado: Empleado) => {
+            try {
+              const horariosResponse = await fetch(
+                `${API_BASE_URL}/empleados/horarios/?empleado=${empleado.id}`,
+                { headers: getAuthHeaders() }
+              );
+              if (horariosResponse.ok) {
+                const horariosData = await horariosResponse.json();
+                return {
+                  ...empleado,
+                  horarios_detallados: horariosData.results || horariosData
+                };
+              }
+            } catch (error) {
+              console.error(`Error cargando horarios para empleado ${empleado.id}:`, error);
+            }
+            return empleado;
+          })
+        );
+
+        setEmpleados(empleadosConHorarios);
+
+        if (empleadosConHorarios.length === 0) {
           setError(`No hay profesionales disponibles para el servicio "${servicioSeleccionado.nombre}". Por favor, intenta con otro servicio o contacta al salón.`);
         }
       } else {
@@ -279,6 +314,11 @@ export default function NuevoTurnoPage() {
       return;
     }
 
+    // Prevenir doble submit
+    if (loading) {
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -297,16 +337,28 @@ export default function NuevoTurnoPage() {
       // Crear el turno
       const fechaHora = `${fechaSeleccionada}T${horarioSeleccionado}:00`;
 
-      const turnoData = {
+      const turnoData: any = {
         cliente: clienteData.id,
         empleado: empleadoSeleccionado.id,
         servicio: servicioSeleccionado.id,
         fecha_hora: fechaHora,
-        notas_cliente: notasCliente || '',
-        precio_final: parseFloat(servicioSeleccionado.precio) || servicioSeleccionado.precio_base || 0
       };
 
-      console.log('Enviando turno:', turnoData);
+      // Agregar notas solo si hay contenido
+      if (notasCliente.trim()) {
+        turnoData.notas_cliente = notasCliente.trim();
+      }
+
+      console.log('=== DATOS DEL TURNO ===');
+      console.log('Cliente ID:', clienteData.id);
+      console.log('Empleado ID:', empleadoSeleccionado.id);
+      console.log('Servicio ID:', servicioSeleccionado.id);
+      console.log('Fecha seleccionada:', fechaSeleccionada);
+      console.log('Horario seleccionado:', horarioSeleccionado);
+      console.log('Fecha/Hora completa:', fechaHora);
+      console.log('Notas:', notasCliente);
+      console.log('Objeto completo:', turnoData);
+      console.log('JSON a enviar:', JSON.stringify(turnoData, null, 2));
 
       const response = await fetch(`${API_BASE_URL}/turnos/`, {
         method: 'POST',
@@ -314,22 +366,42 @@ export default function NuevoTurnoPage() {
         body: JSON.stringify(turnoData)
       });
 
+      console.log('Response status:', response.status);
+
       if (response.ok) {
         setSuccess(true);
         setTimeout(() => {
           router.push('/dashboard/cliente/turnos');
         }, 2000);
       } else {
-        const errorData = await response.json();
+        const responseText = await response.text();
+        console.error('Error response text:', responseText);
+
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch {
+          errorData = { error: responseText };
+        }
+
         console.error('Error del servidor:', errorData);
 
         // Manejar errores de validación
         if (errorData.fecha_hora) {
-          setError(errorData.fecha_hora[0] || errorData.fecha_hora);
+          // Puede ser un array o un string
+          const mensajeError = Array.isArray(errorData.fecha_hora)
+            ? errorData.fecha_hora[0]
+            : errorData.fecha_hora;
+          setError(mensajeError);
         } else if (errorData.detail) {
           setError(errorData.detail);
         } else if (errorData.error) {
           setError(errorData.error);
+        } else if (errorData.notas_cliente) {
+          const mensajeError = Array.isArray(errorData.notas_cliente)
+            ? errorData.notas_cliente[0]
+            : errorData.notas_cliente;
+          setError(mensajeError);
         } else {
           setError('Error al crear el turno. Por favor verifica los datos.');
         }
@@ -340,6 +412,32 @@ export default function NuevoTurnoPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Manejar salida con confirmación
+  const handleExit = (destination: string) => {
+    // Si ya completó el turno o no ha avanzado, puede salir directo
+    if (success || step === 1) {
+      router.push(destination);
+      return;
+    }
+
+    // Si está en proceso de reserva, pedir confirmación
+    setShowExitConfirm(true);
+  };
+
+  const confirmExit = (destination: string) => {
+    setShowExitConfirm(false);
+    // Resetear todo el estado
+    setStep(1);
+    setCategoriaSeleccionada(null);
+    setServicioSeleccionado(null);
+    setEmpleadoSeleccionado(null);
+    setFechaSeleccionada('');
+    setHorarioSeleccionado('');
+    setNotasCliente('');
+    setError('');
+    router.push(destination);
   };
 
   // Obtener fecha mínima (hoy) y máxima (30 días)
@@ -375,6 +473,51 @@ export default function NuevoTurnoPage() {
       'D': 'Dom'
     };
     return dias.split(',').map(d => diasMap[d.trim()] || d).join(', ');
+  };
+
+  // Obtener horarios del empleado para un día específico
+  const getHorariosPorDia = (empleado: Empleado, diaSemana: number): HorarioDetallado[] => {
+    if (!empleado.horarios_detallados || empleado.horarios_detallados.length === 0) {
+      return [];
+    }
+    return empleado.horarios_detallados
+      .filter(h => h.dia_semana === diaSemana && h.is_active)
+      .sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
+  };
+
+  // Formatear rangos horarios para mostrar
+  const formatearRangosHorarios = (horarios: HorarioDetallado[]): string => {
+    if (!horarios || horarios.length === 0) {
+      return 'Sin horarios';
+    }
+    return horarios
+      .map(h => `${h.hora_inicio.slice(0, 5)} - ${h.hora_fin.slice(0, 5)}`)
+      .join(', ');
+  };
+
+  // Obtener todos los horarios agrupados por día para mostrar en resumen
+  const getHorariosAgrupados = (empleado: Empleado): { [key: string]: HorarioDetallado[] } => {
+    if (!empleado.horarios_detallados || empleado.horarios_detallados.length === 0) {
+      return {};
+    }
+
+    const agrupados: { [key: string]: HorarioDetallado[] } = {};
+    empleado.horarios_detallados.forEach(horario => {
+      if (horario.is_active) {
+        const dia = horario.dia_semana_display;
+        if (!agrupados[dia]) {
+          agrupados[dia] = [];
+        }
+        agrupados[dia].push(horario);
+      }
+    });
+
+    // Ordenar horarios dentro de cada día
+    Object.keys(agrupados).forEach(dia => {
+      agrupados[dia].sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
+    });
+
+    return agrupados;
   };
 
   // Obtener color del badge de experiencia
@@ -467,11 +610,41 @@ export default function NuevoTurnoPage() {
 
   return (
     <div className="container mx-auto p-6">
+      {/* Diálogo de confirmación para salir */}
+      {showExitConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="max-w-md mx-4">
+            <CardHeader>
+              <CardTitle>¿Cancelar reserva?</CardTitle>
+              <CardDescription>
+                Si sales ahora, perderás el progreso de tu reserva actual.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-3 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowExitConfirm(false)}
+                >
+                  Continuar reserva
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => confirmExit('/dashboard/cliente')}
+                >
+                  Sí, cancelar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6">
         <Button
           variant="ghost"
-          onClick={() => router.back()}
+          onClick={() => step > 1 ? setStep(step - 1) : handleExit('/dashboard/cliente')}
           className="mb-4"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -681,12 +854,28 @@ export default function NuevoTurnoPage() {
                           )}
 
                           <div className="text-xs text-gray-500 space-y-1">
-                            <div className="flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              <span>
-                                {empleado.horario_entrada.slice(0, 5)} - {empleado.horario_salida.slice(0, 5)}
-                              </span>
-                            </div>
+                            {empleado.horarios_detallados && empleado.horarios_detallados.length > 0 ? (
+                              <>
+                                <div className="flex items-start gap-1">
+                                  <Clock className="w-3 h-3 mt-0.5 shrink-0" />
+                                  <div className="space-y-0.5">
+                                    {Object.entries(getHorariosAgrupados(empleado)).map(([dia, horarios]) => (
+                                      <div key={dia} className="text-xs">
+                                        <span className="font-medium">{dia}:</span>{' '}
+                                        {formatearRangosHorarios(horarios)}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span>
+                                  {empleado.horario_entrada.slice(0, 5)} - {empleado.horario_salida.slice(0, 5)}
+                                </span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1">
                               <CalendarIcon className="w-3 h-3" />
                               <span>{formatDiasTrabajo(empleado.dias_trabajo)}</span>
@@ -732,18 +921,34 @@ export default function NuevoTurnoPage() {
                   <p className="text-sm text-gray-600">{empleadoSeleccionado.especialidad_display}</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="flex items-center gap-2 text-gray-700">
-                  <Clock className="w-4 h-4 text-gray-500" />
-                  <span>
-                    {empleadoSeleccionado.horario_entrada.slice(0, 5)} - {empleadoSeleccionado.horario_salida.slice(0, 5)}
-                  </span>
+              {empleadoSeleccionado.horarios_detallados && empleadoSeleccionado.horarios_detallados.length > 0 ? (
+                <div className="space-y-1 text-sm text-gray-700">
+                  <div className="flex items-start gap-2">
+                    <Clock className="w-4 h-4 text-gray-500 mt-0.5 shrink-0" />
+                    <div className="space-y-1">
+                      {Object.entries(getHorariosAgrupados(empleadoSeleccionado)).map(([dia, horarios]) => (
+                        <div key={dia}>
+                          <span className="font-medium">{dia}:</span>{' '}
+                          {formatearRangosHorarios(horarios)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-gray-700">
-                  <CalendarIcon className="w-4 h-4 text-gray-500" />
-                  <span>{formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}</span>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <Clock className="w-4 h-4 text-gray-500" />
+                    <span>
+                      {empleadoSeleccionado.horario_entrada.slice(0, 5)} - {empleadoSeleccionado.horario_salida.slice(0, 5)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <CalendarIcon className="w-4 h-4 text-gray-500" />
+                    <span>{formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Selector de fecha */}

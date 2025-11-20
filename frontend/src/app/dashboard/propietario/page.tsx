@@ -22,7 +22,6 @@ import {
   Settings,
   Shield,
   TrendingUp,
-  UserPlus,
   Users
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -33,8 +32,11 @@ interface DashboardStats {
   total_empleados: number;
   turnos_hoy: number;
   ingresos_mes: number;
-  turnos_pendientes: number;
   turnos_completados_hoy: number;
+  comision_pendiente: number;
+  turnos_pendientes_pago: number;
+  turnos_pendientes_aceptacion: number;
+  turnos_proximos_48h: number;
 }
 
 interface TurnoAdmin {
@@ -62,10 +64,12 @@ interface TurnoAdmin {
 export default function DashboardAdminPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [turnosRecientes, setTurnosRecientes] = useState<TurnoAdmin[]>([]);
+  const [turnosAccion, setTurnosAccion] = useState<TurnoAdmin[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [accionTab, setAccionTab] = useState<'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion'>('proximos_48h');
 
   const { user } = useAuth();
   const router = useRouter();
@@ -139,7 +143,7 @@ export default function DashboardAdminPage() {
     try {
       await Promise.all([
         loadStats(),
-        loadTurnosRecientes()
+        loadTurnosAccion('proximos_48h')
       ]);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -152,7 +156,7 @@ export default function DashboardAdminPage() {
   // Cargar estadísticas generales
   const loadStats = async () => {
     try {
-      const response = await authenticatedFetch('/api/servicios/');
+      const response = await authenticatedFetch('/turnos/metricas-propietario/');
 
       if (response.ok) {
         const data = await response.json();
@@ -165,20 +169,26 @@ export default function DashboardAdminPage() {
     }
   };
 
-  // Cargar turnos recientes
-  const loadTurnosRecientes = async () => {
+  // Cargar turnos que requieren acción
+  const loadTurnosAccion = async (tipo: 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion') => {
     try {
-      const response = await authenticatedFetch('/api/turnos/?ordering=-fecha_hora&limit=10');
+      const response = await authenticatedFetch(`/turnos/turnos-accion/?tipo=${tipo}&limit=20`);
 
       if (response.ok) {
         const data = await response.json();
-        setTurnosRecientes(data.results || []);
+        setTurnosAccion(data.turnos || []);
       } else {
-        console.error('Error fetching turnos recientes:', response.status);
+        console.error('Error fetching turnos acción:', response.status);
       }
     } catch (error) {
-      console.error('Error loading turnos recientes:', error);
+      console.error('Error loading turnos acción:', error);
     }
+  };
+
+  // Manejar cambio de pestaña de acción
+  const handleAccionTabChange = (tipo: 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion') => {
+    setAccionTab(tipo);
+    loadTurnosAccion(tipo);
   };
 
   // Función para formatear fecha y hora
@@ -249,18 +259,11 @@ export default function DashboardAdminPage() {
             </div>
             <div className="flex space-x-3">
               <Button
-                onClick={() => router.push('/admin/empleados')}
-                variant="outline"
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                Gestionar Profesionales
-              </Button>
-              <Button
-                onClick={() => router.push('/admin/configuracion')}
-                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                onClick={() => router.push('/dashboard/propietario/usuarios')}
+                className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
               >
                 <Settings className="w-4 h-4 mr-2" />
-                Configuración
+                Configuración Global
               </Button>
             </div>
           </div>
@@ -285,17 +288,80 @@ export default function DashboardAdminPage() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="overview">Resumen</TabsTrigger>
             <TabsTrigger value="turnos">Turnos</TabsTrigger>
             <TabsTrigger value="reportes">Reportes</TabsTrigger>
-            <TabsTrigger value="gestion">Gestión</TabsTrigger>
           </TabsList>
 
           {/* Tab: Resumen */}
           <TabsContent value="overview" className="space-y-6">
-            {/* Tarjetas de estadísticas */}
+            {/* Tarjetas de estadísticas principales */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Ingresos del Mes</CardTitle>
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">
+                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.ingresos_mes?.toFixed(2) || 0}`}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <TrendingUp className="w-3 h-3 inline mr-1" />
+                    Mes actual
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Turnos Hoy</CardTitle>
+                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_hoy || 0}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {stats?.turnos_completados_hoy || 0} completados
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-orange-200 bg-orange-50">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-orange-900">Comisión Pendiente</CardTitle>
+                  <DollarSign className="h-4 w-4 text-orange-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-orange-700">
+                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
+                  </div>
+                  <p className="text-xs text-orange-600">
+                    Por pagar a profesionales
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-red-200 bg-red-50">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-red-900">Turnos Pendientes de Pago</CardTitle>
+                  <AlertCircle className="h-4 w-4 text-red-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-red-700">
+                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_pendientes_pago || 0}
+                  </div>
+                  <p className="text-xs text-red-600">
+                    Requieren cierre de caja
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Estadísticas secundarias */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Total Clientes</CardTitle>
@@ -324,100 +390,210 @@ export default function DashboardAdminPage() {
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Turnos Hoy</CardTitle>
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">Próximos 48h</CardTitle>
+                  <Clock className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_hoy || 0}
+                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_proximos_48h || 0}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {stats?.turnos_completados_hoy || 0} completados
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Ingresos del Mes</CardTitle>
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.ingresos_mes || 0}`}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    <TrendingUp className="w-3 h-3 inline mr-1" />
-                    Mes actual
-                  </p>
+                  <p className="text-xs text-muted-foreground">Turnos programados</p>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Turnos Recientes */}
+            {/* Acción Requerida / Próximos Turnos */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Clock className="w-5 h-5 mr-2" />
-                  Turnos Recientes
+                  <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                  Acción Requerida / Próximos Turnos
                 </CardTitle>
                 <CardDescription>
-                  Últimas citas programadas en el sistema
+                  Turnos que requieren tu atención inmediata
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {loadingData ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                    <span className="ml-2">Cargando turnos...</span>
-                  </div>
-                ) : turnosRecientes.length > 0 ? (
-                  <div className="space-y-4">
-                    {turnosRecientes.slice(0, 5).map((turno) => {
-                      const dateFormatted = formatDate(turno.fecha_hora);
-                      const timeFormatted = formatTime(turno.fecha_hora);
-                      return (
-                        <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                          <div className="flex items-center space-x-4">
-                            {getEstadoIcon(turno.estado)}
-                            <div>
-                              <div className="flex items-center space-x-2">
-                                <span className="font-medium">{turno.servicio.nombre}</span>
-                                <Badge variant={getEstadoBadgeVariant(turno.estado)}>
-                                  {turno.estado}
-                                </Badge>
+                <Tabs value={accionTab} onValueChange={(value) => handleAccionTabChange(value as any)}>
+                  <TabsList className="grid w-full grid-cols-3 mb-4">
+                    <TabsTrigger value="proximos_48h" className="relative">
+                      Próximos (48h)
+                      {stats && stats.turnos_proximos_48h > 0 && (
+                        <Badge className="ml-2 bg-blue-500">{stats.turnos_proximos_48h}</Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="pendientes_pago" className="relative">
+                      Pendientes de Pago
+                      {stats && stats.turnos_pendientes_pago > 0 && (
+                        <Badge className="ml-2 bg-red-500">{stats.turnos_pendientes_pago}</Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="pendientes_aceptacion" className="relative">
+                      Pendientes de Aceptación
+                      {stats && stats.turnos_pendientes_aceptacion > 0 && (
+                        <Badge className="ml-2 bg-orange-500">{stats.turnos_pendientes_aceptacion}</Badge>
+                      )}
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="proximos_48h">
+                    {loadingData ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span className="ml-2">Cargando turnos...</span>
+                      </div>
+                    ) : turnosAccion.length > 0 ? (
+                      <div className="space-y-4">
+                        {turnosAccion.map((turno) => {
+                          const dateFormatted = formatDate(turno.fecha_hora);
+                          const timeFormatted = formatTime(turno.fecha_hora);
+                          return (
+                            <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                              <div className="flex items-center space-x-4">
+                                {getEstadoIcon(turno.estado)}
+                                <div>
+                                  <div className="flex items-center space-x-2">
+                                    <span className="font-medium">{turno.servicio.nombre}</span>
+                                    <Badge variant={getEstadoBadgeVariant(turno.estado)}>
+                                      {turno.estado}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-sm text-gray-600">
+                                    {turno.cliente.nombre_completo} • {turno.empleado.nombre_completo}
+                                  </p>
+                                  <p className="text-sm text-gray-500">
+                                    {dateFormatted} - {timeFormatted}
+                                  </p>
+                                </div>
                               </div>
-                              <p className="text-sm text-gray-600">
-                                {turno.cliente.nombre_completo} • {turno.empleado.nombre_completo}
-                              </p>
-                              <p className="text-sm text-gray-500">
-                                {dateFormatted} - {timeFormatted}
-                              </p>
+                              <div className="text-right">
+                                <p className="font-semibold text-green-600">
+                                  ${turno.precio_final || turno.servicio.precio}
+                                </p>
+                                <div className="flex space-x-1 mt-1">
+                                  <Button size="sm" variant="ghost">
+                                    <Eye className="w-3 h-3" />
+                                  </Button>
+                                  <Button size="sm" variant="ghost">
+                                    <Edit className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-semibold text-green-600">
-                              ${turno.precio_final || turno.servicio.precio}
-                            </p>
-                            <div className="flex space-x-1 mt-1">
-                              <Button size="sm" variant="ghost">
-                                <Eye className="w-3 h-3" />
-                              </Button>
-                              <Button size="sm" variant="ghost">
-                                <Edit className="w-3 h-3" />
-                              </Button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                        <p className="text-gray-500">No hay turnos próximos en las siguientes 48 horas</p>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="pendientes_pago">
+                    {loadingData ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span className="ml-2">Cargando turnos...</span>
+                      </div>
+                    ) : turnosAccion.length > 0 ? (
+                      <div className="space-y-4">
+                        {turnosAccion.map((turno) => {
+                          const dateFormatted = formatDate(turno.fecha_hora);
+                          const timeFormatted = formatTime(turno.fecha_hora);
+                          return (
+                            <div key={turno.id} className="flex items-center justify-between p-4 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100">
+                              <div className="flex items-center space-x-4">
+                                <DollarSign className="w-5 h-5 text-red-600" />
+                                <div>
+                                  <div className="flex items-center space-x-2">
+                                    <span className="font-medium">{turno.servicio.nombre}</span>
+                                    <Badge className="bg-red-500">Pendiente Pago</Badge>
+                                  </div>
+                                  <p className="text-sm text-gray-700">
+                                    Profesional: {turno.empleado.nombre_completo}
+                                  </p>
+                                  <p className="text-sm text-gray-600">
+                                    Completado: {dateFormatted} - {timeFormatted}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-red-700">
+                                  ${turno.precio_final || turno.servicio.precio}
+                                </p>
+                                <Button size="sm" className="mt-2 bg-red-600 hover:bg-red-700">
+                                  Marcar como Pagado
+                                </Button>
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No hay turnos recientes</p>
-                  </div>
-                )}
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
+                        <p className="text-gray-500">No hay turnos pendientes de pago</p>
+                        <p className="text-sm text-gray-400 mt-2">¡Todos los pagos están al día!</p>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="pendientes_aceptacion">
+                    {loadingData ? (
+                      <div className="flex items-center justify-center py-8">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span className="ml-2">Cargando turnos...</span>
+                      </div>
+                    ) : turnosAccion.length > 0 ? (
+                      <div className="space-y-4">
+                        {turnosAccion.map((turno) => {
+                          const dateFormatted = formatDate(turno.fecha_hora);
+                          const timeFormatted = formatTime(turno.fecha_hora);
+                          return (
+                            <div key={turno.id} className="flex items-center justify-between p-4 border border-orange-200 bg-orange-50 rounded-lg hover:bg-orange-100">
+                              <div className="flex items-center space-x-4">
+                                <Clock className="w-5 h-5 text-orange-600" />
+                                <div>
+                                  <div className="flex items-center space-x-2">
+                                    <span className="font-medium">{turno.servicio.nombre}</span>
+                                    <Badge className="bg-orange-500">Pendiente</Badge>
+                                  </div>
+                                  <p className="text-sm text-gray-700">
+                                    {turno.cliente.nombre_completo} → {turno.empleado.nombre_completo}
+                                  </p>
+                                  <p className="text-sm text-gray-600">
+                                    Solicitado para: {dateFormatted} - {timeFormatted}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold text-orange-700">
+                                  ${turno.precio_final || turno.servicio.precio}
+                                </p>
+                                <div className="flex space-x-2 mt-2">
+                                  <Button size="sm" className="bg-green-600 hover:bg-green-700">
+                                    Aceptar
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="text-red-600 border-red-600">
+                                    Rechazar
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
+                        <p className="text-gray-500">No hay solicitudes pendientes</p>
+                        <p className="text-sm text-gray-400 mt-2">Todas las solicitudes han sido procesadas</p>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           </TabsContent>
@@ -466,58 +642,6 @@ export default function DashboardAdminPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Tab: Gestión */}
-          <TabsContent value="gestion" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('/dashboard/propietario/usuarios')}>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Users className="w-5 h-5 mr-2" />
-                    Usuarios
-                  </CardTitle>
-                  <CardDescription>Gestionar clientes y profesionales</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold">{(stats?.total_clientes || 0) + (stats?.total_empleados || 0)}</p>
-                      <p className="text-sm text-gray-600">Usuarios totales</p>
-                    </div>
-                    <div className="space-y-1 text-right">
-                      <div className="flex items-center space-x-2">
-                        <UserPlus className="w-4 h-4 text-blue-600" />
-                        <span className="text-sm font-medium">{stats?.total_clientes || 0} Clientes</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Users className="w-4 h-4 text-purple-600" />
-                        <span className="text-sm font-medium">{stats?.total_empleados || 0} Profesionales</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => router.push('/dashboard/propietario/servicios')}>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Scissors className="w-5 h-5 mr-2" />
-                    Servicios
-                  </CardTitle>
-                  <CardDescription>Configurar servicios y precios</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600">Gestionar catálogo de servicios</p>
-                  <Button variant="outline" size="sm" className="mt-3">
-                    <Plus className="w-3 h-3 mr-2" />
-                    Nuevo Servicio
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
         </Tabs>
       </div>

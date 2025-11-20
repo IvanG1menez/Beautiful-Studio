@@ -31,9 +31,26 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    cliente_profile = serializers.SerializerMethodField()
+    profesional_profile = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
         fields = "__all__"
+    
+    def get_cliente_profile(self, obj):
+        """Obtener perfil de cliente si existe"""
+        if hasattr(obj, 'cliente_profile'):
+            from apps.clientes.serializers import ClienteDetailSerializer
+            return ClienteDetailSerializer(obj.cliente_profile).data
+        return None
+    
+    def get_profesional_profile(self, obj):
+        """Obtener perfil de profesional si existe"""
+        if hasattr(obj, 'profesional_profile'):
+            from apps.empleados.serializers import EmpleadoListSerializer
+            return EmpleadoListSerializer(obj.profesional_profile).data
+        return None
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):

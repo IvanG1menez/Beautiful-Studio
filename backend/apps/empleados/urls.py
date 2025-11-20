@@ -7,6 +7,11 @@ urlpatterns = [
     path("me/", views.empleado_me_view, name="empleado-me"),
     path("<int:pk>/", views.EmpleadoDetailView.as_view(), name="empleado-detail"),
     path(
+        "<int:empleado_id>/stats/",
+        views.empleado_stats,
+        name="empleado-stats",
+    ),
+    path(
         "<int:empleado_id>/dias-trabajo/",
         views.dias_trabajo_empleado,
         name="dias-trabajo-empleado",

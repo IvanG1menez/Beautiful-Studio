@@ -45,17 +45,20 @@ def notificar_turno_creado(sender, instance, created, **kwargs):
         if instance.empleado and instance.empleado.user:
             cliente_nombre = f"{instance.cliente.user.first_name} {instance.cliente.user.last_name}" if instance.cliente and instance.cliente.user else "Cliente"
             
+            # Formatear fecha y hora desde fecha_hora
+            fecha_formateada = instance.fecha_hora.strftime("%d/%m/%Y")
+            hora_formateada = instance.fecha_hora.strftime("%H:%M")
+            
             crear_notificacion(
                 usuario=instance.empleado.user,
                 tipo='solicitud_turno',
                 titulo='Nueva solicitud de turno',
-                mensaje=f'{cliente_nombre} ha solicitado un turno para {instance.servicio.nombre} el {instance.fecha.strftime("%d/%m/%Y")} a las {instance.hora_inicio.strftime("%H:%M")}',
+                mensaje=f'{cliente_nombre} ha solicitado un turno para {instance.servicio.nombre} el {fecha_formateada} a las {hora_formateada}',
                 data={
                     'turno_id': instance.id,
                     'cliente_id': instance.cliente.id if instance.cliente else None,
                     'servicio_id': instance.servicio.id,
-                    'fecha': instance.fecha.isoformat(),
-                    'hora': instance.hora_inicio.isoformat(),
+                    'fecha_hora': instance.fecha_hora.isoformat(),
                 }
             )
         
@@ -66,7 +69,7 @@ def notificar_turno_creado(sender, instance, created, **kwargs):
                 usuario=propietario,
                 tipo='solicitud_turno',
                 titulo='Nuevo turno en el sistema',
-                mensaje=f'Se ha creado un nuevo turno para {instance.servicio.nombre} el {instance.fecha.strftime("%d/%m/%Y")}',
+                mensaje=f'Se ha creado un nuevo turno para {instance.servicio.nombre} el {instance.fecha_hora.strftime("%d/%m/%Y")}',
                 data={
                     'turno_id': instance.id,
                     'empleado_id': instance.empleado.id if instance.empleado else None,
@@ -86,11 +89,14 @@ def notificar_pago_turno(sender, instance, created, update_fields, **kwargs):
             if instance.empleado and instance.empleado.user:
                 cliente_nombre = f"{instance.cliente.user.first_name} {instance.cliente.user.last_name}" if instance.cliente and instance.cliente.user else "Cliente"
                 
+                fecha_formateada = instance.fecha_hora.strftime("%d/%m/%Y")
+                hora_formateada = instance.fecha_hora.strftime("%H:%M")
+                
                 crear_notificacion(
                     usuario=instance.empleado.user,
                     tipo='pago_turno',
                     titulo='Turno pagado',
-                    mensaje=f'{cliente_nombre} ha pagado el turno del {instance.fecha.strftime("%d/%m/%Y")} a las {instance.hora_inicio.strftime("%H:%M")}',
+                    mensaje=f'{cliente_nombre} ha pagado el turno del {fecha_formateada} a las {hora_formateada}',
                     data={
                         'turno_id': instance.id,
                         'monto': str(instance.servicio.precio),
@@ -109,14 +115,17 @@ def notificar_cancelacion_turno(sender, instance, created, update_fields, **kwar
             if instance.empleado and instance.empleado.user:
                 cliente_nombre = f"{instance.cliente.user.first_name} {instance.cliente.user.last_name}" if instance.cliente and instance.cliente.user else "Cliente"
                 
+                fecha_formateada = instance.fecha_hora.strftime("%d/%m/%Y")
+                hora_formateada = instance.fecha_hora.strftime("%H:%M")
+                
                 crear_notificacion(
                     usuario=instance.empleado.user,
                     tipo='cancelacion_turno',
                     titulo='Turno cancelado',
-                    mensaje=f'{cliente_nombre} ha cancelado el turno del {instance.fecha.strftime("%d/%m/%Y")} a las {instance.hora_inicio.strftime("%H:%M")}',
+                    mensaje=f'{cliente_nombre} ha cancelado el turno del {fecha_formateada} a las {hora_formateada}',
                     data={
                         'turno_id': instance.id,
-                        'fecha': instance.fecha.isoformat(),
+                        'fecha_hora': instance.fecha_hora.isoformat(),
                     }
                 )
 

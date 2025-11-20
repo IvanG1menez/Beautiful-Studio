@@ -524,15 +524,45 @@ export default function AgendaEmpleadoPage() {
                           </span>
                         </div>
 
-                        {turno.notas_cliente && (
-                          <div className="text-sm text-gray-600 bg-blue-50 p-2 rounded">
-                            <span className="font-medium">Nota del cliente:</span> {turno.notas_cliente}
+                        {/* Fecha/Hora de solicitud */}
+                        {turno.created_at && (
+                          <div className="text-sm text-gray-600">
+                            <span className="font-medium">Solicitado:</span>{' '}
+                            {new Date(turno.created_at).toLocaleDateString('es-AR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                            })}{' '}
+                            a las{' '}
+                            {new Date(turno.created_at).toLocaleTimeString('es-AR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
                           </div>
                         )}
 
+                        {/* Notas del cliente - SIEMPRE visible */}
+                        <div className={`text-sm p-3 rounded-lg border ${turno.notas_cliente
+                            ? 'bg-blue-50 border-blue-200'
+                            : 'bg-gray-50 border-gray-200'
+                          }`}>
+                          <div className="flex items-start gap-2">
+                            <span className={`font-semibold ${turno.notas_cliente ? 'text-blue-900' : 'text-gray-600'
+                              }`}>
+                              💬 Nota del cliente:
+                            </span>
+                          </div>
+                          {turno.notas_cliente ? (
+                            <p className="mt-1 text-gray-800 whitespace-pre-wrap">{turno.notas_cliente}</p>
+                          ) : (
+                            <p className="mt-1 text-gray-500 italic">No se encontró nota adicional</p>
+                          )}
+                        </div>
+
                         {turno.notas_empleado && (
-                          <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                            <span className="font-medium">Mis notas:</span> {turno.notas_empleado}
+                          <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 p-3 rounded-lg">
+                            <span className="font-semibold text-purple-900">📝 Mis notas:</span>
+                            <p className="mt-1 whitespace-pre-wrap">{turno.notas_empleado}</p>
                           </div>
                         )}
 

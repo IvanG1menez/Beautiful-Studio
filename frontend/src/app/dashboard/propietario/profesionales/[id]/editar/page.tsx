@@ -14,7 +14,17 @@ import { useEffect, useState } from 'react';
 
 interface Empleado {
   id: number;
-  user: string;
+  user?: {
+    id: number;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone?: string;
+    dni?: string;
+    role: string;
+  };
+  // Campos legacy por compatibilidad
   username?: string;
   email?: string;
   first_name?: string;
@@ -172,11 +182,11 @@ export default function EditarProfesionalPage() {
         if (response.ok) {
           const empleado: Empleado = await response.json();
           setFormData({
-            username: empleado.username || '',
-            email: empleado.email || '',
-            dni: empleado.user_dni || '',
-            first_name: empleado.first_name || '',
-            last_name: empleado.last_name || '',
+            username: empleado.user?.username || empleado.username || '',
+            email: empleado.user?.email || empleado.email || '',
+            dni: empleado.user?.dni || empleado.user_dni || '',
+            first_name: empleado.user?.first_name || empleado.first_name || '',
+            last_name: empleado.user?.last_name || empleado.last_name || '',
             especialidades: empleado.especialidades || '',
             fecha_ingreso: empleado.fecha_ingreso || '',
             horario_entrada: empleado.horario_entrada || '',

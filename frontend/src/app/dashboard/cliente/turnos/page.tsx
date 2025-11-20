@@ -28,6 +28,7 @@ interface Turno {
   precio_final: string;
   puede_cancelar: boolean;
   notas_cliente?: string;
+  notas_empleado?: string;
   created_at: string;
   updated_at: string;
 }
@@ -316,10 +317,31 @@ export default function TurnosClientePage() {
                     </div>
                   </div>
 
-                  {/* Notas del cliente */}
-                  {turno.notas_cliente && (
-                    <div className="mt-2 text-sm text-gray-500">
-                      <span className="font-medium">Notas:</span> {turno.notas_cliente}
+                  {/* Nota del cliente - SIEMPRE VISIBLE */}
+                  <div className={`mt-3 p-3 rounded-md border ${turno.notas_cliente
+                    ? 'bg-blue-50 border-blue-200'
+                    : 'bg-gray-50 border-gray-200'
+                    }`}>
+                    <div className="text-sm font-medium text-gray-700 mb-1">
+                      Mis notas adicionales
+                    </div>
+                    <div className={`text-sm ${turno.notas_cliente
+                      ? 'text-gray-800 whitespace-pre-wrap'
+                      : 'text-gray-500 italic'
+                      }`}>
+                      {turno.notas_cliente || 'No se agregaron notas adicionales'}
+                    </div>
+                  </div>
+
+                  {/* Nota del profesional - Visible cuando hay notas del empleado */}
+                  {turno.notas_empleado && (
+                    <div className="mt-3 p-3 rounded-md border bg-amber-50 border-amber-200">
+                      <div className="text-sm font-medium text-amber-900 mb-1">
+                        Nota del profesional
+                      </div>
+                      <div className="text-sm text-amber-800 whitespace-pre-wrap">
+                        {turno.notas_empleado}
+                      </div>
                     </div>
                   )}
                 </div>

@@ -52,6 +52,8 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "estado_display",
             "precio_final",
             "puede_cancelar",
+            "notas_cliente",
+            "notas_empleado",
             "created_at",
             "updated_at",
         ]

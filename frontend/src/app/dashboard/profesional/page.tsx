@@ -303,28 +303,12 @@ export default function DashboardEmpleadoPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">
-                  ¡Hola, {user?.first_name}!
+                  ¡Hola, {user?.first_name || 'Profesional'}!
                 </h1>
                 <p className="text-gray-600">
                   Panel profesional - Beautiful Studio
                 </p>
               </div>
-            </div>
-            <div className="flex space-x-3">
-              <Button
-                onClick={() => router.push('/dashboard/profesional/agenda')}
-                variant="outline"
-              >
-                <CalendarDays className="w-4 h-4 mr-2" />
-                Mi Calendario
-              </Button>
-              <Button
-                onClick={() => router.push('/dashboard/profesional/perfil')}
-                className="bg-gradient-to-r from-blue-500 to-green-600 hover:from-blue-600 hover:to-green-700"
-              >
-                <User className="w-4 h-4 mr-2" />
-                Mi Perfil
-              </Button>
             </div>
           </div>
         </div>

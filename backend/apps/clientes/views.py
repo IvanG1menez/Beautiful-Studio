@@ -158,6 +158,49 @@ class ClienteViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=False, methods=["get"])
+    def mis_clientes(self, request):
+        """
+        Obtener los clientes que han tenido turnos con el profesional autenticado
+        """
+        from apps.turnos.models import Turno
+        from django.db.models import Count, Max, Q
+        
+        # Verificar que el usuario sea un profesional
+        if not hasattr(request.user, 'profesional_profile'):
+            return Response(
+                {"error": "Usuario no tiene perfil de profesional"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        profesional = request.user.profesional_profile
+        
+        # Obtener clientes únicos que han tenido turnos con este profesional
+        clientes_ids = Turno.objects.filter(
+            empleado=profesional
+        ).values_list('cliente_id', flat=True).distinct()
+        
+        # Obtener los clientes con información adicional
+        clientes = Cliente.objects.filter(
+            id__in=clientes_ids
+        ).select_related('user').annotate(
+            total_turnos=Count('turnos', filter=Q(turnos__empleado=profesional)),
+            ultimo_turno=Max('turnos__fecha_hora', filter=Q(turnos__empleado=profesional)),
+            turnos_completados=Count('turnos', filter=Q(
+                turnos__empleado=profesional,
+                turnos__estado='completado'
+            ))
+        ).order_by('-ultimo_turno')
+        
+        # Aplicar paginación
+        page = self.paginate_queryset(clientes)
+        if page is not None:
+            serializer = ClienteListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = ClienteListSerializer(clientes, many=True)
+        return Response(serializer.data)
+
 
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])

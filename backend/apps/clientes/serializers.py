@@ -39,6 +39,11 @@ class ClienteListSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     edad = serializers.IntegerField(read_only=True)
     tiempo_como_cliente = serializers.IntegerField(read_only=True)
+    
+    # Campos anotados (desde la query)
+    total_turnos = serializers.IntegerField(read_only=True, default=0)
+    ultimo_turno = serializers.DateTimeField(read_only=True, required=False)
+    turnos_completados = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = Cliente
@@ -59,6 +64,9 @@ class ClienteListSerializer(serializers.ModelSerializer):
             "nombre_completo",
             "edad",
             "tiempo_como_cliente",
+            "total_turnos",
+            "ultimo_turno",
+            "turnos_completados",
             "created_at",
             "updated_at",
         ]

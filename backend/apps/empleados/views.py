@@ -1,6 +1,9 @@
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from django.db.models import Count, Avg, Sum, Q
+from django.utils import timezone
+from datetime import timedelta
 from .models import Empleado, HorarioEmpleado
 from .serializers import (
     EmpleadoSerializer,
@@ -298,6 +301,90 @@ def dias_trabajo_empleado(request, empleado_id):
             "empleado_nombre": empleado.nombre_completo,
             "dias_trabajo": list(dias_trabajo),
             "dias_detallados": dias_detallados,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def empleado_stats(request, empleado_id):
+    """
+    Obtener estadísticas del profesional:
+    - Turnos de hoy
+    - Turnos de esta semana
+    - Turnos completados del mes
+    - Ingresos del mes
+    - Calificación promedio
+    """
+    try:
+        empleado = Empleado.objects.get(id=empleado_id)
+    except Empleado.DoesNotExist:
+        return Response(
+            {"error": "Empleado no encontrado"}, status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Verificar que el usuario es el profesional o tiene permisos de propietario
+    if (
+        request.user.role == "profesional"
+        and empleado.user != request.user
+    ):
+        return Response(
+            {"error": "No tiene permisos para ver estas estadísticas"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    now = timezone.now()
+    today = now.date()
+    
+    # Inicio de la semana (lunes)
+    start_of_week = today - timedelta(days=today.weekday())
+    end_of_week = start_of_week + timedelta(days=6)
+    
+    # Inicio del mes
+    start_of_month = today.replace(day=1)
+    
+    # Importar Turno aquí para evitar importación circular
+    from apps.turnos.models import Turno
+    
+    # Turnos de hoy
+    turnos_hoy = Turno.objects.filter(
+        empleado=empleado,
+        fecha_hora__date=today,
+    ).exclude(estado='cancelado').count()
+    
+    # Turnos de esta semana
+    turnos_semana = Turno.objects.filter(
+        empleado=empleado,
+        fecha_hora__date__gte=start_of_week,
+        fecha_hora__date__lte=end_of_week,
+    ).exclude(estado='cancelado').count()
+    
+    # Turnos completados del mes
+    turnos_completados = Turno.objects.filter(
+        empleado=empleado,
+        estado='completado',
+        fecha_hora__date__gte=start_of_month,
+    ).count()
+    
+    # Ingresos del mes
+    ingresos_mes = Turno.objects.filter(
+        empleado=empleado,
+        estado='completado',
+        fecha_hora__date__gte=start_of_month,
+    ).aggregate(total=Sum('precio_final'))['total'] or 0
+    
+    # Calificación promedio (simulada por ahora - puede implementarse con un modelo de reviews)
+    # Por ahora retornamos un valor fijo, pero puede calcularse de una tabla de calificaciones
+    calificacion_promedio = 4.5
+    
+    return Response(
+        {
+            "turnos_hoy": turnos_hoy,
+            "turnos_semana": turnos_semana,
+            "turnos_completados": turnos_completados,
+            "ingresos_mes": float(ingresos_mes),
+            "calificacion_promedio": calificacion_promedio,
         },
         status=status.HTTP_200_OK,
     )
