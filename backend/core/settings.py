@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "corsheaders",
+    "django_celery_beat",
+    "django_celery_results",
     # Local apps
     "apps.authentication",
     "apps.users",
@@ -223,6 +225,24 @@ EMAIL_PORT = config('EMAIL_PORT', default=2525, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Beautiful Studio <noreply@beautifulstudio.com>')
+
+# ============================================================================
+# CELERY CONFIGURATION
+# ============================================================================
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_CACHE_BACKEND = 'django-cache'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'America/Argentina/Buenos_Aires'
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutos máximo por tarea
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+
+# Configuración de Celery Beat (tareas periódicas)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
 # Frontend URL for email links
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')

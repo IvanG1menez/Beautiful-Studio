@@ -235,6 +235,66 @@ export default function ConfiguracionNotificacionesPage() {
             </div>
           </div>
 
+          {/* Notificaciones por email */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Notificaciones por Email</h3>
+            <p className="text-sm text-muted-foreground">
+              Recibe emails en tu correo electrónico
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_solicitud_turno" className="text-base cursor-pointer">
+                  Email de nuevo turno
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email cuando se crea un nuevo turno
+                </p>
+              </div>
+              <Switch
+                id="email_solicitud_turno"
+                checked={config.email_solicitud_turno}
+                onCheckedChange={() => handleToggle('email_solicitud_turno')}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_cancelacion_turno" className="text-base cursor-pointer">
+                  Email de cancelación
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email cuando se cancela un turno
+                </p>
+              </div>
+              <Switch
+                id="email_cancelacion_turno"
+                checked={config.email_cancelacion_turno}
+                onCheckedChange={() => handleToggle('email_cancelacion_turno')}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_reporte_diario" className="text-base cursor-pointer">
+                  Email de reporte diario
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email con el resumen diario de actividad
+                </p>
+              </div>
+              <Switch
+                id="email_reporte_diario"
+                checked={config.email_reporte_diario}
+                onCheckedChange={() => handleToggle('email_reporte_diario')}
+              />
+            </div>
+          </div>
+
           {/* Botón guardar */}
           <div className="flex justify-end pt-4">
             <Button

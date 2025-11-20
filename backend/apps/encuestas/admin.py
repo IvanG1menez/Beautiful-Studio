@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Encuesta, EncuestaConfig
+from .models import Encuesta, EncuestaConfig, EncuestaPregunta, RespuestaCliente
 
 
 @admin.register(EncuestaConfig)
@@ -243,3 +243,111 @@ class EncuestaAdmin(admin.ModelAdmin):
         )
     
     reprocesar_encuestas.short_description = "Reprocesar encuestas seleccionadas"
+
+
+# ==========================================
+# ADMIN PARA SISTEMA PARAMETRIZADO
+# ==========================================
+
+@admin.register(EncuestaPregunta)
+class EncuestaPreguntaAdmin(admin.ModelAdmin):
+    """Admin para gestionar preguntas dinámicas"""
+    
+    list_display = [
+        'orden',
+        'texto_corto',
+        'puntaje_maximo',
+        'categoria',
+        'is_active',
+        'created_at',
+    ]
+    
+    list_filter = [
+        'is_active',
+        'categoria',
+        'puntaje_maximo',
+    ]
+    
+    search_fields = [
+        'texto',
+        'categoria',
+    ]
+    
+    list_editable = [
+        'is_active',
+    ]
+    
+    ordering = ['orden', 'id']
+    
+    fieldsets = (
+        ('Contenido de la Pregunta', {
+            'fields': ('texto', 'categoria'),
+        }),
+        ('Configuración', {
+            'fields': ('puntaje_maximo', 'orden', 'is_active'),
+        }),
+        ('Información', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    readonly_fields = ['created_at', 'updated_at']
+    
+    def texto_corto(self, obj):
+        """Mostrar texto truncado"""
+        if len(obj.texto) > 60:
+            return f"{obj.texto[:60]}..."
+        return obj.texto
+    texto_corto.short_description = "Pregunta"
+
+
+class RespuestaClienteInline(admin.TabularInline):
+    """Inline para ver respuestas dentro de una encuesta"""
+    model = RespuestaCliente
+    extra = 0
+    readonly_fields = ['pregunta', 'respuesta_valor', 'created_at']
+    can_delete = False
+    
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RespuestaCliente)
+class RespuestaClienteAdmin(admin.ModelAdmin):
+    """Admin para respuestas individuales"""
+    
+    list_display = [
+        'id',
+        'encuesta',
+        'pregunta_texto_corto',
+        'respuesta_valor',
+        'created_at',
+    ]
+    
+    list_filter = [
+        'pregunta',
+        'respuesta_valor',
+        'created_at',
+    ]
+    
+    search_fields = [
+        'encuesta__cliente__user__first_name',
+        'encuesta__empleado__user__first_name',
+        'pregunta__texto',
+    ]
+    
+    readonly_fields = ['encuesta', 'pregunta', 'respuesta_valor', 'created_at']
+    
+    def pregunta_texto_corto(self, obj):
+        """Mostrar texto de pregunta truncado"""
+        if len(obj.pregunta.texto) > 50:
+            return f"{obj.pregunta.texto[:50]}..."
+        return obj.pregunta.texto
+    pregunta_texto_corto.short_description = "Pregunta"
+    
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False

@@ -103,9 +103,12 @@ export default function ConfiguracionNotificacionesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Notificaciones de turnos */}
+          {/* Notificaciones en plataforma */}
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold">Notificaciones de Turnos</h3>
+            <h3 className="text-lg font-semibold">Notificaciones en la Plataforma</h3>
+            <p className="text-sm text-muted-foreground">
+              Notificaciones que aparecerán en tu panel de control
+            </p>
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -174,6 +177,102 @@ export default function ConfiguracionNotificacionesPage() {
                 id="modificacion_turno"
                 checked={config.notificar_modificacion_turno}
                 onCheckedChange={() => handleToggle('notificar_modificacion_turno')}
+              />
+            </div>
+          </div>
+
+          {/* Notificaciones por email */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Notificaciones por Email</h3>
+            <p className="text-sm text-muted-foreground">
+              Recibe emails en tu correo electrónico
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_solicitud_turno" className="text-base cursor-pointer">
+                  Email de nuevo turno
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email cuando se te asigna un nuevo turno
+                </p>
+              </div>
+              <Switch
+                id="email_solicitud_turno"
+                checked={config.email_solicitud_turno}
+                onCheckedChange={() => handleToggle('email_solicitud_turno')}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_pago_turno" className="text-base cursor-pointer">
+                  Email de pago pendiente
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email cuando hay un pago pendiente
+                </p>
+              </div>
+              <Switch
+                id="email_pago_turno"
+                checked={config.email_pago_turno}
+                onCheckedChange={() => handleToggle('email_pago_turno')}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_cancelacion_turno" className="text-base cursor-pointer">
+                  Email de cancelación
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email cuando se cancela un turno
+                </p>
+              </div>
+              <Switch
+                id="email_cancelacion_turno"
+                checked={config.email_cancelacion_turno}
+                onCheckedChange={() => handleToggle('email_cancelacion_turno')}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_modificacion_turno" className="text-base cursor-pointer">
+                  Email de modificación
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email cuando se modifica un turno
+                </p>
+              </div>
+              <Switch
+                id="email_modificacion_turno"
+                checked={config.email_modificacion_turno}
+                onCheckedChange={() => handleToggle('email_modificacion_turno')}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="email_recordatorio_turno" className="text-base cursor-pointer">
+                  Email recordatorio
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Recibe un email recordatorio antes de tus turnos
+                </p>
+              </div>
+              <Switch
+                id="email_recordatorio_turno"
+                checked={config.email_recordatorio_turno}
+                onCheckedChange={() => handleToggle('email_recordatorio_turno')}
               />
             </div>
           </div>

@@ -173,7 +173,7 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
     Nota: Se mantiene el nombre 'EmpleadoListSerializer' por compatibilidad.
     """
 
-    user = serializers.StringRelatedField(read_only=True)
+    user = UserNestedSerializer(read_only=True)
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     first_name = serializers.CharField(source="user.first_name", read_only=True)
@@ -182,6 +182,7 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
     especialidad_display = serializers.CharField(
         source="get_especialidades_display", read_only=True
     )
+    nombre_completo = serializers.CharField(read_only=True)
     biografia = serializers.CharField(read_only=True)
     nivel_experiencia = serializers.SerializerMethodField()
 
@@ -213,6 +214,7 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "user_dni",
+            "nombre_completo",
             "especialidades",
             "especialidad_display",
             "fecha_ingreso",
@@ -223,6 +225,8 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "is_disponible",
             "biografia",
             "nivel_experiencia",
+            "promedio_calificacion",
+            "total_encuestas",
             "created_at",
             "updated_at",
         )

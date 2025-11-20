@@ -43,6 +43,13 @@ interface Cliente {
   created_at: string;
 }
 
+interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
 interface Empleado {
   id: number;
   user: {
@@ -76,6 +83,11 @@ export default function UsuariosPage() {
   const [activeTab, setActiveTab] = useState('clientes');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+  // Estados de paginación
+  const [currentPageClientes, setCurrentPageClientes] = useState(1);
+  const [currentPageEmpleados, setCurrentPageEmpleados] = useState(1);
+  const itemsPerPage = 10;
+
   const { user } = useAuth();
   const router = useRouter();
 
@@ -92,6 +104,24 @@ export default function UsuariosPage() {
 
   const getAuthToken = (): string | null => {
     return localStorage.getItem('auth_token');
+  };
+
+  // Helper para obtener nombre completo de forma segura
+  const getNombreCompleto = (item: Cliente | Empleado): string => {
+    if (item.nombre_completo) return item.nombre_completo;
+    const firstName = item.user?.first_name || '';
+    const lastName = item.user?.last_name || '';
+    return `${firstName} ${lastName}`.trim() || 'Sin nombre';
+  };
+
+  // Helper para obtener email de forma segura
+  const getEmail = (item: Cliente | Empleado): string => {
+    return item.email || item.user?.email || 'Sin email';
+  };
+
+  // Helper para obtener especialidad de forma segura
+  const getEspecialidad = (empleado: Empleado): string => {
+    return empleado.especialidad_display || empleado.especialidades || 'Sin especialidad';
   };
 
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
@@ -133,7 +163,7 @@ export default function UsuariosPage() {
     setLoadingClientes(true);
     try {
       console.log('Loading clientes...');
-      const response = await authenticatedFetch('/clientes/?page_size=100');
+      const response = await authenticatedFetch('/clientes/?page_size=1000');
       console.log('Clientes response status:', response.status);
 
       if (response.ok) {
@@ -156,7 +186,7 @@ export default function UsuariosPage() {
     setLoadingEmpleados(true);
     try {
       console.log('Loading empleados...');
-      const response = await authenticatedFetch('/empleados/?page_size=100');
+      const response = await authenticatedFetch('/empleados/?page_size=1000');
       console.log('Empleados response status:', response.status);
 
       if (response.ok) {
@@ -175,17 +205,52 @@ export default function UsuariosPage() {
     }
   };
 
-  const filteredClientes = clientes.filter(cliente =>
-    cliente.nombre_completo.toLowerCase().includes(searchClientes.toLowerCase()) ||
-    cliente.email.toLowerCase().includes(searchClientes.toLowerCase()) ||
-    cliente.user?.dni?.toLowerCase().includes(searchClientes.toLowerCase())
+  const filteredClientes = clientes.filter(cliente => {
+    const searchLower = searchClientes.toLowerCase();
+    const nombreCompleto = getNombreCompleto(cliente);
+    const email = getEmail(cliente);
+    const dni = cliente.user?.dni || '';
+
+    return nombreCompleto.toLowerCase().includes(searchLower) ||
+      email.toLowerCase().includes(searchLower) ||
+      dni.toLowerCase().includes(searchLower);
+  });
+
+  const filteredEmpleados = empleados.filter(empleado => {
+    const searchLower = searchEmpleados.toLowerCase();
+    const nombreCompleto = getNombreCompleto(empleado);
+    const email = getEmail(empleado);
+    const especialidad = getEspecialidad(empleado);
+
+    return nombreCompleto.toLowerCase().includes(searchLower) ||
+      email.toLowerCase().includes(searchLower) ||
+      especialidad.toLowerCase().includes(searchLower);
+  });
+
+  // Paginación de clientes
+  const totalPagesClientes = Math.ceil(filteredClientes.length / itemsPerPage);
+  const paginatedClientes = filteredClientes.slice(
+    (currentPageClientes - 1) * itemsPerPage,
+    currentPageClientes * itemsPerPage
   );
 
-  const filteredEmpleados = empleados.filter(empleado =>
-    empleado.nombre_completo.toLowerCase().includes(searchEmpleados.toLowerCase()) ||
-    empleado.email.toLowerCase().includes(searchEmpleados.toLowerCase()) ||
-    empleado.especialidad_display.toLowerCase().includes(searchEmpleados.toLowerCase())
+  // Paginación de empleados
+  const totalPagesEmpleados = Math.ceil(filteredEmpleados.length / itemsPerPage);
+  const paginatedEmpleados = filteredEmpleados.slice(
+    (currentPageEmpleados - 1) * itemsPerPage,
+    currentPageEmpleados * itemsPerPage
   );
+
+  // Resetear página al buscar
+  const handleSearchClientes = (value: string) => {
+    setSearchClientes(value);
+    setCurrentPageClientes(1);
+  };
+
+  const handleSearchEmpleados = (value: string) => {
+    setSearchEmpleados(value);
+    setCurrentPageEmpleados(1);
+  };
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
@@ -223,7 +288,7 @@ export default function UsuariosPage() {
               >
                 <ArrowLeft className="w-5 h-5" />
               </Button>
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+              <div className="w-12 h-12 bg-linear-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
                 <Users className="w-6 h-6 text-white" />
               </div>
               <div>
@@ -264,6 +329,7 @@ export default function UsuariosPage() {
                     <CardTitle>Clientes</CardTitle>
                     <CardDescription>
                       {filteredClientes.length} cliente{filteredClientes.length !== 1 ? 's' : ''} registrado{filteredClientes.length !== 1 ? 's' : ''}
+                      {filteredClientes.length > itemsPerPage && ` (Página ${currentPageClientes} de ${totalPagesClientes})`}
                     </CardDescription>
                   </div>
                   <div className="flex space-x-2">
@@ -273,13 +339,13 @@ export default function UsuariosPage() {
                         type="text"
                         placeholder="Buscar clientes..."
                         value={searchClientes}
-                        onChange={(e) => setSearchClientes(e.target.value)}
+                        onChange={(e) => handleSearchClientes(e.target.value)}
                         className="pl-10 w-64"
                       />
                     </div>
                     <Button
                       onClick={() => router.push('/dashboard/propietario/clientes/nuevo')}
-                      className="bg-gradient-to-r from-blue-600 to-purple-600"
+                      className="bg-linear-to-r from-blue-600 to-purple-600"
                     >
                       <Plus className="w-4 h-4 mr-2" />
                       Nuevo Cliente
@@ -293,91 +359,122 @@ export default function UsuariosPage() {
                     <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
                     <span className="ml-2 text-gray-600">Cargando clientes...</span>
                   </div>
-                ) : filteredClientes.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Cliente</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Contacto</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">DNI</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Estado</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Primera Visita</th>
-                          <th className="text-right py-3 px-4 font-medium text-gray-700">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredClientes.map((cliente) => (
-                          <tr key={cliente.id} className="border-b hover:bg-gray-50">
-                            <td className="py-4 px-4">
-                              <div className="flex items-center space-x-3">
-                                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
-                                  {cliente.nombre_completo.charAt(0).toUpperCase()}
-                                </div>
-                                <div>
-                                  <div className="font-medium text-gray-900">
-                                    {cliente.nombre_completo}
-                                  </div>
-                                  <div className="text-sm text-gray-500">
-                                    @{cliente.user?.username}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="space-y-1">
-                                <div className="flex items-center text-sm text-gray-600">
-                                  <Mail className="w-3 h-3 mr-1" />
-                                  {cliente.email}
-                                </div>
-                                {cliente.telefono && (
-                                  <div className="flex items-center text-sm text-gray-600">
-                                    <Phone className="w-3 h-3 mr-1" />
-                                    {cliente.telefono}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className="text-sm text-gray-600">
-                                {cliente.user?.dni || '-'}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4">
-                              {cliente.is_vip ? (
-                                <Badge className="bg-yellow-500">VIP</Badge>
-                              ) : (
-                                <Badge variant="secondary">Regular</Badge>
-                              )}
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className="text-sm text-gray-600">
-                                {formatDate(cliente.fecha_primera_visita)}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="flex justify-end space-x-2">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => router.push(`/dashboard/propietario/clientes/${cliente.id}`)}
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => router.push(`/dashboard/propietario/clientes/${cliente.id}/editar`)}
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            </td>
+                ) : paginatedClientes.length > 0 ? (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Cliente</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Contacto</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">DNI</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Estado</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Primera Visita</th>
+                            <th className="text-right py-3 px-4 font-medium text-gray-700">Acciones</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {paginatedClientes.map((cliente) => {
+                            const nombreCompleto = getNombreCompleto(cliente);
+                            const email = getEmail(cliente);
+                            return (
+                              <tr key={cliente.id} className="border-b hover:bg-gray-50">
+                                <td className="py-4 px-4">
+                                  <div className="flex items-center space-x-3">
+                                    <div className="w-10 h-10 bg-linear-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-semibold">
+                                      {nombreCompleto.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <div className="font-medium text-gray-900">
+                                        {nombreCompleto}
+                                      </div>
+                                      <div className="text-sm text-gray-500">
+                                        {cliente.user?.username ? `@${cliente.user.username}` : `ID: ${cliente.id}`}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center text-sm text-gray-600">
+                                      <Mail className="w-3 h-3 mr-1" />
+                                      {email}
+                                    </div>
+                                    {cliente.telefono && (
+                                      <div className="flex items-center text-sm text-gray-600">
+                                        <Phone className="w-3 h-3 mr-1" />
+                                        {cliente.telefono}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-sm text-gray-600">
+                                    {cliente.user?.dni || '-'}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  {cliente.is_vip ? (
+                                    <Badge className="bg-yellow-500">VIP</Badge>
+                                  ) : (
+                                    <Badge variant="secondary">Regular</Badge>
+                                  )}
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-sm text-gray-600">
+                                    {formatDate(cliente.fecha_primera_visita)}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <div className="flex justify-end space-x-2">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => router.push(`/dashboard/propietario/clientes/${cliente.id}`)}
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => router.push(`/dashboard/propietario/clientes/${cliente.id}/editar`)}
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Paginación de clientes */}
+                    {totalPagesClientes > 1 && (
+                      <div className="flex justify-center items-center space-x-2 mt-4 pb-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPageClientes(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPageClientes === 1}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-sm text-gray-600">
+                          Página {currentPageClientes} de {totalPagesClientes}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPageClientes(prev => Math.min(prev + 1, totalPagesClientes))}
+                          disabled={currentPageClientes === totalPagesClientes}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="text-center py-12">
                     <UserCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -408,6 +505,7 @@ export default function UsuariosPage() {
                     <CardTitle>Profesionales</CardTitle>
                     <CardDescription>
                       {filteredEmpleados.length} profesional{filteredEmpleados.length !== 1 ? 'es' : ''} en el equipo
+                      {filteredEmpleados.length > itemsPerPage && ` (Página ${currentPageEmpleados} de ${totalPagesEmpleados})`}
                     </CardDescription>
                   </div>
                   <div className="flex space-x-2">
@@ -417,13 +515,13 @@ export default function UsuariosPage() {
                         type="text"
                         placeholder="Buscar profesionales..."
                         value={searchEmpleados}
-                        onChange={(e) => setSearchEmpleados(e.target.value)}
+                        onChange={(e) => handleSearchEmpleados(e.target.value)}
                         className="pl-10 w-64"
                       />
                     </div>
                     <Button
                       onClick={() => router.push('/dashboard/propietario/profesionales/nuevo')}
-                      className="bg-gradient-to-r from-purple-600 to-blue-600"
+                      className="bg-linear-to-r from-purple-600 to-blue-600"
                     >
                       <UserPlus className="w-4 h-4 mr-2" />
                       Nuevo Profesional
@@ -437,77 +535,109 @@ export default function UsuariosPage() {
                     <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
                     <span className="ml-2 text-gray-600">Cargando profesionales...</span>
                   </div>
-                ) : filteredEmpleados.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredEmpleados.map((empleado) => (
-                      <Card key={empleado.id} className="hover:shadow-md transition-shadow">
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
-                                {empleado.nombre_completo.charAt(0).toUpperCase()}
+                ) : paginatedEmpleados.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {paginatedEmpleados.map((empleado) => {
+                        const nombreCompleto = getNombreCompleto(empleado);
+                        const email = getEmail(empleado);
+                        const especialidad = getEspecialidad(empleado);
+                        return (
+                          <Card key={empleado.id} className="hover:shadow-md transition-shadow">
+                            <CardHeader className="pb-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex items-center space-x-3">
+                                  <div className="w-12 h-12 bg-linear-to-r from-purple-500 to-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
+                                    {nombreCompleto.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <CardTitle className="text-base">
+                                      {nombreCompleto}
+                                    </CardTitle>
+                                    <p className="text-sm text-gray-500">
+                                      {especialidad}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Badge variant={empleado.is_disponible ? 'default' : 'secondary'}>
+                                  {empleado.is_disponible ? 'Disponible' : 'No disponible'}
+                                </Badge>
                               </div>
-                              <div>
-                                <CardTitle className="text-base">
-                                  {empleado.nombre_completo}
-                                </CardTitle>
-                                <p className="text-sm text-gray-500">
-                                  {empleado.especialidad_display}
-                                </p>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              <div className="flex items-center text-sm text-gray-600">
+                                <Mail className="w-3 h-3 mr-2" />
+                                {email}
                               </div>
-                            </div>
-                            <Badge variant={empleado.is_disponible ? 'default' : 'secondary'}>
-                              {empleado.is_disponible ? 'Disponible' : 'No disponible'}
-                            </Badge>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <div className="flex items-center text-sm text-gray-600">
-                            <Mail className="w-3 h-3 mr-2" />
-                            {empleado.email}
-                          </div>
-                          {empleado.user?.phone && (
-                            <div className="flex items-center text-sm text-gray-600">
-                              <Phone className="w-3 h-3 mr-2" />
-                              {empleado.user.phone}
-                            </div>
-                          )}
-                          <div className="text-sm text-gray-600 pt-2 border-t">
-                            <div className="flex justify-between">
-                              <span>Horario:</span>
-                              <span className="font-medium">
-                                {empleado.horario_entrada?.slice(0, 5)} - {empleado.horario_salida?.slice(0, 5)}
-                              </span>
-                            </div>
-                            <div className="flex justify-between mt-1">
-                              <span>Días:</span>
-                              <span className="font-medium">{empleado.dias_trabajo}</span>
-                            </div>
-                          </div>
-                          <div className="flex space-x-2 pt-3">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1"
-                              onClick={() => router.push(`/dashboard/propietario/profesionales/${empleado.id}`)}
-                            >
-                              <Eye className="w-3 h-3 mr-1" />
-                              Ver
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1"
-                              onClick={() => router.push(`/dashboard/propietario/profesionales/${empleado.id}/editar`)}
-                            >
-                              <Edit className="w-3 h-3 mr-1" />
-                              Editar
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+                              {empleado.user?.phone && (
+                                <div className="flex items-center text-sm text-gray-600">
+                                  <Phone className="w-3 h-3 mr-2" />
+                                  {empleado.user.phone}
+                                </div>
+                              )}
+                              <div className="text-sm text-gray-600 pt-2 border-t">
+                                <div className="flex justify-between">
+                                  <span>Horario:</span>
+                                  <span className="font-medium">
+                                    {empleado.horario_entrada?.slice(0, 5)} - {empleado.horario_salida?.slice(0, 5)}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between mt-1">
+                                  <span>Días:</span>
+                                  <span className="font-medium">{empleado.dias_trabajo}</span>
+                                </div>
+                              </div>
+                              <div className="flex space-x-2 pt-3">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1"
+                                  onClick={() => router.push(`/dashboard/propietario/profesionales/${empleado.id}`)}
+                                >
+                                  <Eye className="w-3 h-3 mr-1" />
+                                  Ver
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1"
+                                  onClick={() => router.push(`/dashboard/propietario/profesionales/${empleado.id}/editar`)}
+                                >
+                                  <Edit className="w-3 h-3 mr-1" />
+                                  Editar
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+
+                    {/* Paginación de empleados */}
+                    {totalPagesEmpleados > 1 && (
+                      <div className="flex justify-center items-center space-x-2 mt-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPageEmpleados(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPageEmpleados === 1}
+                        >
+                          Anterior
+                        </Button>
+                        <span className="text-sm text-gray-600">
+                          Página {currentPageEmpleados} de {totalPagesEmpleados}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPageEmpleados(prev => Math.min(prev + 1, totalPagesEmpleados))}
+                          disabled={currentPageEmpleados === totalPagesEmpleados}
+                        >
+                          Siguiente
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="text-center py-12">
                     <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />

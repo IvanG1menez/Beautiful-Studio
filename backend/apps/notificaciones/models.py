@@ -13,7 +13,7 @@ class NotificacionConfig(models.Model):
         related_name='notificacion_config'
     )
     
-    # Notificaciones para profesionales
+    # Notificaciones en la plataforma para profesionales
     notificar_solicitud_turno = models.BooleanField(
         default=True,
         help_text="Notificar cuando un cliente solicita un turno"
@@ -43,6 +43,32 @@ class NotificacionConfig(models.Model):
     notificar_reporte_diario = models.BooleanField(
         default=True,
         help_text="Notificar resumen diario de turnos (solo propietario)"
+    )
+    
+    # Control de envío de emails
+    email_solicitud_turno = models.BooleanField(
+        default=True,
+        help_text="Enviar email cuando se asigna un turno"
+    )
+    email_pago_turno = models.BooleanField(
+        default=True,
+        help_text="Enviar email cuando hay pago pendiente"
+    )
+    email_cancelacion_turno = models.BooleanField(
+        default=True,
+        help_text="Enviar email cuando se cancela un turno"
+    )
+    email_modificacion_turno = models.BooleanField(
+        default=True,
+        help_text="Enviar email cuando se modifica un turno"
+    )
+    email_recordatorio_turno = models.BooleanField(
+        default=True,
+        help_text="Enviar email recordatorio antes del turno"
+    )
+    email_reporte_diario = models.BooleanField(
+        default=True,
+        help_text="Enviar email con reporte diario (solo propietario)"
     )
     
     created_at = models.DateTimeField(auto_now_add=True)

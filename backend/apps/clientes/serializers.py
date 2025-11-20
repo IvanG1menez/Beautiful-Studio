@@ -26,7 +26,10 @@ class ClienteUserSerializer(serializers.ModelSerializer):
 class ClienteListSerializer(serializers.ModelSerializer):
     """Serializer para listar clientes"""
 
-    # Datos del usuario
+    # Objeto user completo
+    user = ClienteUserSerializer(read_only=True)
+    
+    # Datos del usuario (mantener por compatibilidad)
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
     first_name = serializers.CharField(source="user.first_name", read_only=True)
@@ -49,6 +52,7 @@ class ClienteListSerializer(serializers.ModelSerializer):
         model = Cliente
         fields = [
             "id",
+            "user",
             "username",
             "email",
             "first_name",

@@ -8,12 +8,14 @@ from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import Encuesta, EncuestaConfig
+from .models import Encuesta, EncuestaConfig, EncuestaPregunta, RespuestaCliente
 from .serializers import (
     EncuestaCreateSerializer,
     EncuestaListSerializer,
     EncuestaDetailSerializer,
-    EncuestaConfigSerializer
+    EncuestaConfigSerializer,
+    EncuestaPreguntaSerializer,
+    EncuestaRespuestaSerializer,
 )
 from apps.turnos.models import Turno
 from apps.authentication.pagination import CustomPageNumberPagination
@@ -294,3 +296,141 @@ class TurnoEncuestaInfoView(generics.RetrieveAPIView):
                 {'error': 'Turno no encontrado'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+# ==========================================
+# VIEWSETS PARA SISTEMA PARAMETRIZADO
+# ==========================================
+
+class EncuestaPreguntaViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet para gestionar preguntas dinámicas de encuestas.
+    
+    Endpoints:
+    - GET /api/encuestas/preguntas/ - Listar preguntas activas
+    - POST /api/encuestas/preguntas/ - Crear nueva pregunta (solo propietario)
+    - PUT/PATCH /api/encuestas/preguntas/:id/ - Actualizar pregunta (solo propietario)
+    - DELETE /api/encuestas/preguntas/:id/ - Desactivar pregunta (solo propietario)
+    """
+    
+    queryset = EncuestaPregunta.objects.all()
+    serializer_class = EncuestaPreguntaSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Filtrar preguntas activas por defecto"""
+        queryset = super().get_queryset()
+        
+        # Si el usuario no es propietario, solo ver preguntas activas
+        if self.request.user.role not in ['propietario', 'superusuario']:
+            queryset = queryset.filter(is_active=True)
+        
+        # Ordenar por orden
+        return queryset.order_by('orden')
+    
+    def create(self, request, *args, **kwargs):
+        """Solo propietarios pueden crear preguntas"""
+        if request.user.role not in ['propietario', 'superusuario']:
+            return Response(
+                {'error': 'Solo los propietarios pueden crear preguntas'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().create(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        """Solo propietarios pueden actualizar preguntas"""
+        if request.user.role not in ['propietario', 'superusuario']:
+            return Response(
+                {'error': 'Solo los propietarios pueden modificar preguntas'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+    
+    def partial_update(self, request, *args, **kwargs):
+        """Solo propietarios pueden actualizar preguntas"""
+        if request.user.role not in ['propietario', 'superusuario']:
+            return Response(
+                {'error': 'Solo los propietarios pueden modificar preguntas'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().partial_update(request, *args, **kwargs)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Desactivar pregunta en lugar de eliminarla"""
+        if request.user.role not in ['propietario', 'superusuario']:
+            return Response(
+                {'error': 'Solo los propietarios pueden desactivar preguntas'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save()
+        
+        return Response(
+            {'message': 'Pregunta desactivada exitosamente'},
+            status=status.HTTP_200_OK
+        )
+    
+    @action(detail=False, methods=['get'])
+    def activas(self, request):
+        """Obtener solo preguntas activas (para formularios de encuesta)"""
+        preguntas = self.get_queryset().filter(is_active=True)
+        serializer = self.get_serializer(preguntas, many=True)
+        return Response(serializer.data)
+
+
+class EncuestaRespuestaViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet para encuestas con sistema parametrizado.
+    
+    Permite crear encuestas usando preguntas dinámicas configuradas por el propietario.
+    Los clientes responden a las preguntas activas sin límite fijo.
+    
+    Endpoints:
+    - GET /api/encuestas/respuestas/ - Listar encuestas parametrizadas
+    - POST /api/encuestas/respuestas/ - Crear encuesta con respuestas dinámicas
+    - GET /api/encuestas/respuestas/:id/ - Ver detalle con todas las respuestas
+    """
+    
+    queryset = Encuesta.objects.select_related(
+        'cliente__user',
+        'empleado__user',
+        'turno__servicio'
+    ).prefetch_related('respuestas__pregunta').all()
+    
+    serializer_class = EncuestaRespuestaSerializer
+    permission_classes = [AllowAny]  # Permitir acceso público para responder
+    pagination_class = CustomPageNumberPagination
+    
+    def get_queryset(self):
+        """Filtrar por usuario si está autenticado"""
+        if not self.request.user.is_authenticated:
+            return self.queryset.none()
+        
+        user = self.request.user
+        queryset = super().get_queryset()
+        
+        # Propietarios ven todas
+        if user.role in ['propietario', 'superusuario']:
+            return queryset
+        
+        # Profesionales ven solo sus encuestas
+        if user.role == 'profesional' and hasattr(user, 'profesional_profile'):
+            return queryset.filter(empleado=user.profesional_profile)
+        
+        # Clientes ven solo sus encuestas
+        if user.role == 'cliente' and hasattr(user, 'cliente_profile'):
+            return queryset.filter(cliente=user.cliente_profile)
+        
+        return queryset.none()
+    
+    def create(self, request, *args, **kwargs):
+        """Crear encuesta con validaciones"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        encuesta = serializer.save()
+        
+        # Retornar con respuestas incluidas
+        response_serializer = self.get_serializer(encuesta)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)

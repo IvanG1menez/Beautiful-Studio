@@ -1,7 +1,7 @@
 """Serializers para la app de encuestas"""
 
 from rest_framework import serializers
-from .models import Encuesta, EncuestaConfig
+from .models import Encuesta, EncuestaConfig, EncuestaPregunta, RespuestaCliente
 
 
 class EncuestaConfigSerializer(serializers.ModelSerializer):
@@ -73,9 +73,14 @@ class EncuestaCreateSerializer(serializers.ModelSerializer):
             comentario=validated_data.get('comentario', '')
         )
         
-        # Procesamiento síncrono (TODO: implementar Celery para asíncrono)
+        # Procesamiento asíncrono con Celery (o síncrono si Celery no está disponible)
         from .tasks import procesar_resultado_encuesta
-        procesar_resultado_encuesta(encuesta.id)
+        try:
+            # Intentar ejecutar con Celery
+            procesar_resultado_encuesta.delay(encuesta.id)
+        except AttributeError:
+            # Si Celery no está disponible, ejecutar síncronamente
+            procesar_resultado_encuesta(encuesta.id)
         
         return encuesta
 
@@ -201,3 +206,182 @@ class EncuestaDetailSerializer(serializers.ModelSerializer):
             'fecha_hora': obj.turno.fecha_hora,
             'precio_final': float(obj.turno.precio_final) if obj.turno.precio_final else None,
         }
+
+
+# ==========================================
+# SERIALIZERS PARA SISTEMA PARAMETRIZADO
+# ==========================================
+
+class EncuestaPreguntaSerializer(serializers.ModelSerializer):
+    """Serializer para gestión de preguntas dinámicas"""
+    
+    class Meta:
+        model = EncuestaPregunta
+        fields = [
+            'id',
+            'texto',
+            'puntaje_maximo',
+            'orden',
+            'is_active',
+            'categoria',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_orden(self, value):
+        """Validar que el orden sea positivo"""
+        if value < 1:
+            raise serializers.ValidationError("El orden debe ser mayor a 0")
+        return value
+
+
+class RespuestaClienteSerializer(serializers.ModelSerializer):
+    """Serializer para respuestas individuales a preguntas"""
+    
+    pregunta_texto = serializers.CharField(source='pregunta.texto', read_only=True)
+    pregunta_puntaje_maximo = serializers.IntegerField(source='pregunta.puntaje_maximo', read_only=True)
+    
+    class Meta:
+        model = RespuestaCliente
+        fields = [
+            'id',
+            'pregunta',
+            'pregunta_texto',
+            'pregunta_puntaje_maximo',
+            'respuesta_valor',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+    
+    def validate(self, data):
+        """Validar que el valor no supere el máximo de la pregunta"""
+        pregunta = data.get('pregunta')
+        respuesta_valor = data.get('respuesta_valor')
+        
+        if respuesta_valor > pregunta.puntaje_maximo:
+            raise serializers.ValidationError({
+                'respuesta_valor': f"El valor {respuesta_valor} supera el máximo permitido ({pregunta.puntaje_maximo})"
+            })
+        
+        return data
+
+
+class EncuestaRespuestaSerializer(serializers.ModelSerializer):
+    """
+    Serializer para crear encuestas con sistema parametrizado.
+    Acepta un array de respuestas a preguntas dinámicas.
+    """
+    
+    respuestas = RespuestaClienteSerializer(many=True, write_only=True)
+    respuestas_detalle = RespuestaClienteSerializer(many=True, read_only=True, source='respuestas')
+    cliente_info = serializers.SerializerMethodField(read_only=True)
+    empleado_info = serializers.SerializerMethodField(read_only=True)
+    clasificacion_display = serializers.CharField(source='get_clasificacion_display', read_only=True)
+    
+    class Meta:
+        model = Encuesta
+        fields = [
+            'id',
+            'turno',
+            'cliente_info',
+            'empleado_info',
+            'respuestas',
+            'respuestas_detalle',
+            'puntaje',
+            'clasificacion',
+            'clasificacion_display',
+            'comentario',
+            'fecha_respuesta',
+            'procesada',
+        ]
+        read_only_fields = ['id', 'puntaje', 'clasificacion', 'fecha_respuesta', 'procesada']
+    
+    def get_cliente_info(self, obj):
+        if obj.cliente:
+            return {
+                'id': obj.cliente.id,
+                'nombre': obj.cliente.nombre_completo,
+            }
+        return None
+    
+    def get_empleado_info(self, obj):
+        if obj.empleado:
+            return {
+                'id': obj.empleado.id,
+                'nombre': obj.empleado.nombre_completo,
+                'promedio_calificacion': float(obj.empleado.promedio_calificacion),
+                'total_encuestas': obj.empleado.total_encuestas,
+            }
+        return None
+    
+    def validate_turno(self, value):
+        """Validar que el turno esté completado y no tenga encuesta"""
+        if value.estado != 'completado':
+            raise serializers.ValidationError("Solo se pueden evaluar turnos completados")
+        
+        if hasattr(value, 'encuesta'):
+            raise serializers.ValidationError("Este turno ya tiene una encuesta asociada")
+        
+        return value
+    
+    def validate_respuestas(self, value):
+        """Validar que haya al menos una respuesta y que no haya duplicados"""
+        if not value:
+            raise serializers.ValidationError("Debe proporcionar al menos una respuesta")
+        
+        # Verificar que no haya preguntas duplicadas
+        preguntas_ids = [r['pregunta'].id for r in value]
+        if len(preguntas_ids) != len(set(preguntas_ids)):
+            raise serializers.ValidationError("No puede responder la misma pregunta dos veces")
+        
+        return value
+    
+    def create(self, validated_data):
+        """Crear encuesta con respuestas en transacción atómica"""
+        from django.db import transaction
+        
+        respuestas_data = validated_data.pop('respuestas')
+        turno = validated_data['turno']
+        
+        with transaction.atomic():
+            # Crear encuesta
+            encuesta = Encuesta.objects.create(
+                turno=turno,
+                cliente=turno.cliente,
+                empleado=turno.empleado,
+                comentario=validated_data.get('comentario', ''),
+                puntaje=0,  # Se calculará después
+            )
+            
+            # Crear respuestas individuales
+            total_puntos = 0
+            total_maximo = 0
+            
+            for respuesta_data in respuestas_data:
+                RespuestaCliente.objects.create(
+                    encuesta=encuesta,
+                    pregunta=respuesta_data['pregunta'],
+                    respuesta_valor=respuesta_data['respuesta_valor']
+                )
+                
+                # Acumular para calcular puntaje promedio
+                total_puntos += respuesta_data['respuesta_valor']
+                total_maximo += respuesta_data['pregunta'].puntaje_maximo
+            
+            # Calcular puntaje normalizado a escala 0-10
+            if total_maximo > 0:
+                encuesta.puntaje = round((total_puntos / total_maximo) * 10, 2)
+            
+            # Clasificar la encuesta
+            encuesta.clasificar()
+            encuesta.save()
+            
+            # Procesamiento asíncrono con Celery
+            from .tasks import procesar_resultado_encuesta
+            try:
+                procesar_resultado_encuesta.delay(encuesta.id)
+            except AttributeError:
+                procesar_resultado_encuesta(encuesta.id)
+        
+        return encuesta

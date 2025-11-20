@@ -15,6 +15,7 @@ export interface Notificacion {
 
 export interface NotificacionConfig {
   id: number;
+  // Notificaciones en plataforma
   notificar_solicitud_turno: boolean;
   notificar_pago_turno: boolean;
   notificar_cancelacion_turno: boolean;
@@ -22,6 +23,13 @@ export interface NotificacionConfig {
   notificar_nuevo_empleado: boolean;
   notificar_nuevo_cliente: boolean;
   notificar_reporte_diario: boolean;
+  // Notificaciones por email
+  email_solicitud_turno: boolean;
+  email_pago_turno: boolean;
+  email_cancelacion_turno: boolean;
+  email_modificacion_turno: boolean;
+  email_recordatorio_turno: boolean;
+  email_reporte_diario: boolean;
   created_at: string;
   updated_at: string;
 }

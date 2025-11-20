@@ -3,6 +3,7 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
+from django.db import transaction
 
 
 class EncuestaConfig(models.Model):
@@ -253,3 +254,100 @@ class Encuesta(models.Model):
             self.clasificacion = 'Ne'  # Neutral
         else:
             self.clasificacion = 'P'  # Positiva
+
+
+class EncuestaPregunta(models.Model):
+    """
+    Preguntas dinámicas configurables para el sistema de encuestas.
+    Permite que el propietario personalice las preguntas sin modificar código.
+    """
+    texto = models.CharField(
+        max_length=255,
+        verbose_name="Texto de la pregunta",
+        help_text="Pregunta que se mostrará al cliente"
+    )
+    puntaje_maximo = models.PositiveSmallIntegerField(
+        default=10,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+        verbose_name="Puntaje máximo",
+        help_text="Máximo puntaje que puede asignar el cliente (ej: 10)"
+    )
+    orden = models.PositiveSmallIntegerField(
+        default=1,
+        verbose_name="Orden de aparición",
+        help_text="Orden en el que aparece en el formulario"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="Activa",
+        help_text="Si está activa se muestra en las encuestas nuevas"
+    )
+    categoria = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name="Categoría",
+        help_text="Categoría de la pregunta (ej: Servicio, Atención, Instalaciones)"
+    )
+    
+    # Metadatos
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Pregunta de Encuesta"
+        verbose_name_plural = "Preguntas de Encuesta"
+        ordering = ['orden', 'id']
+        indexes = [
+            models.Index(fields=['is_active', 'orden']),
+        ]
+    
+    def __str__(self):
+        estado = "✓" if self.is_active else "✗"
+        return f"[{self.orden}] {estado} {self.texto[:50]}..."
+
+
+class RespuestaCliente(models.Model):
+    """
+    Respuestas individuales del cliente a cada pregunta de la encuesta.
+    Modelo dinámico que se adapta a las preguntas configuradas.
+    """
+    encuesta = models.ForeignKey(
+        'Encuesta',
+        on_delete=models.CASCADE,
+        related_name='respuestas',
+        verbose_name='Encuesta'
+    )
+    pregunta = models.ForeignKey(
+        'EncuestaPregunta',
+        on_delete=models.PROTECT,  # Proteger para no perder historial
+        related_name='respuestas',
+        verbose_name='Pregunta'
+    )
+    respuesta_valor = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(0), MaxValueValidator(10)],
+        verbose_name="Valor de la respuesta",
+        help_text="Puntaje asignado por el cliente (0-10)"
+    )
+    
+    # Metadatos
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "Respuesta de Cliente"
+        verbose_name_plural = "Respuestas de Clientes"
+        unique_together = ['encuesta', 'pregunta']
+        indexes = [
+            models.Index(fields=['encuesta', 'pregunta']),
+            models.Index(fields=['pregunta', 'respuesta_valor']),
+        ]
+    
+    def __str__(self):
+        return f"Encuesta {self.encuesta.id} - {self.pregunta.texto[:30]}... = {self.respuesta_valor}"
+    
+    def clean(self):
+        """Validar que el valor no supere el puntaje máximo de la pregunta"""
+        from django.core.exceptions import ValidationError
+        if self.respuesta_valor > self.pregunta.puntaje_maximo:
+            raise ValidationError(
+                f"El valor {self.respuesta_valor} supera el máximo permitido ({self.pregunta.puntaje_maximo})"
+            )

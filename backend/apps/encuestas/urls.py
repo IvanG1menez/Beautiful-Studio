@@ -7,6 +7,8 @@ from . import views
 router = DefaultRouter()
 router.register(r'encuestas', views.EncuestaViewSet, basename='encuesta')
 router.register(r'config', views.EncuestaConfigViewSet, basename='encuesta-config')
+router.register(r'preguntas', views.EncuestaPreguntaViewSet, basename='encuesta-pregunta')
+router.register(r'respuestas', views.EncuestaRespuestaViewSet, basename='encuesta-respuesta')
 
 urlpatterns = [
     path('turno/<int:turno_id>/info/', views.TurnoEncuestaInfoView.as_view(), name='turno-encuesta-info'),

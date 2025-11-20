@@ -2,8 +2,7 @@
 Tareas asíncronas para el procesamiento de encuestas
 """
 
-# TODO: Implementar Celery en el futuro para procesamiento asíncrono
-# from celery import shared_task
+from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
@@ -15,7 +14,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# @shared_task  # Comentado temporalmente hasta implementar Celery
+@shared_task
 def procesar_resultado_encuesta(encuesta_id):
     """
     Procesar el resultado de una encuesta:
@@ -100,7 +99,7 @@ def procesar_resultado_encuesta(encuesta_id):
         return {'success': False, 'error': str(e)}
 
 
-# @shared_task  # Comentado temporalmente hasta implementar Celery
+@shared_task
 def alerta_propietario_bajo_rendimiento(empleado_id, cantidad_negativas):
     """
     Enviar alerta al propietario cuando un empleado excede el umbral de encuestas negativas
@@ -222,7 +221,7 @@ def alerta_propietario_bajo_rendimiento(empleado_id, cantidad_negativas):
         return {'success': False, 'error': str(e)}
 
 
-# @shared_task  # Comentado temporalmente hasta implementar Celery
+@shared_task
 def enviar_encuesta_post_servicio(turno_id):
     """
     Enviar encuesta de satisfacción al cliente después de completar un servicio
