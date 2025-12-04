@@ -8,7 +8,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 
-from .models import PermisoAdicional, Configuracion, AuditoriaAcciones
+from .models import PermisoAdicional, Configuracion, AuditoriaAcciones, ConfiguracionSSO
 from .serializers import (
     RegisterSerializer,
     UserSerializer,
@@ -16,6 +16,8 @@ from .serializers import (
     ConfiguracionSerializer,
     AuditoriaAccionesSerializer,
     UsuarioBasicoSerializer,
+    ConfiguracionSSOSerializer,
+    ConfiguracionSSOPublicSerializer,
 )
 
 
@@ -334,3 +336,67 @@ class UsuarioBasicoViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         return queryset.order_by("first_name", "last_name")
+
+
+# ==========================================
+# Vistas para Configuración SSO
+# ==========================================
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def configuracion_sso_public_view(request):
+    """
+    Vista pública para obtener configuración de SSO (sin credenciales)
+    Permite al frontend saber si debe mostrar el botón de Google SSO
+    """
+    config = ConfiguracionSSO.get_config()
+    serializer = ConfiguracionSSOPublicSerializer(config)
+    return Response(serializer.data)
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def configuracion_sso_view(request):
+    """
+    Vista para gestionar configuración de SSO (solo propietario)
+    GET: Obtener configuración completa (con credenciales para propietario)
+    PATCH: Actualizar configuración (solo propietario)
+    """
+    # Verificar que el usuario sea propietario
+    if request.user.role != 'propietario':
+        return Response(
+            {'error': 'Solo el propietario puede gestionar la configuración de SSO'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    config = ConfiguracionSSO.get_config()
+    
+    if request.method == 'GET':
+        serializer = ConfiguracionSSOSerializer(config)
+        return Response(serializer.data)
+    
+    elif request.method == 'PATCH':
+        serializer = ConfiguracionSSOSerializer(config, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            
+            # Registrar acción en auditoría (opcional, no falla si la tabla no existe)
+            try:
+                AuditoriaAcciones.objects.create(
+                    usuario=request.user,
+                    accion='editar',
+                    modelo_afectado='ConfiguracionSSO',
+                    objeto_id=config.id,
+                    detalles={'cambios': request.data},
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')
+                )
+            except Exception as e:
+                # Si falla la auditoría, registrar en logs pero no fallar la request
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'No se pudo registrar auditoría: {e}')
+            
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

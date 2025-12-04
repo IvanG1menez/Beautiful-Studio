@@ -259,7 +259,7 @@ export default function DashboardAdminPage() {
             </div>
             <div className="flex space-x-3">
               <Button
-                onClick={() => router.push('/dashboard/propietario/usuarios')}
+                onClick={() => router.push('/dashboard/propietario/configuracion')}
                 className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
               >
                 <Settings className="w-4 h-4 mr-2" />

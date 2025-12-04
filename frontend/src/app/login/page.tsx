@@ -1,10 +1,12 @@
 'use client';
 
+import GoogleSSOButton from '@/components/auth/GoogleSSOButton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { AlertCircle, Eye, EyeOff, Loader2, Scissors } from 'lucide-react';
 import Link from 'next/link';
@@ -231,6 +233,17 @@ export default function LoginPage() {
                 {isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
               </Button>
             </form>
+
+            {/* Divisor para Google SSO */}
+            <div className="relative my-6">
+              <Separator />
+              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-xs text-gray-500">
+                O continúa con
+              </span>
+            </div>
+
+            {/* Botón de Google SSO */}
+            <GoogleSSOButton />
 
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-600">

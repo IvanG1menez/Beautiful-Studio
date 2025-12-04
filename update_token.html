@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Actualizar Token - Beautiful Studio</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #2196F3;
+        }
+        .warning {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #ffc107;
+        }
+        .success {
+            background: #d4edda;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #28a745;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin: 10px 0;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+        button.secondary {
+            background: #6c757d;
+        }
+        button.secondary:hover {
+            background: #5a6268;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔑 Actualizar Token de Autenticación</h1>
+        
+        <div class="warning">
+            <strong>⚠️ Importante:</strong> Esta página te ayudará a actualizar el token de autenticación en tu navegador.
+        </div>
+
+        <h2>Opción 1: Actualizar token manualmente</h2>
+        <p>Pega el token que obtuviste del backend:</p>
+        <input type="text" id="tokenInput" placeholder="Pega aquí el token">
+        <button onclick="updateToken()">Actualizar Token</button>
+
+        <hr style="margin: 30px 0;">
+
+        <h2>Opción 2: Cerrar sesión y volver a iniciar</h2>
+        <p>Esta es la opción más segura y recomendada.</p>
+        <button class="secondary" onclick="clearAndLogout()">Limpiar token y cerrar sesión</button>
+
+        <hr style="margin: 30px 0;">
+
+        <h3>Estado actual:</h3>
+        <div id="status" class="info">
+            <strong>Token actual:</strong> <span id="currentToken">Verificando...</span>
+        </div>
+
+        <div id="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        // Mostrar token actual al cargar
+        window.onload = function() {
+            const currentToken = localStorage.getItem('auth_token');
+            document.getElementById('currentToken').textContent = currentToken || 'No hay token';
+        };
+
+        function updateToken() {
+            const token = document.getElementById('tokenInput').value.trim();
+            
+            if (!token) {
+                showResult('❌ Por favor, pega un token válido', 'warning');
+                return;
+            }
+
+            localStorage.setItem('auth_token', token);
+            document.getElementById('currentToken').textContent = token;
+            
+            showResult('✅ Token actualizado correctamente. Recarga la página de configuración para usarlo.', 'success');
+        }
+
+        function clearAndLogout() {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user');
+            document.getElementById('currentToken').textContent = 'No hay token';
+            
+            showResult('✅ Token eliminado. Ahora puedes cerrar esta página e iniciar sesión nuevamente en http://localhost:3000/login', 'success');
+        }
+
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = type;
+            resultDiv.innerHTML = message;
+            resultDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+            }, 10000);
+        }
+    </script>
+</body>
+</html>

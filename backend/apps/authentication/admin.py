@@ -2,7 +2,8 @@ from django.contrib import admin
 from .models import (
     PermisoAdicional,
     Configuracion,
-    AuditoriaAcciones
+    AuditoriaAcciones,
+    ConfiguracionSSO
 )
 
 
@@ -73,5 +74,50 @@ class AuditoriaAccionesAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """
         No permitir eliminar registros de auditoría
+        """
+        return False
+
+
+@admin.register(ConfiguracionSSO)
+class ConfiguracionSSOAdmin(admin.ModelAdmin):
+    """
+    Configuración del admin para ConfiguracionSSO (Singleton)
+    """
+    list_display = [
+        'id', 'google_sso_activo', 'autocreacion_cliente_sso',
+        'activo', 'created_at', 'updated_at'
+    ]
+    list_filter = ['google_sso_activo', 'autocreacion_cliente_sso', 'activo']
+    readonly_fields = ['created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Configuración Google SSO', {
+            'fields': ('google_sso_activo', 'autocreacion_cliente_sso')
+        }),
+        ('Credenciales Google OAuth', {
+            'fields': ('client_id', 'client_secret'),
+            'description': 'Credenciales de Google Cloud Console para OAuth 2.0'
+        }),
+        ('Estado', {
+            'fields': ('activo',)
+        }),
+        ('Información del Sistema', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        """
+        Solo permitir un registro de configuración SSO (Singleton)
+        """
+        from .models import ConfiguracionSSO
+        if ConfiguracionSSO.objects.exists():
+            return False
+        return super().has_add_permission(request)
+    
+    def has_delete_permission(self, request, obj=None):
+        """
+        No permitir eliminar la configuración SSO
         """
         return False

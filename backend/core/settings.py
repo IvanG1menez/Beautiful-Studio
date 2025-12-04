@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_celery_beat",
     "django_celery_results",
+    "social_django",  # Google OAuth
     # Local apps
     "apps.authentication",
     "apps.users",
@@ -196,11 +197,56 @@ else:
 # Custom User Model
 AUTH_USER_MODEL = "users.User"
 
-# Authentication Backends - Usar email para login
+# Authentication Backends - Usar email para login + Google OAuth
 AUTHENTICATION_BACKENDS = [
+    'social_core.backends.google.GoogleOAuth2',  # Google OAuth2
     'apps.users.backends.EmailBackend',  # Backend personalizado para email
     'django.contrib.auth.backends.ModelBackend',  # Fallback al backend por defecto
 ]
+
+# ============================================================================
+# GOOGLE OAUTH CONFIGURATION
+# ============================================================================
+SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config('GOOGLE_OAUTH2_CLIENT_ID', default='')
+SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config('GOOGLE_OAUTH2_CLIENT_SECRET', default='')
+
+# Redirect URLs
+SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = config(
+    'GOOGLE_OAUTH2_REDIRECT_URI',
+    default='http://localhost:8000/api/auth/google/callback/'
+)
+
+# Scope de Google OAuth (qué permisos solicitar)
+SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = [
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+]
+
+# Usuario activo por defecto
+SOCIAL_AUTH_GOOGLE_OAUTH2_USER_FIELDS = ['email', 'first_name', 'last_name']
+
+# Pipeline personalizado para crear usuarios con rol Cliente
+SOCIAL_AUTH_PIPELINE = (
+    'social_core.pipeline.social_auth.social_details',
+    'social_core.pipeline.social_auth.social_uid',
+    'social_core.pipeline.social_auth.auth_allowed',
+    'social_core.pipeline.social_auth.social_user',
+    'apps.authentication.pipeline.associate_by_email',  # Asociar por email si el usuario ya existe
+    'social_core.pipeline.user.get_username',
+    'apps.authentication.pipeline.create_user_with_username',  # Pipeline personalizado para generar username
+    'social_core.pipeline.social_auth.associate_user',
+    'social_core.pipeline.social_auth.load_extra_data',
+    'social_core.pipeline.user.user_details',
+    'apps.authentication.pipeline.create_cliente_profile',  # Pipeline personalizado para crear perfil Cliente
+)
+
+# Configuración adicional de social auth
+SOCIAL_AUTH_URL_NAMESPACE = 'social'
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/dashboard/cliente'
+SOCIAL_AUTH_LOGIN_ERROR_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/login?error=oauth'
+SOCIAL_AUTH_RAISE_EXCEPTIONS = False
+SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ['username', 'first_name', 'last_name', 'email']
+
 
 # Django JET Configuration
 JET_DEFAULT_THEME = "light-blue"

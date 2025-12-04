@@ -29,7 +29,8 @@ urlpatterns = [
     ),  # Django JET dashboard
     path("admin/", admin.site.urls),  # Django admin
     path("api/", include(router.urls)),
-    path("api/auth/", include("apps.authentication.urls")),
+    path("api/", include("apps.authentication.urls")),  # Authentication URLs
+    path("api/auth/", include("social_django.urls", namespace="social")),  # Google OAuth URLs
     path("api/users/", include("apps.users.urls")),
     path("api/empleados/", include("apps.empleados.urls")),
     path("api/clientes/", include("apps.clientes.urls")),

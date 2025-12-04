@@ -134,3 +134,72 @@ class AuditoriaAcciones(models.Model):
         )
         accion_display = getattr(self, "get_accion_display", lambda: str(self.accion))()
         return f"{usuario_str} - {accion_display} - " f"{self.created_at}"
+
+
+class ConfiguracionSSO(models.Model):
+    """
+    Modelo para configuración de Google SSO
+    Singleton - Solo debe existir un registro
+    """
+    
+    google_sso_activo = models.BooleanField(
+        default=True,
+        verbose_name="Google SSO Activo",
+        help_text="Activar/desactivar inicio de sesión con Google"
+    )
+    
+    autocreacion_cliente_sso = models.BooleanField(
+        default=True,
+        verbose_name="Auto-creación de Cliente SSO",
+        help_text="Crear automáticamente perfil de Cliente para usuarios que se registren con Google"
+    )
+    
+    client_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name="Google Client ID",
+        help_text="Client ID de Google Cloud Console"
+    )
+    
+    client_secret = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name="Google Client Secret",
+        help_text="Client Secret de Google Cloud Console"
+    )
+    
+    activo = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración SSO"
+        verbose_name_plural = "Configuración SSO"
+
+    def __str__(self) -> str:
+        status = "Activo" if self.google_sso_activo else "Inactivo"
+        return f"Configuración SSO - {status}"
+
+    @classmethod
+    def get_config(cls):
+        """
+        Método para obtener o crear la configuración (Singleton)
+        """
+        config, created = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                'google_sso_activo': True,
+                'autocreacion_cliente_sso': True,
+                'activo': True
+            }
+        )
+        return config
+    
+    def save(self, *args, **kwargs):
+        """
+        Override save para asegurar que solo exista un registro
+        """
+        self.pk = 1
+        super().save(*args, **kwargs)

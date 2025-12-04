@@ -45,3 +45,13 @@ urllib3==2.5.0
 vine==5.1.0
 wcwidth==0.2.14
 whitenoise==6.11.0
+
+# Celery para tareas asíncronas
+celery==5.4.0
+redis==5.2.0
+django-celery-beat==2.7.0
+django-celery-results==2.5.1
+
+# Social Auth para Google OAuth
+social-auth-app-django==5.4.2
+social-auth-core==4.5.4

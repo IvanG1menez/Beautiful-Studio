@@ -4,7 +4,8 @@ from django.contrib.auth.password_validation import validate_password
 from .models import (
     PermisoAdicional,
     Configuracion,
-    AuditoriaAcciones
+    AuditoriaAcciones,
+    ConfiguracionSSO
 )
 
 
@@ -177,3 +178,30 @@ class UsuarioBasicoSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'username', 'first_name', 'last_name', 'email', 'role'
         ]
+
+
+class ConfiguracionSSOSerializer(serializers.ModelSerializer):
+    """
+    Serializer para la configuración de Google SSO (completo, para propietario)
+    """
+    class Meta:
+        model = ConfiguracionSSO
+        fields = [
+            'id', 'google_sso_activo', 'autocreacion_cliente_sso', 
+            'client_id', 'client_secret', 'activo'
+        ]
+        read_only_fields = ['id']
+        # NO poner write_only en client_secret para que el propietario pueda verlo
+        extra_kwargs = {
+            'client_secret': {'required': False}
+        }
+
+
+class ConfiguracionSSOPublicSerializer(serializers.ModelSerializer):
+    """
+    Serializer público para la configuración de SSO (sin credenciales sensibles)
+    """
+    class Meta:
+        model = ConfiguracionSSO
+        fields = ['id', 'google_sso_activo', 'autocreacion_cliente_sso']
+        read_only_fields = ['id', 'google_sso_activo', 'autocreacion_cliente_sso']

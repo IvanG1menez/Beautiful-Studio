@@ -1,10 +1,12 @@
 'use client';
 
+import GoogleSSOButton from '@/components/auth/GoogleSSOButton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { authService } from '@/services/auth';
 import { CheckCircle, Eye, EyeOff, Loader2, Scissors } from 'lucide-react';
 import Link from 'next/link';
@@ -370,6 +372,17 @@ export default function RegisterPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Divisor para Google SSO */}
+              <div className="relative my-6">
+                <Separator />
+                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-xs text-gray-500">
+                  O regístrate con
+                </span>
+              </div>
+
+              {/* Botón de Google SSO */}
+              <GoogleSSOButton />
 
               {/* Botón de submit */}
               <Button
