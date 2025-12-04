@@ -238,11 +238,12 @@ SOCIAL_AUTH_PIPELINE = (
     'social_core.pipeline.social_auth.load_extra_data',
     'social_core.pipeline.user.user_details',
     'apps.authentication.pipeline.create_cliente_profile',  # Pipeline personalizado para crear perfil Cliente
+    'apps.authentication.pipeline.redirect_with_token',  # Redirigir al frontend con el token
 )
 
 # Configuración adicional de social auth
 SOCIAL_AUTH_URL_NAMESPACE = 'social'
-SOCIAL_AUTH_LOGIN_REDIRECT_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/dashboard/cliente'
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/auth/callback'
 SOCIAL_AUTH_LOGIN_ERROR_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/login?error=oauth'
 SOCIAL_AUTH_RAISE_EXCEPTIONS = False
 SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ['username', 'first_name', 'last_name', 'email']

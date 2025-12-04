@@ -83,23 +83,25 @@ export default function DashboardClienteLayout({
         {/* Sidebar */}
         <aside
           className={`
-            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+            ${isMobile && !sidebarOpen ? '-translate-x-full' : 'translate-x-0'}
             ${isMobile ? 'absolute z-40' : 'relative'}
-            transition-transform duration-300 ease-in-out
-            w-64 bg-linear-to-b from-purple-900 to-purple-800 text-white
+            ${sidebarOpen ? 'w-64' : 'w-20'}
+            transition-all duration-300 ease-in-out
+            bg-gradient-to-b from-purple-900 to-purple-800 text-white
             flex flex-col
             h-full
           `}
         >
           <div className="p-4 border-b border-purple-700">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-lg">Mi Portal</h3>
+              {sidebarOpen && <h3 className="font-semibold text-lg">Mi Portal</h3>}
               {!isMobile && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="text-white hover:bg-purple-700"
+                  className="text-white hover:bg-purple-700 ml-auto"
+                  title={sidebarOpen ? 'Contraer menú' : 'Expandir menú'}
                 >
                   {sidebarOpen ? (
                     <ChevronLeft className="h-4 w-4" />
@@ -118,9 +120,11 @@ export default function DashboardClienteLayout({
                 <Link
                   key={item.href}
                   href={item.href}
+                  title={!sidebarOpen ? item.label : undefined}
                   className={`
                     flex items-center gap-3 px-4 py-3 rounded-lg
                     transition-colors duration-200
+                    ${sidebarOpen ? '' : 'justify-center'}
                     ${item.active
                       ? 'bg-white text-purple-900 shadow-md'
                       : 'text-purple-100 hover:bg-purple-700 hover:text-white'
@@ -128,19 +132,21 @@ export default function DashboardClienteLayout({
                   `}
                   onClick={() => isMobile && setSidebarOpen(false)}
                 >
-                  <Icon className="h-5 w-5" />
-                  <span className="font-medium">{item.label}</span>
+                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  {sidebarOpen && <span className="font-medium">{item.label}</span>}
                 </Link>
               );
             })}
           </nav>
 
-          <div className="p-4 border-t border-purple-700">
-            <div className="text-xs text-purple-200">
-              <p>Beautiful Studio</p>
-              <p className="mt-1">Tu belleza, nuestra pasión</p>
+          {sidebarOpen && (
+            <div className="p-4 border-t border-purple-700">
+              <div className="text-xs text-purple-200">
+                <p>Beautiful Studio</p>
+                <p className="mt-1">Tu belleza, nuestra pasión</p>
+              </div>
             </div>
-          </div>
+          )}
         </aside>
 
         <main className="flex-1 overflow-y-auto bg-gray-50">
