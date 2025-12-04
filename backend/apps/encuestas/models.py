@@ -93,84 +93,6 @@ class Encuesta(models.Model):
         related_name='encuesta',
         verbose_name='Turno asociado'
     )
-    cliente = models.ForeignKey(
-        'clientes.Cliente',
-        on_delete=models.CASCADE,
-        related_name='encuestas',
-        verbose_name='Cliente',
-        null=True,
-        blank=True
-    )
-    empleado = models.ForeignKey(
-        'empleados.Empleado',
-        on_delete=models.CASCADE,
-        related_name='encuestas',
-        verbose_name='Profesional evaluado',
-        null=True,
-        blank=True
-    )
-    
-    # 10 PREGUNTAS DE LA ENCUESTA (0-10 cada una)
-    # 1. Calidad del servicio
-    pregunta1_calidad_servicio = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Qué tan satisfecho estás con la calidad del servicio?"
-    )
-    # 2. Profesionalismo
-    pregunta2_profesionalismo = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Cómo calificarías el profesionalismo del especialista?"
-    )
-    # 3. Puntualidad
-    pregunta3_puntualidad = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿El servicio comenzó a tiempo?"
-    )
-    # 4. Limpieza
-    pregunta4_limpieza = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Cómo calificarías la limpieza e higiene del lugar?"
-    )
-    # 5. Atención al cliente
-    pregunta5_atencion = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Cómo fue la atención recibida?"
-    )
-    # 6. Resultado final
-    pregunta6_resultado = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Estás satisfecho con el resultado final?"
-    )
-    # 7. Relación calidad-precio
-    pregunta7_precio = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Consideras que el precio es justo?"
-    )
-    # 8. Comodidad
-    pregunta8_comodidad = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Te sentiste cómodo durante el servicio?"
-    )
-    # 9. Comunicación
-    pregunta9_comunicacion = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿El especialista te explicó claramente el proceso?"
-    )
-    # 10. Recomendación
-    pregunta10_recomendacion = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        default=5,
-        verbose_name="¿Qué tan probable es que recomiendes este servicio?"
-    )
     
     # Puntaje promedio calculado
     puntaje = models.DecimalField(
@@ -188,23 +110,8 @@ class Encuesta(models.Model):
         help_text="Clasificación automática según puntaje promedio"
     )
     
-    # Comentario opcional
-    comentario = models.TextField(
-        blank=True,
-        null=True,
-        help_text="Comentarios adicionales del cliente"
-    )
-    
     # Control
     fecha_respuesta = models.DateTimeField(auto_now_add=True)
-    procesada = models.BooleanField(
-        default=False,
-        help_text="Indica si ya se procesó para ranking y alertas"
-    )
-    alerta_enviada = models.BooleanField(
-        default=False,
-        help_text="Indica si se envió alerta al propietario"
-    )
     
     # Metadatos
     created_at = models.DateTimeField(auto_now_add=True)
@@ -215,12 +122,12 @@ class Encuesta(models.Model):
         verbose_name_plural = "Encuestas de Satisfacción"
         ordering = ['-fecha_respuesta']
         indexes = [
-            models.Index(fields=['empleado', 'clasificacion', 'fecha_respuesta']),
-            models.Index(fields=['cliente', 'fecha_respuesta']),
+            models.Index(fields=['turno', 'clasificacion', 'fecha_respuesta']),
         ]
     
     def __str__(self):
-        return f"Encuesta {self.id} - {self.empleado.nombre_completo} ({self.puntaje}/10 - {self.get_clasificacion_display()})"
+        empleado = self.turno.empleado.nombre_completo if self.turno and self.turno.empleado else 'Sin empleado'
+        return f"Encuesta {self.id} - {empleado} ({self.puntaje}/10 - {self.get_clasificacion_display()})"
     
     def save(self, *args, **kwargs):
         """Calcular puntaje promedio y clasificar automáticamente"""
@@ -229,19 +136,15 @@ class Encuesta(models.Model):
         super().save(*args, **kwargs)
     
     def calcular_puntaje_promedio(self):
-        """Calcular el promedio de las 10 preguntas"""
-        total = (
-            self.pregunta1_calidad_servicio +
-            self.pregunta2_profesionalismo +
-            self.pregunta3_puntualidad +
-            self.pregunta4_limpieza +
-            self.pregunta5_atencion +
-            self.pregunta6_resultado +
-            self.pregunta7_precio +
-            self.pregunta8_comodidad +
-            self.pregunta9_comunicacion +
-            self.pregunta10_recomendacion
-        )
+        """Calcular el promedio de las respuestas dinámicas"""
+        respuestas = self.respuestas.all()
+        if not respuestas.exists():
+            self.puntaje = 5.0  # Valor por defecto
+            return
+        
+        total = sum(r.respuesta_valor for r in respuestas)
+        cantidad = respuestas.count()
+        self.puntaje = round(total / cantidad, 2) if cantidad > 0 else 5.0
         self.puntaje = round(total / 10, 2)
     
     def clasificar(self):

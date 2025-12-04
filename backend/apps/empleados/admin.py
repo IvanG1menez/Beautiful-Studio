@@ -6,8 +6,8 @@ from .models import Empleado, EmpleadoServicio, HorarioEmpleado
 class ProfesionalAdmin(admin.ModelAdmin):
     """Administración de Profesionales del salón"""
 
-    list_display = ["user", "especialidades", "is_disponible", "fecha_ingreso"]
-    list_filter = ["especialidades", "is_disponible"]
+    list_display = ["user", "is_disponible", "fecha_ingreso"]
+    list_filter = ["is_disponible"]
     search_fields = ["user__first_name", "user__last_name", "user__email"]
     readonly_fields = ["created_at", "updated_at"]
 

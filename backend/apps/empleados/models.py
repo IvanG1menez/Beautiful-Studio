@@ -27,11 +27,6 @@ class Empleado(models.Model):
         related_name="profesional_profile",
         verbose_name="Usuario",
     )
-    especialidades = models.CharField(
-        max_length=20,
-        choices=ESPECIALIDAD_CHOICES,
-        verbose_name="Especialidad principal",
-    )
     fecha_ingreso = models.DateField(verbose_name="Fecha de ingreso")
     horario_entrada = models.TimeField(verbose_name="Hora de entrada")
     horario_salida = models.TimeField(verbose_name="Hora de salida")
@@ -79,8 +74,7 @@ class Empleado(models.Model):
 
     def __str__(self):
         try:
-            especialidad = self.get_especialidades_display()
-            return f"{self.user.full_name} - {especialidad}"
+            return f"{self.user.full_name}"
         except AttributeError:
             return f"Profesional #{self.pk}"
 

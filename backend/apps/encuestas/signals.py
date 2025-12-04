@@ -37,7 +37,7 @@ def enviar_email_encuesta_automatico(sender, instance, created, **kwargs):
         contexto = {
             'cliente_nombre': instance.cliente.nombre_completo,
             'servicio': instance.servicio.nombre,
-            'profesional': instance.empleado.nombre_completo,
+            'profesional': instance.empleado.nombre_completo if instance.empleado else 'Profesional',
             'fecha': instance.fecha_hora.strftime('%d/%m/%Y'),
             'hora': instance.fecha_hora.strftime('%H:%M'),
             'link_encuesta': link_encuesta,

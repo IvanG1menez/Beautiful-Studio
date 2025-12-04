@@ -22,23 +22,19 @@ class EncuestaConfigSerializer(serializers.ModelSerializer):
 
 
 class EncuestaCreateSerializer(serializers.ModelSerializer):
-    """Serializer para crear una encuesta (respuesta del cliente con 10 preguntas)"""
+    """Serializer para crear una encuesta (respuesta del cliente con sistema dinámico)"""
+    
+    respuestas = serializers.ListField(
+        child=serializers.DictField(child=serializers.IntegerField()),
+        write_only=True,
+        help_text="Lista de respuestas: [{'pregunta_id': 1, 'valor': 8}, ...]"
+    )
     
     class Meta:
         model = Encuesta
         fields = [
             'turno',
-            'pregunta1_calidad_servicio',
-            'pregunta2_profesionalismo',
-            'pregunta3_puntualidad',
-            'pregunta4_limpieza',
-            'pregunta5_atencion',
-            'pregunta6_resultado',
-            'pregunta7_precio',
-            'pregunta8_comodidad',
-            'pregunta9_comunicacion',
-            'pregunta10_recomendacion',
-            'comentario',
+            'respuestas',
         ]
     
     def validate_turno(self, value):
@@ -52,35 +48,42 @@ class EncuestaCreateSerializer(serializers.ModelSerializer):
         return value
     
     def create(self, validated_data):
-        """Crear encuesta y disparar procesamiento"""
+        """Crear encuesta con respuestas dinámicas"""
+        from django.db import transaction
+        
         turno = validated_data['turno']
+        respuestas_data = validated_data['respuestas']
         
-        # Crear encuesta con datos relacionados
-        encuesta = Encuesta.objects.create(
-            turno=turno,
-            cliente=turno.cliente,
-            empleado=turno.empleado,
-            pregunta1_calidad_servicio=validated_data['pregunta1_calidad_servicio'],
-            pregunta2_profesionalismo=validated_data['pregunta2_profesionalismo'],
-            pregunta3_puntualidad=validated_data['pregunta3_puntualidad'],
-            pregunta4_limpieza=validated_data['pregunta4_limpieza'],
-            pregunta5_atencion=validated_data['pregunta5_atencion'],
-            pregunta6_resultado=validated_data['pregunta6_resultado'],
-            pregunta7_precio=validated_data['pregunta7_precio'],
-            pregunta8_comodidad=validated_data['pregunta8_comodidad'],
-            pregunta9_comunicacion=validated_data['pregunta9_comunicacion'],
-            pregunta10_recomendacion=validated_data['pregunta10_recomendacion'],
-            comentario=validated_data.get('comentario', '')
-        )
-        
-        # Procesamiento asíncrono con Celery (o síncrono si Celery no está disponible)
-        from .tasks import procesar_resultado_encuesta
-        try:
-            # Intentar ejecutar con Celery
-            procesar_resultado_encuesta.delay(encuesta.id)
-        except AttributeError:
-            # Si Celery no está disponible, ejecutar síncronamente
-            procesar_resultado_encuesta(encuesta.id)
+        with transaction.atomic():
+            # Crear encuesta
+            encuesta = Encuesta.objects.create(
+                turno=turno,
+                puntaje=0,  # Se calculará con respuestas
+            )
+            
+            # Crear respuestas individuales
+            for respuesta_data in respuestas_data:
+                pregunta_id = respuesta_data['pregunta_id']
+                valor = respuesta_data['valor']
+                
+                pregunta = EncuestaPregunta.objects.get(id=pregunta_id)
+                RespuestaCliente.objects.create(
+                    encuesta=encuesta,
+                    pregunta=pregunta,
+                    respuesta_valor=valor
+                )
+            
+            # Calcular puntaje y clasificar
+            encuesta.calcular_puntaje_promedio()
+            encuesta.clasificar()
+            encuesta.save()
+            
+            # Procesamiento asíncrono
+            from .tasks import procesar_resultado_encuesta
+            try:
+                procesar_resultado_encuesta.delay(encuesta.id)
+            except AttributeError:
+                procesar_resultado_encuesta(encuesta.id)
         
         return encuesta
 
@@ -101,49 +104,44 @@ class EncuestaListSerializer(serializers.ModelSerializer):
             'cliente',
             'empleado',
             'servicio',
-            # 10 preguntas
-            'pregunta1_calidad_servicio',
-            'pregunta2_profesionalismo',
-            'pregunta3_puntualidad',
-            'pregunta4_limpieza',
-            'pregunta5_atencion',
-            'pregunta6_resultado',
-            'pregunta7_precio',
-            'pregunta8_comodidad',
-            'pregunta9_comunicacion',
-            'pregunta10_recomendacion',
-            # Resultado
             'puntaje',
             'clasificacion',
             'clasificacion_display',
-            'comentario',
             'fecha_respuesta',
-            'procesada',
-            'alerta_enviada',
         ]
-        read_only_fields = ['id', 'clasificacion', 'fecha_respuesta', 'procesada', 'alerta_enviada']
+        read_only_fields = ['id', 'clasificacion', 'fecha_respuesta']
     
     def get_cliente(self, obj):
-        return {
-            'id': obj.cliente.id,
-            'nombre': obj.cliente.nombre_completo,
-            'email': obj.cliente.user.email,
-        }
+        cliente = obj.turno.cliente if obj.turno else None
+        if cliente:
+            return {
+                'id': cliente.id,
+                'nombre': cliente.nombre_completo,
+                'email': cliente.user.email,
+            }
+        return None
     
     def get_empleado(self, obj):
-        return {
-            'id': obj.empleado.id,
-            'nombre': obj.empleado.nombre_completo,
-            'especialidad': obj.empleado.get_especialidades_display(),
-        }
+        empleado = obj.turno.empleado if obj.turno else None
+        if empleado:
+            return {
+                'id': empleado.id,
+                'nombre': empleado.nombre_completo,
+            }
+        return None
     
     def get_servicio(self, obj):
-        return {
-            'nombre': obj.turno.servicio.nombre,
-            'categoria': obj.turno.servicio.categoria.nombre,
-        }
+        if obj.turno:
+            return {
+                'nombre': obj.turno.servicio.nombre,
+                'categoria': obj.turno.servicio.categoria.nombre,
+            }
+        return None
 
 
+class EncuestaDetailSerializer(serializers.ModelSerializer):
+    """Serializer detallado para una encuesta con todas las respuestas"""
+    
 class EncuestaDetailSerializer(serializers.ModelSerializer):
     """Serializer detallado para una encuesta con todas las respuestas"""
     
@@ -160,52 +158,45 @@ class EncuestaDetailSerializer(serializers.ModelSerializer):
             'turno_info',
             'cliente',
             'empleado',
-            # 10 preguntas
-            'pregunta1_calidad_servicio',
-            'pregunta2_profesionalismo',
-            'pregunta3_puntualidad',
-            'pregunta4_limpieza',
-            'pregunta5_atencion',
-            'pregunta6_resultado',
-            'pregunta7_precio',
-            'pregunta8_comodidad',
-            'pregunta9_comunicacion',
-            'pregunta10_recomendacion',
-            # Resultado
+            'respuestas_detalle',
             'puntaje',
             'clasificacion',
             'clasificacion_display',
-            'comentario',
             'fecha_respuesta',
-            'procesada',
-            'alerta_enviada',
             'created_at',
             'updated_at',
         ]
     
     def get_cliente(self, obj):
-        return {
-            'id': obj.cliente.id,
-            'nombre_completo': obj.cliente.nombre_completo,
-            'email': obj.cliente.user.email,
-        }
+        cliente = obj.turno.cliente if obj.turno else None
+        if cliente:
+            return {
+                'id': cliente.id,
+                'nombre_completo': cliente.nombre_completo,
+                'email': cliente.user.email,
+            }
+        return None
     
     def get_empleado(self, obj):
-        return {
-            'id': obj.empleado.id,
-            'nombre_completo': obj.empleado.nombre_completo,
-            'especialidad': obj.empleado.get_especialidades_display(),
-            'promedio_calificacion': float(obj.empleado.promedio_calificacion),
-            'total_encuestas': obj.empleado.total_encuestas,
-        }
+        empleado = obj.turno.empleado if obj.turno else None
+        if empleado:
+            return {
+                'id': empleado.id,
+                'nombre_completo': empleado.nombre_completo,
+                'promedio_calificacion': float(empleado.promedio_calificacion),
+                'total_encuestas': empleado.total_encuestas,
+            }
+        return None
     
     def get_turno_info(self, obj):
-        return {
-            'id': obj.turno.id,
-            'servicio': obj.turno.servicio.nombre,
-            'fecha_hora': obj.turno.fecha_hora,
-            'precio_final': float(obj.turno.precio_final) if obj.turno.precio_final else None,
-        }
+        if obj.turno:
+            return {
+                'id': obj.turno.id,
+                'servicio': obj.turno.servicio.nombre,
+                'fecha_hora': obj.turno.fecha_hora,
+                'precio_final': float(obj.turno.precio_final) if obj.turno.precio_final else None,
+            }
+        return None
 
 
 # ==========================================
@@ -291,27 +282,27 @@ class EncuestaRespuestaSerializer(serializers.ModelSerializer):
             'puntaje',
             'clasificacion',
             'clasificacion_display',
-            'comentario',
             'fecha_respuesta',
-            'procesada',
         ]
-        read_only_fields = ['id', 'puntaje', 'clasificacion', 'fecha_respuesta', 'procesada']
+        read_only_fields = ['id', 'puntaje', 'clasificacion', 'fecha_respuesta']
     
     def get_cliente_info(self, obj):
-        if obj.cliente:
+        cliente = obj.turno.cliente if obj.turno else None
+        if cliente:
             return {
-                'id': obj.cliente.id,
-                'nombre': obj.cliente.nombre_completo,
+                'id': cliente.id,
+                'nombre': cliente.nombre_completo,
             }
         return None
     
     def get_empleado_info(self, obj):
-        if obj.empleado:
+        empleado = obj.turno.empleado if obj.turno else None
+        if empleado:
             return {
-                'id': obj.empleado.id,
-                'nombre': obj.empleado.nombre_completo,
-                'promedio_calificacion': float(obj.empleado.promedio_calificacion),
-                'total_encuestas': obj.empleado.total_encuestas,
+                'id': empleado.id,
+                'nombre': empleado.nombre_completo,
+                'promedio_calificacion': float(empleado.promedio_calificacion),
+                'total_encuestas': empleado.total_encuestas,
             }
         return None
     
@@ -348,9 +339,6 @@ class EncuestaRespuestaSerializer(serializers.ModelSerializer):
             # Crear encuesta
             encuesta = Encuesta.objects.create(
                 turno=turno,
-                cliente=turno.cliente,
-                empleado=turno.empleado,
-                comentario=validated_data.get('comentario', ''),
                 puntaje=0,  # Se calculará después
             )
             

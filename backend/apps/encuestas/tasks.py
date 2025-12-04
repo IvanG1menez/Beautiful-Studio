@@ -28,23 +28,21 @@ def procesar_resultado_encuesta(encuesta_id):
     from apps.empleados.models import Empleado
     
     try:
-        encuesta = Encuesta.objects.select_related('empleado', 'cliente', 'turno').get(id=encuesta_id)
+        encuesta = Encuesta.objects.select_related('turno__empleado', 'turno__cliente').get(id=encuesta_id)
         
-        # Evitar procesamiento duplicado
-        if encuesta.procesada:
-            logger.info(f"Encuesta {encuesta_id} ya fue procesada. Saltando.")
+        empleado = encuesta.turno.empleado if encuesta.turno else None
+        if not empleado:
+            logger.warning(f"Encuesta {encuesta_id} no tiene empleado asociado")
             return
-        
-        empleado = encuesta.empleado
         
         # 1. ACTUALIZACIÓN DE RANKING
         with transaction.atomic():
             # Recalcular promedio de todas las encuestas del empleado
             promedio_actual = Encuesta.objects.filter(
-                empleado=empleado
+                turno__empleado=empleado
             ).aggregate(promedio=Avg('puntaje'))['promedio'] or 5.0
             
-            total_encuestas = Encuesta.objects.filter(empleado=empleado).count()
+            total_encuestas = Encuesta.objects.filter(turno__empleado=empleado).count()
             
             # Actualizar empleado
             Empleado.objects.filter(id=empleado.id).update(
@@ -64,7 +62,7 @@ def procesar_resultado_encuesta(encuesta_id):
             
             # Contar encuestas negativas en la ventana de tiempo
             encuestas_negativas = Encuesta.objects.filter(
-                empleado=empleado,
+                turno__empleado=empleado,
                 clasificacion='N',
                 fecha_respuesta__gte=fecha_limite
             ).count()
@@ -77,12 +75,6 @@ def procesar_resultado_encuesta(encuesta_id):
             # Disparar alerta si se supera el umbral
             if encuestas_negativas >= config.umbral_notificacion_propietario:
                 alerta_propietario_bajo_rendimiento.delay(empleado.id, encuestas_negativas)
-                
-                # Marcar encuesta como alertada
-                Encuesta.objects.filter(id=encuesta_id).update(alerta_enviada=True)
-        
-        # Marcar como procesada
-        Encuesta.objects.filter(id=encuesta_id).update(procesada=True)
         
         return {
             'success': True,
@@ -156,7 +148,6 @@ def alerta_propietario_bajo_rendimiento(empleado_id, cantidad_negativas):
 📊 RESUMEN:
    • Profesional: {empleado.nombre_completo}
    • Email: {empleado.user.email}
-   • Especialidad: {empleado.get_especialidades_display()}
    
 📉 MÉTRICAS:
    • Encuestas negativas (últimos {config.dias_ventana_alerta} días): {cantidad_negativas}
@@ -171,8 +162,6 @@ def alerta_propietario_bajo_rendimiento(empleado_id, cantidad_negativas):
         
         for i, enc in enumerate(ultimas_negativas, 1):
             mensaje_texto += f"\n   {i}. Puntaje: {enc.puntaje}/10 | Fecha: {enc.fecha_respuesta.strftime('%d/%m/%Y %H:%M')}"
-            if enc.comentario:
-                mensaje_texto += f"\n      💬 \"{enc.comentario[:100]}...\""
         
         mensaje_texto += f"""
 

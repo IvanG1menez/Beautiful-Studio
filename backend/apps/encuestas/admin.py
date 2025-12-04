@@ -61,86 +61,55 @@ class EncuestaAdmin(admin.ModelAdmin):
     
     list_display = [
         'id',
-        'empleado',
-        'cliente',
+        'get_empleado',
+        'get_cliente',
         'puntaje_promedio',
         'clasificacion_color',
         'fecha_respuesta',
-        'procesada',
     ]
     
     list_filter = [
         'clasificacion',
-        'procesada',
-        'alerta_enviada',
         'fecha_respuesta',
-        'empleado',
     ]
     
     search_fields = [
-        'empleado__user__first_name',
-        'empleado__user__last_name',
-        'cliente__user__first_name',
-        'cliente__user__last_name',
-        'comentario',
+        'turno__empleado__user__first_name',
+        'turno__empleado__user__last_name',
+        'turno__cliente__user__first_name',
+        'turno__cliente__user__last_name',
     ]
     
     readonly_fields = [
         'puntaje',
         'clasificacion',
         'fecha_respuesta',
-        'procesada',
-        'alerta_enviada',
         'created_at',
         'updated_at',
-        'ver_detalles_completos',
+        'ver_respuestas_dinamicas',
     ]
     
     fieldsets = (
         ('Información del Turno', {
             'fields': ('turno',)
         }),
-        ('Partes Involucradas', {
-            'fields': ('cliente', 'empleado')
-        }),
-        ('📊 Respuestas de la Encuesta (0-10)', {
-            'fields': (
-                'pregunta1_calidad_servicio',
-                'pregunta2_profesionalismo',
-                'pregunta3_puntualidad',
-                'pregunta4_limpieza',
-                'pregunta5_atencion',
-                'pregunta6_resultado',
-                'pregunta7_precio',
-                'pregunta8_comodidad',
-                'pregunta9_comunicacion',
-                'pregunta10_recomendacion',
-            ),
-            'description': 'Respuestas del cliente a cada pregunta (escala 0-10)'
-        }),
-        ('💬 Comentario del Cliente', {
-            'fields': ('comentario',),
-            'classes': ('wide',)
-        }),
         ('📈 Resultado Automático', {
             'fields': (
                 'puntaje',
                 'clasificacion',
             ),
-            'description': 'Promedio calculado automáticamente y clasificación'
+            'description': 'Promedio calculado automáticamente desde respuestas dinámicas'
         }),
         ('🔧 Control Interno', {
             'fields': (
-                'procesada',
-                'alerta_enviada',
                 'fecha_respuesta',
                 'created_at',
                 'updated_at',
             ),
             'classes': ('collapse',)
         }),
-        ('📋 Vista Detallada', {
-            'fields': ('ver_detalles_completos',),
+        ('📋 Respuestas del Cliente', {
+            'fields': ('ver_respuestas_dinamicas',),
             'classes': ('wide',)
         }),
     )
@@ -149,6 +118,16 @@ class EncuestaAdmin(admin.ModelAdmin):
         """Mostrar puntaje con formato"""
         return f"{obj.puntaje:.2f}/10"
     puntaje_promedio.short_description = "Promedio"
+    
+    def get_empleado(self, obj):
+        """Obtener empleado desde turno"""
+        return obj.turno.empleado if obj.turno else 'Sin empleado'
+    get_empleado.short_description = "Profesional"
+    
+    def get_cliente(self, obj):
+        """Obtener cliente desde turno"""
+        return obj.turno.cliente if obj.turno else 'Sin cliente'
+    get_cliente.short_description = "Cliente"
     
     def clasificacion_color(self, obj):
         """Mostrar clasificación con color"""
@@ -165,23 +144,15 @@ class EncuestaAdmin(admin.ModelAdmin):
         )
     clasificacion_color.short_description = "Clasificación"
     
-    def ver_detalles_completos(self, obj):
-        """Mostrar todas las respuestas en formato tabla"""
+    def ver_respuestas_dinamicas(self, obj):
+        """Mostrar todas las respuestas dinámicas en formato tabla"""
         if not obj.id:
-            return "Guarda la encuesta para ver los detalles"
+            return "Guarda la encuesta para ver las respuestas"
         
-        preguntas = [
-            ("Calidad del servicio", obj.pregunta1_calidad_servicio),
-            ("Profesionalismo", obj.pregunta2_profesionalismo),
-            ("Puntualidad", obj.pregunta3_puntualidad),
-            ("Limpieza e higiene", obj.pregunta4_limpieza),
-            ("Atención al cliente", obj.pregunta5_atencion),
-            ("Resultado final", obj.pregunta6_resultado),
-            ("Relación calidad-precio", obj.pregunta7_precio),
-            ("Comodidad", obj.pregunta8_comodidad),
-            ("Comunicación", obj.pregunta9_comunicacion),
-            ("Recomendación", obj.pregunta10_recomendacion),
-        ]
+        respuestas = obj.respuestas.all().order_by('pregunta__orden')
+        
+        if not respuestas.exists():
+            return format_html('<p style="color: orange;">No hay respuestas registradas</p>')
         
         html = '<table style="width: 100%; border-collapse: collapse; margin-top: 10px;">'
         html += '<thead><tr style="background-color: #f0f0f0;">'
@@ -190,13 +161,15 @@ class EncuestaAdmin(admin.ModelAdmin):
         html += '<th style="padding: 8px; text-align: left; border: 1px solid #ddd; width: 200px;">Barra</th>'
         html += '</tr></thead><tbody>'
         
-        for pregunta, puntaje in preguntas:
-            porcentaje = (puntaje / 10) * 100
-            color = '#4caf50' if puntaje >= 8 else '#ff9800' if puntaje >= 5 else '#f44336'
+        for respuesta in respuestas:
+            puntaje = respuesta.respuesta_valor
+            puntaje_max = respuesta.pregunta.puntaje_maximo
+            porcentaje = (puntaje / puntaje_max) * 100
+            color = '#4caf50' if porcentaje >= 80 else '#ff9800' if porcentaje >= 50 else '#f44336'
             
             html += f'<tr>'
-            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{pregunta}</td>'
-            html += f'<td style="padding: 8px; text-align: center; border: 1px solid #ddd; font-weight: bold;">{puntaje}/10</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{respuesta.pregunta.texto}</td>'
+            html += f'<td style="padding: 8px; text-align: center; border: 1px solid #ddd; font-weight: bold;">{puntaje}/{puntaje_max}</td>'
             html += f'<td style="padding: 8px; border: 1px solid #ddd;">'
             html += f'<div style="background-color: #e0e0e0; border-radius: 10px; overflow: hidden;">'
             html += f'<div style="background-color: {color}; width: {porcentaje}%; height: 20px; border-radius: 10px;"></div>'
@@ -210,17 +183,15 @@ class EncuestaAdmin(admin.ModelAdmin):
         html += f'<h4 style="margin-top: 0;">📊 Resumen</h4>'
         html += f'<p><strong>Promedio General:</strong> <span style="font-size: 24px; color: #667eea;">{obj.puntaje:.2f}/10</span></p>'
         html += f'<p><strong>Clasificación:</strong> {obj.get_clasificacion_display()}</p>'
-        if obj.comentario:
-            html += f'<p><strong>Comentario:</strong> "{obj.comentario}"</p>'
         html += f'</div>'
         
         return format_html(html)
-    ver_detalles_completos.short_description = "Detalles Completos"
+    ver_respuestas_dinamicas.short_description = "Respuestas del Cliente"
     
     def get_readonly_fields(self, request, obj=None):
         if obj:  # Editando
-            # No permitir cambiar turno, cliente, empleado una vez creada
-            return self.readonly_fields + ['turno', 'cliente', 'empleado']
+            # No permitir cambiar turno una vez creada
+            return self.readonly_fields + ['turno']
         return self.readonly_fields
     
     actions = ['reprocesar_encuestas']
