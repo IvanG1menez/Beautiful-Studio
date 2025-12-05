@@ -50,40 +50,81 @@ class EncuestaCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Crear encuesta con respuestas dinámicas"""
         from django.db import transaction
+        import logging
+        logger = logging.getLogger(__name__)
         
-        turno = validated_data['turno']
-        respuestas_data = validated_data['respuestas']
-        
-        with transaction.atomic():
-            # Crear encuesta
-            encuesta = Encuesta.objects.create(
-                turno=turno,
-                puntaje=0,  # Se calculará con respuestas
-            )
+        try:
+            turno = validated_data['turno']
+            respuestas_data = validated_data.pop('respuestas')
             
-            # Crear respuestas individuales
-            for respuesta_data in respuestas_data:
-                pregunta_id = respuesta_data['pregunta_id']
-                valor = respuesta_data['valor']
-                
-                pregunta = EncuestaPregunta.objects.get(id=pregunta_id)
-                RespuestaCliente.objects.create(
-                    encuesta=encuesta,
-                    pregunta=pregunta,
-                    respuesta_valor=valor
+            logger.info(f"Creando encuesta para turno #{turno.id}")
+            logger.info(f"Respuestas recibidas: {respuestas_data}")
+            
+            # Calcular puntaje promedio desde las respuestas
+            valores = [r['valor'] for r in respuestas_data if 'valor' in r]
+            puntaje_promedio = round(sum(valores) / len(valores), 2) if valores else 5.0
+            
+            logger.info(f"Puntaje calculado: {puntaje_promedio}")
+            
+            # Determinar clasificación manualmente
+            if puntaje_promedio <= 4:
+                clasificacion = 'N'  # Negativa
+            elif 5 <= puntaje_promedio <= 7:
+                clasificacion = 'Ne'  # Neutral
+            else:
+                clasificacion = 'P'  # Positiva
+            
+            logger.info(f"Clasificación: {clasificacion}")
+            
+            with transaction.atomic():
+                # Crear encuesta directamente con todos los valores
+                logger.info("Creando objeto Encuesta en BD...")
+                # Usamos skip_auto_calculation porque ya calculamos el puntaje y clasificación manualmente
+                encuesta = Encuesta(
+                    turno=turno,
+                    puntaje=puntaje_promedio,
+                    clasificacion=clasificacion
                 )
+                encuesta.save(skip_auto_calculation=True)
+                logger.info(f"Encuesta creada con ID: {encuesta.id}")
+                
+                # Intentar crear respuestas individuales si existen las preguntas
+                for respuesta_data in respuestas_data:
+                    pregunta_id = respuesta_data.get('pregunta_id')
+                    valor = respuesta_data.get('valor')
+                    
+                    if pregunta_id and valor is not None:
+                        try:
+                            pregunta = EncuestaPregunta.objects.get(id=pregunta_id)
+                            RespuestaCliente.objects.create(
+                                encuesta=encuesta,
+                                pregunta=pregunta,
+                                respuesta_valor=valor
+                            )
+                            logger.info(f"Respuesta creada para pregunta #{pregunta_id}")
+                        except EncuestaPregunta.DoesNotExist:
+                            logger.warning(f"Pregunta #{pregunta_id} no existe, omitiendo")
+                            continue
+                
+                logger.info("Intentando procesamiento asíncrono...")
+                # Procesamiento asíncrono - solo si Celery está disponible
+                try:
+                    from django.conf import settings
+                    if hasattr(settings, 'CELERY_BROKER_URL'):
+                        from .tasks import procesar_resultado_encuesta
+                        procesar_resultado_encuesta.delay(encuesta.id)
+                        logger.info("Tarea asíncrona encolada")
+                except Exception as e:
+                    logger.warning(f"No se pudo encolar tarea asíncrona: {e}")
+                    # No es crítico, continuar sin procesar
+                    pass
             
-            # Calcular puntaje y clasificar
-            encuesta.calcular_puntaje_promedio()
-            encuesta.clasificar()
-            encuesta.save()
+            logger.info(f"Encuesta #{encuesta.id} creada exitosamente")
+            return encuesta
             
-            # Procesamiento asíncrono
-            from .tasks import procesar_resultado_encuesta
-            try:
-                procesar_resultado_encuesta.delay(encuesta.id)
-            except AttributeError:
-                procesar_resultado_encuesta(encuesta.id)
+        except Exception as e:
+            logger.error(f"Error creando encuesta: {str(e)}", exc_info=True)
+            raise
         
         return encuesta
 
@@ -116,7 +157,7 @@ class EncuestaListSerializer(serializers.ModelSerializer):
         if cliente:
             return {
                 'id': cliente.id,
-                'nombre': cliente.nombre_completo,
+                'nombre_completo': cliente.nombre_completo,
                 'email': cliente.user.email,
             }
         return None
@@ -126,7 +167,7 @@ class EncuestaListSerializer(serializers.ModelSerializer):
         if empleado:
             return {
                 'id': empleado.id,
-                'nombre': empleado.nombre_completo,
+                'nombre_completo': empleado.nombre_completo,
             }
         return None
     
@@ -148,6 +189,7 @@ class EncuestaDetailSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
     empleado = serializers.SerializerMethodField()
     turno_info = serializers.SerializerMethodField()
+    respuestas_detalle = serializers.SerializerMethodField()
     clasificacion_display = serializers.CharField(source='get_clasificacion_display', read_only=True)
     
     class Meta:
@@ -197,6 +239,20 @@ class EncuestaDetailSerializer(serializers.ModelSerializer):
                 'precio_final': float(obj.turno.precio_final) if obj.turno.precio_final else None,
             }
         return None
+    
+    def get_respuestas_detalle(self, obj):
+        """Devuelve las respuestas individuales con información de la pregunta"""
+        respuestas = obj.respuestas.select_related('pregunta').all()
+        return [
+            {
+                'pregunta_id': respuesta.pregunta.id,
+                'pregunta_texto': respuesta.pregunta.texto,
+                'categoria': respuesta.pregunta.categoria,
+                'valor': respuesta.respuesta_valor,
+                'puntaje_maximo': respuesta.pregunta.puntaje_maximo,
+            }
+            for respuesta in respuestas
+        ]
 
 
 # ==========================================
@@ -336,40 +392,49 @@ class EncuestaRespuestaSerializer(serializers.ModelSerializer):
         turno = validated_data['turno']
         
         with transaction.atomic():
-            # Crear encuesta
-            encuesta = Encuesta.objects.create(
-                turno=turno,
-                puntaje=0,  # Se calculará después
-            )
-            
-            # Crear respuestas individuales
+            # Calcular puntaje antes de crear la encuesta
             total_puntos = 0
             total_maximo = 0
             
+            for respuesta_data in respuestas_data:
+                total_puntos += respuesta_data['respuesta_valor']
+                total_maximo += respuesta_data['pregunta'].puntaje_maximo
+            
+            # Calcular puntaje normalizado a escala 0-10
+            puntaje_calculado = round((total_puntos / total_maximo) * 10, 2) if total_maximo > 0 else 5.0
+            
+            # Determinar clasificación manualmente
+            if puntaje_calculado <= 4:
+                clasificacion = 'N'  # Negativa
+            elif 5 <= puntaje_calculado <= 7:
+                clasificacion = 'Ne'  # Neutral
+            else:
+                clasificacion = 'P'  # Positiva
+            
+            # Crear encuesta con todos los valores calculados
+            encuesta = Encuesta(
+                turno=turno,
+                puntaje=puntaje_calculado,
+                clasificacion=clasificacion
+            )
+            encuesta.save(skip_auto_calculation=True)
+            
+            # Crear respuestas individuales
             for respuesta_data in respuestas_data:
                 RespuestaCliente.objects.create(
                     encuesta=encuesta,
                     pregunta=respuesta_data['pregunta'],
                     respuesta_valor=respuesta_data['respuesta_valor']
                 )
-                
-                # Acumular para calcular puntaje promedio
-                total_puntos += respuesta_data['respuesta_valor']
-                total_maximo += respuesta_data['pregunta'].puntaje_maximo
             
-            # Calcular puntaje normalizado a escala 0-10
-            if total_maximo > 0:
-                encuesta.puntaje = round((total_puntos / total_maximo) * 10, 2)
-            
-            # Clasificar la encuesta
-            encuesta.clasificar()
-            encuesta.save()
-            
-            # Procesamiento asíncrono con Celery
-            from .tasks import procesar_resultado_encuesta
+            # Procesamiento asíncrono - solo si Celery está disponible
             try:
-                procesar_resultado_encuesta.delay(encuesta.id)
-            except AttributeError:
-                procesar_resultado_encuesta(encuesta.id)
+                from django.conf import settings
+                if hasattr(settings, 'CELERY_BROKER_URL'):
+                    from .tasks import procesar_resultado_encuesta
+                    procesar_resultado_encuesta.delay(encuesta.id)
+            except Exception:
+                # No es crítico, continuar sin procesar
+                pass
         
         return encuesta

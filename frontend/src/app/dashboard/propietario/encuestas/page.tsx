@@ -22,36 +22,38 @@ import { toast } from 'sonner'
 interface Encuesta {
   id: number
   turno: number
-  cliente: {
+  cliente?: {
     id: number
-    nombre: string
+    nombre_completo: string
     email: string
   }
-  empleado: {
+  empleado?: {
     id: number
-    nombre: string
-    especialidad: string
+    nombre_completo: string
   }
-  servicio: {
+  servicio?: {
     nombre: string
     categoria: string
   }
   puntaje: number
   clasificacion: 'positiva' | 'neutral' | 'negativa'
-  comentario: string
+  clasificacion_display: string
+  comentario?: string
   fecha_respuesta: string
-
-  // 10 preguntas
-  pregunta1_calidad_servicio: number
-  pregunta2_profesionalismo: number
-  pregunta3_puntualidad: number
-  pregunta4_limpieza: number
-  pregunta5_atencion: number
-  pregunta6_resultado: number
-  pregunta7_precio: number
-  pregunta8_comodidad: number
-  pregunta9_comunicacion: number
-  pregunta10_recomendacion: number
+  // Campos opcionales que vienen en el detalle
+  turno_info?: {
+    id: number
+    servicio: string
+    fecha_hora: string
+    precio_final: number | null
+  }
+  respuestas_detalle?: Array<{
+    pregunta_id: number
+    pregunta_texto: string
+    categoria: string
+    valor: number
+    puntaje_maximo: number
+  }>
 }
 
 interface Estadisticas {
@@ -252,6 +254,7 @@ export default function EncuestasPropietarioPage() {
   const [busqueda, setBusqueda] = useState('')
   const [filtroClasificacion, setFiltroClasificacion] = useState<string>('todas')
   const [encuestaSeleccionada, setEncuestaSeleccionada] = useState<Encuesta | null>(null)
+  const [cargandoDetalle, setCargandoDetalle] = useState(false)
 
   useEffect(() => {
     cargarEncuestas()
@@ -299,6 +302,45 @@ export default function EncuestasPropietarioPage() {
     }
   }
 
+  const cargarDetalleEncuesta = async (encuestaId: number) => {
+    try {
+      setCargandoDetalle(true)
+      const token = localStorage.getItem('auth_token')
+
+      if (!token) {
+        toast.error('No hay token de autenticación')
+        return
+      }
+
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/encuestas/encuestas/${encuestaId}/`
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Token ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}`)
+      }
+
+      const detalleCompleto = await response.json()
+
+      // Actualizar la encuesta en la lista con los detalles
+      setEncuestas(prev => prev.map(e =>
+        e.id === encuestaId ? { ...e, ...detalleCompleto } : e
+      ))
+
+      setEncuestaSeleccionada(detalleCompleto)
+    } catch (error: any) {
+      console.error('Error cargando detalle:', error)
+      toast.error('Error al cargar detalles de la encuesta')
+    } finally {
+      setCargandoDetalle(false)
+    }
+  }
+
   const calcularEstadisticas = (data: Encuesta[]) => {
     const total = data.length
     const positivas = data.filter(e => e.clasificacion === 'positiva').length
@@ -313,9 +355,9 @@ export default function EncuestasPropietarioPage() {
 
   const encuestasFiltradas = encuestas.filter(encuesta => {
     const matchBusqueda =
-      encuesta.cliente.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-      encuesta.empleado.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-      encuesta.servicio.nombre.toLowerCase().includes(busqueda.toLowerCase())
+      (encuesta.cliente?.nombre_completo || '').toLowerCase().includes(busqueda.toLowerCase()) ||
+      (encuesta.empleado?.nombre_completo || '').toLowerCase().includes(busqueda.toLowerCase()) ||
+      (encuesta.servicio?.nombre || '').toLowerCase().includes(busqueda.toLowerCase())
 
     const matchClasificacion =
       filtroClasificacion === 'todas' ||
@@ -529,7 +571,13 @@ export default function EncuestasPropietarioPage() {
                 <Card
                   key={encuesta.id}
                   className="hover:shadow-lg transition-shadow cursor-pointer"
-                  onClick={() => setEncuestaSeleccionada(encuesta)}
+                  onClick={() => {
+                    if (encuestaSeleccionada?.id === encuesta.id) {
+                      setEncuestaSeleccionada(null)
+                    } else {
+                      cargarDetalleEncuesta(encuesta.id)
+                    }
+                  }}
                 >
                   <CardContent className="p-6">
                     <div className="flex justify-between items-start mb-4">
@@ -552,12 +600,12 @@ export default function EncuestasPropietarioPage() {
                           <div className="flex items-center gap-2">
                             <User className="w-4 h-4 text-gray-400" />
                             <span className="text-gray-600">Cliente:</span>
-                            <span className="font-medium">{encuesta.cliente.nombre}</span>
+                            <span className="font-medium">{encuesta.cliente?.nombre_completo || 'Sin cliente'}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <Scissors className="w-4 h-4 text-gray-400" />
                             <span className="text-gray-600">Profesional:</span>
-                            <span className="font-medium">{encuesta.empleado.nombre}</span>
+                            <span className="font-medium">{encuesta.empleado?.nombre_completo || 'Sin profesional'}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <Calendar className="w-4 h-4 text-gray-400" />
@@ -566,7 +614,7 @@ export default function EncuestasPropietarioPage() {
                         </div>
 
                         <div className="mt-3">
-                          <p className="text-sm font-medium text-gray-700">{encuesta.servicio.nombre}</p>
+                          <p className="text-sm font-medium text-gray-700">{encuesta.servicio?.nombre || 'Sin servicio'}</p>
                           {encuesta.comentario && (
                             <p className="text-sm text-gray-600 mt-2 italic">
                               &quot;{encuesta.comentario}&quot;
@@ -581,39 +629,33 @@ export default function EncuestasPropietarioPage() {
                       <div className="mt-6 pt-6 border-t border-gray-200 space-y-3">
                         <h4 className="font-semibold text-sm text-gray-700 mb-3">Detalle de respuestas:</h4>
 
-                        {[
-                          { key: 'pregunta1_calidad_servicio', label: 'Calidad del servicio' },
-                          { key: 'pregunta2_profesionalismo', label: 'Profesionalismo' },
-                          { key: 'pregunta3_puntualidad', label: 'Puntualidad' },
-                          { key: 'pregunta4_limpieza', label: 'Limpieza e higiene' },
-                          { key: 'pregunta5_atencion', label: 'Atención recibida' },
-                          { key: 'pregunta6_resultado', label: 'Resultado final' },
-                          { key: 'pregunta7_precio', label: 'Relación calidad-precio' },
-                          { key: 'pregunta8_comodidad', label: 'Comodidad' },
-                          { key: 'pregunta9_comunicacion', label: 'Comunicación' },
-                          { key: 'pregunta10_recomendacion', label: 'Recomendación' },
-                        ].map((pregunta) => {
-                          const valor = Number(encuesta[pregunta.key as keyof Encuesta])
-                          return (
-                            <div key={pregunta.key} className="flex items-center gap-3">
-                              <span className="text-sm text-gray-600 flex-1">{pregunta.label}</span>
+                        {cargandoDetalle ? (
+                          <div className="text-center py-4">
+                            <p className="text-sm text-gray-500">Cargando detalles...</p>
+                          </div>
+                        ) : encuesta.respuestas_detalle && encuesta.respuestas_detalle.length > 0 ? (
+                          encuesta.respuestas_detalle.map((respuesta) => (
+                            <div key={respuesta.pregunta_id} className="flex items-center gap-3">
+                              <span className="text-sm text-gray-600 flex-1">{respuesta.pregunta_texto}</span>
                               <div className="flex items-center gap-2">
                                 <div className="w-48 bg-gray-200 rounded-full h-2">
                                   <div
-                                    className={`h-2 rounded-full ${valor >= 8 ? 'bg-green-500' :
-                                        valor >= 5 ? 'bg-yellow-500' :
-                                          'bg-red-500'
+                                    className={`h-2 rounded-full ${respuesta.valor >= 8 ? 'bg-green-500' :
+                                      respuesta.valor >= 5 ? 'bg-yellow-500' :
+                                        'bg-red-500'
                                       }`}
-                                    style={{ width: `${(valor / 10) * 100}%` }}
+                                    style={{ width: `${(respuesta.valor / respuesta.puntaje_maximo) * 100}%` }}
                                   />
                                 </div>
-                                <span className={`text-sm font-bold w-8 text-right ${getPuntajeColor(valor)}`}>
-                                  {valor}
+                                <span className={`text-sm font-bold w-8 text-right ${getPuntajeColor(respuesta.valor)}`}>
+                                  {respuesta.valor}
                                 </span>
                               </div>
                             </div>
-                          )
-                        })}
+                          ))
+                        ) : (
+                          <p className="text-sm text-gray-500 text-center py-4">No hay respuestas detalladas disponibles</p>
+                        )}
                       </div>
                     )}
                   </CardContent>

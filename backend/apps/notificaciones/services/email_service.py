@@ -180,10 +180,25 @@ class EmailService:
         Envía email al profesional cuando se le asigna un nuevo turno
         """
         try:
+            # Validar que existe el profesional y su email
+            if not turno.empleado:
+                logger.warning(f"Turno #{turno.id} no tiene empleado asignado")
+                return False
+            
+            if not turno.empleado.user:
+                logger.warning(f"Empleado #{turno.empleado.id} no tiene usuario asociado")
+                return False
+            
+            if not turno.empleado.user.email:
+                logger.warning(f"Usuario {turno.empleado.user.username} no tiene email configurado")
+                return False
+            
+            logger.info(f"Preparando email para profesional: {turno.empleado.user.email}")
+            
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">¡Tienes un nuevo turno asignado!</h2>
+                <h2 style="color: #667eea; margin-bottom: 20px;">Tienes un nuevo turno asignado</h2>
                 
-                <p>Hola <strong>{turno.empleado.user.get_full_name()}</strong>,</p>
+                <p>Hola <strong>{turno.empleado.user.first_name or turno.empleado.user.username}</strong>,</p>
                 <p>Se te ha asignado un nuevo turno. A continuación los detalles:</p>
                 
                 <div class="info-box">
@@ -229,7 +244,7 @@ class EmailService:
             email_destino = EmailService._get_email_destinatario(turno.empleado.user.email)
             
             send_mail(
-                subject=f'Nuevo turno asignado - {turno.fecha_hora.strftime("%d/%m/%Y %H:%M")}',
+                subject=f'Hola {turno.empleado.user.first_name or turno.empleado.user.username}, tienes un nuevo turno',
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email_destino],
@@ -242,6 +257,89 @@ class EmailService:
             
         except Exception as e:
             logger.error(f"Error enviando email de nuevo turno: {str(e)}")
+            return False
+    
+    @staticmethod
+    def enviar_email_nuevo_turno_cliente(turno) -> bool:
+        """
+        Envía email al cliente cuando reserva un nuevo turno
+        """
+        try:
+            # Validar que existe el cliente y su email
+            if not turno.cliente:
+                logger.warning(f"Turno #{turno.id} no tiene cliente asignado")
+                return False
+            
+            if not turno.cliente.user:
+                logger.warning(f"Cliente #{turno.cliente.id} no tiene usuario asociado")
+                return False
+            
+            if not turno.cliente.user.email:
+                logger.warning(f"Usuario {turno.cliente.user.username} no tiene email configurado")
+                return False
+            
+            logger.info(f"Preparando email de confirmación para cliente: {turno.cliente.user.email}")
+            
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">Tu turno ha sido confirmado</h2>
+                
+                <p>Hola <strong>{turno.cliente.user.first_name or turno.cliente.user.username}</strong>,</p>
+                <p>Tu turno ha sido confirmado exitosamente. A continuación los detalles:</p>
+                
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{turno.empleado.user.get_full_name()}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{turno.servicio.nombre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Fecha y Hora:</span>
+                        <span class="info-value">{turno.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Duración:</span>
+                        <span class="info-value">{turno.servicio.duracion_minutos} minutos</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Precio:</span>
+                        <span class="info-value">${turno.servicio.precio}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Estado:</span>
+                        <span class="info-value">{turno.get_estado_display()}</span>
+                    </div>
+                </div>
+                
+                <p>Te esperamos en Beautiful Studio. ¡Gracias por elegirnos!</p>
+            """
+            
+            html_message = EmailService._get_base_template().format(
+                titulo="Turno Confirmado",
+                header_titulo="Turno Confirmado",
+                contenido=contenido
+            )
+            
+            plain_message = strip_tags(html_message)
+            
+            email_destino = EmailService._get_email_destinatario(turno.cliente.user.email)
+            
+            send_mail(
+                subject=f'Hola {turno.cliente.user.first_name or turno.cliente.user.username}, tu turno ha sido confirmado',
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+            
+            logger.info(f"Email de confirmación enviado a {email_destino} (original: {turno.cliente.user.email})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error enviando email de confirmación al cliente: {str(e)}")
             return False
     
     @staticmethod
@@ -260,9 +358,9 @@ class EmailService:
                 return False
             
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Nuevo turno registrado en el sistema</h2>
+                <h2 style="color: #667eea; margin-bottom: 20px;">Se registró un nuevo turno</h2>
                 
-                <p>Se ha asignado un nuevo turno en Beautiful Studio:</p>
+                <p>Se registró un nuevo turno en Beautiful Studio:</p>
                 
                 <div class="info-box">
                     <div class="info-row">
@@ -309,7 +407,7 @@ class EmailService:
                 emails_propietarios = [p.email for p in propietarios]
             
             send_mail(
-                subject=f'Nuevo turno - {turno.empleado.user.get_full_name()} - {turno.servicio.nombre}',
+                subject='Se registró un nuevo turno',
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=emails_propietarios,

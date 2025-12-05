@@ -110,6 +110,17 @@ class TurnoCreateSerializer(serializers.ModelSerializer):
         empleado = data["empleado"]
         fecha_hora = data["fecha_hora"]
         servicio = data["servicio"]
+        
+        # Verificar unique_together antes de otras validaciones
+        turno_exacto = Turno.objects.filter(
+            empleado=empleado,
+            fecha_hora=fecha_hora
+        ).exclude(id=self.instance.id if self.instance else None)
+        
+        if turno_exacto.exists():
+            raise serializers.ValidationError(
+                {"fecha_hora": "Este horario ya está ocupado. Por favor selecciona otro horario."}
+            )
 
         # Calcular hora de fin del turno
         hora_fin = fecha_hora + timedelta(minutes=servicio.duracion_minutos)

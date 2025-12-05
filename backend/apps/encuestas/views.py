@@ -34,9 +34,9 @@ class EncuestaViewSet(viewsets.ModelViewSet):
     """
     
     queryset = Encuesta.objects.select_related(
-        'cliente__user',
-        'empleado__user',
-        'turno__servicio'
+        'turno__cliente__user',
+        'turno__empleado__user',
+        'turno__servicio__categoria'
     ).all()
     permission_classes = [IsAuthenticated]
     pagination_class = CustomPageNumberPagination
@@ -80,12 +80,12 @@ class EncuestaViewSet(viewsets.ModelViewSet):
         
         if user.role == 'profesional' and hasattr(user, 'profesional_profile'):
             encuestas = Encuesta.objects.filter(
-                empleado=user.profesional_profile
-            ).select_related('cliente__user', 'turno__servicio')
+                turno__empleado=user.profesional_profile
+            ).select_related('turno__cliente__user', 'turno__servicio')
         elif user.role == 'cliente' and hasattr(user, 'cliente_profile'):
             encuestas = Encuesta.objects.filter(
-                cliente=user.cliente_profile
-            ).select_related('empleado__user', 'turno__servicio')
+                turno__cliente=user.cliente_profile
+            ).select_related('turno__empleado__user', 'turno__servicio')
         else:
             return Response(
                 {"error": "No tiene encuestas asociadas"},
@@ -281,7 +281,6 @@ class TurnoEncuestaInfoView(generics.RetrieveAPIView):
                 'empleado': {
                     'id': turno.empleado.id,
                     'nombre': turno.empleado.nombre_completo,
-                    'especialidad': turno.empleado.get_especialidades_display(),
                 },
                 'servicio': {
                     'nombre': turno.servicio.nombre,
@@ -394,8 +393,8 @@ class EncuestaRespuestaViewSet(viewsets.ModelViewSet):
     """
     
     queryset = Encuesta.objects.select_related(
-        'cliente__user',
-        'empleado__user',
+        'turno__cliente__user',
+        'turno__empleado__user',
         'turno__servicio'
     ).prefetch_related('respuestas__pregunta').all()
     

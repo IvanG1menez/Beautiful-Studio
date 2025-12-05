@@ -117,6 +117,14 @@ export default function EncuestaPage() {
     setEnviando(true)
 
     try {
+      // Convertir respuestas al formato esperado por el backend
+      const respuestasArray = Object.entries(respuestas)
+        .filter(([key]) => key.startsWith('pregunta'))
+        .map(([key, valor], index) => ({
+          pregunta_id: index + 1, // IDs del 1 al 10
+          valor: valor as number
+        }))
+
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/encuestas/encuestas/`,
         {
@@ -126,7 +134,7 @@ export default function EncuestaPage() {
           },
           body: JSON.stringify({
             turno: turnoInfo.turno_id,
-            ...respuestas,
+            respuestas: respuestasArray,
           }),
         }
       )

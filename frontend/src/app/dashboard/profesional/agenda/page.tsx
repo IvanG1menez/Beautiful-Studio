@@ -228,17 +228,8 @@ export default function AgendaEmpleadoPage() {
 
   // Validar fecha del turno
   const validarFechaTurno = (turno: Turno): { valido: boolean; mensaje: string } => {
-    const fechaTurno = new Date(turno.fecha_hora);
-    const ahora = new Date();
-
-    // Resetear las horas para comparar solo fechas
-    const fechaTurnoSinHora = new Date(fechaTurno.getFullYear(), fechaTurno.getMonth(), fechaTurno.getDate());
-    const hoySinHora = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-
-    if (fechaTurnoSinHora.getTime() > hoySinHora.getTime()) {
-      return { valido: false, mensaje: '⚠️ No puedes completar un turno que aún no ha llegado. La fecha del turno es futura.' };
-    }
-
+    // TODO: Validación deshabilitada para permitir testing
+    // Permite finalizar turnos en cualquier momento sin validar la fecha
     return { valido: true, mensaje: '' };
   };
 

@@ -50,7 +50,12 @@ def manejar_creacion_turno(sender, instance, created, **kwargs):
                 
                 # Enviar email al profesional si está configurado
                 if config_profesional.email_solicitud_turno:
-                    EmailService.enviar_email_nuevo_turno_profesional(instance)
+                    logger.info(f"Enviando email al profesional {instance.empleado.user.email}")
+                    resultado = EmailService.enviar_email_nuevo_turno_profesional(instance)
+                    logger.info(f"Resultado envío email profesional: {resultado}")
+                    # Delay para evitar límite de Mailtrap
+                    import time
+                    time.sleep(1)
             
             # Notificar a propietarios
             from apps.users.models import User
@@ -82,6 +87,15 @@ def manejar_creacion_turno(sender, instance, created, **kwargs):
             
             # Enviar email a propietarios
             EmailService.enviar_email_nuevo_turno_propietario(instance)
+            
+            # Delay para evitar límite de Mailtrap
+            import time
+            time.sleep(1)
+            
+            # Enviar email de confirmación al cliente
+            logger.info(f"Enviando email de confirmación al cliente {instance.cliente.user.email}")
+            resultado_cliente = EmailService.enviar_email_nuevo_turno_cliente(instance)
+            logger.info(f"Resultado envío email cliente: {resultado_cliente}")
             
             logger.info(f"Notificaciones y emails enviados para nuevo turno {instance.id}")
             
@@ -169,7 +183,10 @@ def manejar_modificacion_turno(sender, instance, created, **kwargs):
             if cambios and instance.estado != 'cancelado':
                 config_profesional, _ = NotificacionConfig.objects.get_or_create(
                     user=instance.empleado.user,
-                    defaults={'notificar_modificacion_turno': True}
+                    defaults={
+                        'notificar_modificacion_turno': True,
+                        'email_modificacion_turno': True
+                    }
                 )
                 
                 if config_profesional.notificar_modificacion_turno:
@@ -183,8 +200,9 @@ def manejar_modificacion_turno(sender, instance, created, **kwargs):
                             'cambios': cambios,
                         }
                     )
-                    
-                    # Enviar email de modificación
+                
+                # Enviar email solo si está configurado
+                if config_profesional.email_modificacion_turno:
                     EmailService.enviar_email_modificacion_turno(instance, cambios)
             
             # Limpiar del tracking
@@ -202,7 +220,10 @@ def manejar_cancelacion_turno(turno):
         # Notificar al profesional
         config_profesional, _ = NotificacionConfig.objects.get_or_create(
             user=turno.empleado.user,
-            defaults={'notificar_cancelacion_turno': True}
+            defaults={
+                'notificar_cancelacion_turno': True,
+                'email_cancelacion_turno': True
+            }
         )
         
         if config_profesional.notificar_cancelacion_turno:
@@ -243,8 +264,9 @@ def manejar_cancelacion_turno(turno):
                     }
                 )
         
-        # Enviar emails de cancelación
-        EmailService.enviar_email_cancelacion_turno(turno, cancelado_por='cliente')
+        # Enviar email de cancelación solo si está configurado
+        if config_profesional.email_cancelacion_turno:
+            EmailService.enviar_email_cancelacion_turno(turno, cancelado_por='cliente')
         
         logger.info(f"Notificaciones de cancelación enviadas para turno {turno.id}")
         

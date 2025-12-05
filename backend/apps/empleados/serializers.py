@@ -215,7 +215,6 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "last_name",
             "user_dni",
             "nombre_completo",
-            "especialidades",
             "especialidad_display",
             "fecha_ingreso",
             "horario_entrada",

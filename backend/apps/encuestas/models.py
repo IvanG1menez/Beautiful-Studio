@@ -131,8 +131,13 @@ class Encuesta(models.Model):
     
     def save(self, *args, **kwargs):
         """Calcular puntaje promedio y clasificar automáticamente"""
-        self.calcular_puntaje_promedio()
-        self.clasificar()
+        # Solo calcular si ya tiene ID (actualización) y no se está forzando skip
+        skip_auto_calc = kwargs.pop('skip_auto_calculation', False)
+        
+        if not skip_auto_calc and self.pk:
+            self.calcular_puntaje_promedio()
+            self.clasificar()
+        
         super().save(*args, **kwargs)
     
     def calcular_puntaje_promedio(self):

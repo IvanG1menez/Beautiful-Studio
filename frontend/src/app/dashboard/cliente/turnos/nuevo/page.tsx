@@ -394,7 +394,13 @@ export default function NuevoTurnoPage() {
         console.error('Error del servidor:', errorData);
 
         // Manejar errores de validación
-        if (errorData.fecha_hora) {
+        if (errorData.non_field_errors) {
+          // Errores de validación de conjunto único
+          const mensajeError = Array.isArray(errorData.non_field_errors)
+            ? errorData.non_field_errors[0]
+            : errorData.non_field_errors;
+          setError(mensajeError);
+        } else if (errorData.fecha_hora) {
           // Puede ser un array o un string
           const mensajeError = Array.isArray(errorData.fecha_hora)
             ? errorData.fecha_hora[0]
