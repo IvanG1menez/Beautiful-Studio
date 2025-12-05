@@ -3,14 +3,22 @@
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+
+interface Servicio {
+  id: number;
+  nombre: string;
+  categoria_nombre: string;
+  is_active: boolean;
+}
 
 interface Empleado {
   id: number;
@@ -72,6 +80,8 @@ export default function EditarProfesionalPage() {
 
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
+  const [loadingServicios, setLoadingServicios] = useState(true);
+  const [servicios, setServicios] = useState<Servicio[]>([]);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState({
     title: '',
@@ -122,6 +132,37 @@ export default function EditarProfesionalPage() {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
   };
+
+  // Cargar servicios activos
+  useEffect(() => {
+    const fetchServicios = async () => {
+      setLoadingServicios(true);
+      try {
+        const response = await fetch('http://localhost:8000/api/servicios/', {
+          headers: getAuthHeaders()
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const serviciosActivos = (data.results || data).filter((serv: Servicio) => serv.is_active);
+          setServicios(serviciosActivos);
+        }
+      } catch (error) {
+        console.error('Error fetching servicios:', error);
+      } finally {
+        setLoadingServicios(false);
+      }
+    };
+
+    fetchServicios();
+  }, []);
+
+  // Preparar opciones para el Combobox
+  const serviciosOptions: ComboboxOption[] = servicios.map(servicio => ({
+    value: servicio.id.toString(),
+    label: servicio.nombre,
+    description: servicio.categoria_nombre
+  }));
 
   // Funciones para manejar horarios
   const toggleDia = (dia: number) => {
@@ -502,23 +543,27 @@ export default function EditarProfesionalPage() {
             {/* Especialidad y Fecha de Ingreso */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="especialidades">Especialidad *</Label>
-                <Select
+                <Label htmlFor="especialidades">Servicio/Especialidad *</Label>
+
+                <Combobox
+                  options={serviciosOptions}
                   value={formData.especialidades}
                   onValueChange={(value) => handleInputChange('especialidades', value)}
+                  placeholder={loadingServicios ? "Cargando servicios..." : "Buscar y seleccionar servicio"}
+                  searchPlaceholder="Buscar servicio o categoría..."
+                  emptyMessage="No se encontraron servicios"
+                  disabled={loadingServicios}
+                />
+
+                {/* Enlace para crear servicio */}
+                <Link
+                  href="/dashboard/propietario/servicios/nuevo"
+                  className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline mt-1"
+                  target="_blank"
                 >
-                  <SelectTrigger id="especialidades">
-                    <SelectValue placeholder="Seleccionar especialidad" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="corte">Corte</SelectItem>
-                    <SelectItem value="color">Colorista</SelectItem>
-                    <SelectItem value="tratamientos">Especialista en Tratamientos</SelectItem>
-                    <SelectItem value="unas">Manicurista/Pedicurista</SelectItem>
-                    <SelectItem value="maquillaje">Maquillador/a</SelectItem>
-                    <SelectItem value="general">General</SelectItem>
-                  </SelectContent>
-                </Select>
+                  <ExternalLink className="w-3 h-3" />
+                  ¿No encuentra el servicio? Añada uno
+                </Link>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="fecha_ingreso">Fecha de Ingreso *</Label>

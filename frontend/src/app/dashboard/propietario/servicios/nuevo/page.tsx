@@ -3,9 +3,9 @@
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Loader2, Save, Scissors } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -186,6 +186,13 @@ export default function NuevoServicioPage() {
     }));
   };
 
+  // Preparar opciones para el Combobox
+  const categoriasOptions: ComboboxOption[] = categorias.map(categoria => ({
+    value: categoria.id.toString(),
+    label: categoria.nombre,
+    description: categoria.descripcion
+  }));
+
   if (loadingCategorias) {
     return (
       <div className="container mx-auto py-6 max-w-4xl">
@@ -271,21 +278,16 @@ export default function NuevoServicioPage() {
             {/* Categoría */}
             <div className="space-y-2">
               <Label htmlFor="categoria">Categoría *</Label>
-              <Select
+
+              <Combobox
+                options={categoriasOptions}
                 value={formData.categoria}
                 onValueChange={(value) => handleInputChange('categoria', value)}
-              >
-                <SelectTrigger id="categoria">
-                  <SelectValue placeholder="Seleccionar categoría" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categorias.map((categoria) => (
-                    <SelectItem key={categoria.id} value={categoria.id.toString()}>
-                      {categoria.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder="Buscar y seleccionar categoría"
+                searchPlaceholder="Buscar categoría..."
+                emptyMessage="No se encontraron categorías"
+              />
+
               <p className="text-sm text-muted-foreground">
                 Los servicios se organizan por categorías para facilitar la navegación
               </p>
