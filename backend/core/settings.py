@@ -103,8 +103,12 @@ WSGI_APPLICATION = "core.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": config("DB_NAME", default="db_proyecto"),
+        "USER": config("DB_USER", default="user_admin"),
+        "PASSWORD": config("DB_PASSWORD", default="password_seguro"),
+        "HOST": config("DB_HOST", default="localhost"),
+        "PORT": config("DB_PORT", default="5433"),
     }
 }
 
@@ -199,54 +203,58 @@ AUTH_USER_MODEL = "users.User"
 
 # Authentication Backends - Usar email para login + Google OAuth
 AUTHENTICATION_BACKENDS = [
-    'social_core.backends.google.GoogleOAuth2',  # Google OAuth2
-    'apps.users.backends.EmailBackend',  # Backend personalizado para email
-    'django.contrib.auth.backends.ModelBackend',  # Fallback al backend por defecto
+    "social_core.backends.google.GoogleOAuth2",  # Google OAuth2
+    "apps.users.backends.EmailBackend",  # Backend personalizado para email
+    "django.contrib.auth.backends.ModelBackend",  # Fallback al backend por defecto
 ]
 
 # ============================================================================
 # GOOGLE OAUTH CONFIGURATION
 # ============================================================================
-SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config('GOOGLE_OAUTH2_CLIENT_ID', default='')
-SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config('GOOGLE_OAUTH2_CLIENT_SECRET', default='')
+SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config("GOOGLE_OAUTH2_CLIENT_ID", default="")
+SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config("GOOGLE_OAUTH2_CLIENT_SECRET", default="")
 
 # Redirect URLs
 SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = config(
-    'GOOGLE_OAUTH2_REDIRECT_URI',
-    default='http://localhost:8000/api/auth/google/callback/'
+    "GOOGLE_OAUTH2_REDIRECT_URI",
+    default="http://localhost:8000/api/auth/google/callback/",
 )
 
 # Scope de Google OAuth (qué permisos solicitar)
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = [
-    'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/userinfo.profile',
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
 ]
 
 # Usuario activo por defecto
-SOCIAL_AUTH_GOOGLE_OAUTH2_USER_FIELDS = ['email', 'first_name', 'last_name']
+SOCIAL_AUTH_GOOGLE_OAUTH2_USER_FIELDS = ["email", "first_name", "last_name"]
 
 # Pipeline personalizado para crear usuarios con rol Cliente
 SOCIAL_AUTH_PIPELINE = (
-    'social_core.pipeline.social_auth.social_details',
-    'social_core.pipeline.social_auth.social_uid',
-    'social_core.pipeline.social_auth.auth_allowed',
-    'social_core.pipeline.social_auth.social_user',
-    'apps.authentication.pipeline.associate_by_email',  # Asociar por email si el usuario ya existe
-    'social_core.pipeline.user.get_username',
-    'apps.authentication.pipeline.create_user_with_username',  # Pipeline personalizado para generar username
-    'social_core.pipeline.social_auth.associate_user',
-    'social_core.pipeline.social_auth.load_extra_data',
-    'social_core.pipeline.user.user_details',
-    'apps.authentication.pipeline.create_cliente_profile',  # Pipeline personalizado para crear perfil Cliente
-    'apps.authentication.pipeline.redirect_with_token',  # Redirigir al frontend con el token
+    "social_core.pipeline.social_auth.social_details",
+    "social_core.pipeline.social_auth.social_uid",
+    "social_core.pipeline.social_auth.auth_allowed",
+    "social_core.pipeline.social_auth.social_user",
+    "apps.authentication.pipeline.associate_by_email",  # Asociar por email si el usuario ya existe
+    "social_core.pipeline.user.get_username",
+    "apps.authentication.pipeline.create_user_with_username",  # Pipeline personalizado para generar username
+    "social_core.pipeline.social_auth.associate_user",
+    "social_core.pipeline.social_auth.load_extra_data",
+    "social_core.pipeline.user.user_details",
+    "apps.authentication.pipeline.create_cliente_profile",  # Pipeline personalizado para crear perfil Cliente
+    "apps.authentication.pipeline.redirect_with_token",  # Redirigir al frontend con el token
 )
 
 # Configuración adicional de social auth
-SOCIAL_AUTH_URL_NAMESPACE = 'social'
-SOCIAL_AUTH_LOGIN_REDIRECT_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/auth/callback'
-SOCIAL_AUTH_LOGIN_ERROR_URL = config('FRONTEND_URL', default='http://localhost:3000') + '/login?error=oauth'
+SOCIAL_AUTH_URL_NAMESPACE = "social"
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = (
+    config("FRONTEND_URL", default="http://localhost:3000") + "/auth/callback"
+)
+SOCIAL_AUTH_LOGIN_ERROR_URL = (
+    config("FRONTEND_URL", default="http://localhost:3000") + "/login?error=oauth"
+)
 SOCIAL_AUTH_RAISE_EXCEPTIONS = False
-SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ['username', 'first_name', 'last_name', 'email']
+SOCIAL_AUTH_ADMIN_USER_SEARCH_FIELDS = ["username", "first_name", "last_name", "email"]
 
 
 # Django JET Configuration
@@ -264,32 +272,34 @@ JET_THEMES = [
 ]
 
 # Looking to send emails in production? Check out our Email API/SMTP product!
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = config('EMAIL_HOST', default='sandbox.smtp.mailtrap.io')
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='3c21f5f8f8562d')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='5cbeba3f934565')
-EMAIL_PORT = config('EMAIL_PORT', default=2525, cast=int)
-EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Beautiful Studio <noreply@beautifulstudio.com>')
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = config("EMAIL_HOST", default="sandbox.smtp.mailtrap.io")
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="3c21f5f8f8562d")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="5cbeba3f934565")
+EMAIL_PORT = config("EMAIL_PORT", default=2525, cast=int)
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", default=False, cast=bool)
+DEFAULT_FROM_EMAIL = config(
+    "DEFAULT_FROM_EMAIL", default="Beautiful Studio <noreply@beautifulstudio.com>"
+)
 
 # ============================================================================
 # CELERY CONFIGURATION
 # ============================================================================
-CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = 'django-db'
-CELERY_CACHE_BACKEND = 'django-cache'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'America/Argentina/Buenos_Aires'
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_CACHE_BACKEND = "django-cache"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = "America/Argentina/Buenos_Aires"
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutos máximo por tarea
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
 
 # Configuración de Celery Beat (tareas periódicas)
-CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # Frontend URL for email links
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")

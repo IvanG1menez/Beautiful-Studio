@@ -11,12 +11,13 @@ click-repl==0.3.0
 colorama==0.4.6
 cron_descriptor==2.0.6
 Django==5.2.8
-django-celery-beat==2.8.1
+
 django-cors-headers==4.9.0
 django-filter==25.2
 django-jet-reboot==1.3.10
+django_celery_beat
 django-timezone-field==7.1
-django_celery_results==2.6.0
+django_celery_results
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 google-api-python-client==1.4.1
@@ -45,12 +46,11 @@ urllib3==2.5.0
 vine==5.1.0
 wcwidth==0.2.14
 whitenoise==6.11.0
+psycopg2-binary
 
 # Celery para tareas asíncronas
 celery==5.4.0
 redis==5.2.0
-django-celery-beat==2.7.0
-django-celery-results==2.5.1
 
 # Social Auth para Google OAuth
 social-auth-app-django==5.4.2

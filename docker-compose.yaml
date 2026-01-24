@@ -1,0 +1,50 @@
+services:
+  # PostgreSQL 16 Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: beautiful_studio_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: db_proyecto
+      POSTGRES_USER: user_admin
+      POSTGRES_PASSWORD: password_seguro
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432" # Puerto 5433 en Windows -> 5432 en contenedor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - beautiful_studio_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_admin -d db_proyecto"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin 4 - Administrador Web de PostgreSQL
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: beautiful_studio_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@beautifulstudio.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "5050:80" # Acceso web en http://localhost:5050
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - beautiful_studio_network
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  beautiful_studio_network:
+    driver: bridge
