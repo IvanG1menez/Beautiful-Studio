@@ -30,13 +30,15 @@ urlpatterns = [
     path("admin/", admin.site.urls),  # Django admin
     path("api/", include(router.urls)),
     path("api/", include("apps.authentication.urls")),  # Authentication URLs
-    path("api/auth/", include("social_django.urls", namespace="social")),  # Google OAuth URLs
+    path(
+        "api/auth/", include("social_django.urls", namespace="social")
+    ),  # Google OAuth URLs
     path("api/users/", include("apps.users.urls")),
     path("api/empleados/", include("apps.empleados.urls")),
     path("api/clientes/", include("apps.clientes.urls")),
     path("api/servicios/", include("apps.servicios.urls")),
     path("api/turnos/", include("apps.turnos.urls")),
     path("api/encuestas/", include("apps.encuestas.urls")),
-    path("api/", include("apps.notificaciones.urls")),
+    path("api/", include("apps.emails.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]

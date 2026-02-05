@@ -224,6 +224,16 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              {/* Enlace de olvidé mi contraseña */}
+              <div className="flex items-center justify-end">
+                <Link
+                  href="/forgot-password"
+                  className="text-sm font-medium text-purple-600 hover:text-purple-500"
+                >
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
+
               <Button
                 type="submit"
                 className="w-full"

@@ -106,6 +106,8 @@ class AuditoriaAcciones(models.Model):
         ("cambio_rol", "Cambio de Rol"),
         ("backup", "Backup"),
         ("restaurar", "Restaurar"),
+        ("solicitar_reset_password", "Solicitar Reset Password"),
+        ("reset_password", "Reset Password"),
     ]
 
     usuario = models.ForeignKey(
@@ -115,7 +117,7 @@ class AuditoriaAcciones(models.Model):
         blank=True,
         related_name="acciones_auditoria",
     )
-    accion = models.CharField(max_length=20, choices=ACCION_CHOICES)
+    accion = models.CharField(max_length=50, choices=ACCION_CHOICES)
     modelo_afectado = models.CharField(max_length=100, blank=True, null=True)
     objeto_id = models.PositiveIntegerField(blank=True, null=True)
     detalles = models.JSONField(blank=True, null=True)

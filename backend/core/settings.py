@@ -62,7 +62,7 @@ INSTALLED_APPS = [
     "apps.clientes",
     "apps.empleados",
     "apps.encuestas",
-    "apps.notificaciones",
+    "apps.emails",
 ]
 
 MIDDLEWARE = [
@@ -203,7 +203,7 @@ AUTH_USER_MODEL = "users.User"
 
 # Authentication Backends - Usar email para login + Google OAuth
 AUTHENTICATION_BACKENDS = [
-    "social_core.backends.google.GoogleOAuth2",  # Google OAuth2
+    "apps.authentication.backends.CustomGoogleOAuth2",  # Google OAuth2 personalizado (usa BD)
     "apps.users.backends.EmailBackend",  # Backend personalizado para email
     "django.contrib.auth.backends.ModelBackend",  # Fallback al backend por defecto
 ]
