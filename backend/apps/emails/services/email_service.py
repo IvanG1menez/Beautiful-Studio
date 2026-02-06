@@ -859,6 +859,114 @@ class EmailService:
             return False
 
     @staticmethod
+    def enviar_email_oferta_reasignacion(
+        turno_cancelado,
+        turno_ofrecido,
+        log_reasignacion,
+        monto_final,
+        monto_descuento,
+        senia_pagada,
+    ) -> bool:
+        """
+        Envía email al cliente con una oferta de adelanto de turno
+        """
+        try:
+            if not turno_ofrecido.cliente or not turno_ofrecido.cliente.user:
+                logger.warning("Cliente sin usuario asociado para oferta")
+                return False
+
+            if not turno_ofrecido.cliente.user.email:
+                logger.warning("Cliente sin email configurado para oferta")
+                return False
+
+            base_url = (
+                settings.BACKEND_URL
+                if hasattr(settings, "BACKEND_URL")
+                else (
+                    settings.FRONTEND_URL
+                    if hasattr(settings, "FRONTEND_URL")
+                    else "http://localhost:3000"
+                )
+            )
+            aceptar_url = f"{base_url}/api/turnos/reasignacion/{log_reasignacion.token}/?accion=aceptar"
+            rechazar_url = f"{base_url}/api/turnos/reasignacion/{log_reasignacion.token}/?accion=rechazar"
+
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
+
+                <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
+                <p>Se liberó un turno para el mismo servicio y podemos adelantarte con un descuento especial.</p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{turno_cancelado.servicio.nombre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Nuevo horario:</span>
+                        <span class="info-value">{turno_cancelado.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{turno_cancelado.empleado.user.get_full_name()}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Precio total:</span>
+                        <span class="info-value">${turno_cancelado.servicio.precio}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Descuento:</span>
+                        <span class="info-value">${monto_descuento}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Seña acreditada:</span>
+                        <span class="info-value">${senia_pagada}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Monto final a pagar:</span>
+                        <span class="info-value">${monto_final}</span>
+                    </div>
+                </div>
+
+                <div class="alert alert-warning">
+                    <strong>Importante:</strong> Este enlace expira el {log_reasignacion.expires_at.strftime('%d/%m/%Y %H:%M')}.
+                </div>
+
+                <p>Si deseas aceptar el adelanto, confirma con el siguiente botón:</p>
+                <a href="{aceptar_url}" class="button">Aceptar oferta</a>
+
+                <p>Si prefieres mantener tu turno original, puedes rechazar la oferta:</p>
+                <a href="{rechazar_url}" class="button" style="background: #6c757d;">Rechazar oferta</a>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Oferta de adelanto de turno",
+                header_titulo="Oferta de turno",
+                contenido=contenido,
+            )
+
+            plain_message = strip_tags(html_message)
+            email_destino = EmailService._get_email_destinatario(
+                turno_ofrecido.cliente.user.email
+            )
+
+            send_mail(
+                subject="Tenemos un turno antes para ti",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(f"Email de oferta de reasignación enviado a {email_destino}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error enviando email de oferta de reasignación: {str(e)}")
+            return False
+
+    @staticmethod
     def enviar_email_recuperacion_password(
         email: str, token: str, usuario_nombre: str = ""
     ) -> bool:

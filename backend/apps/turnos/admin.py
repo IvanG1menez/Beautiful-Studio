@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
-from .models import Turno, HistorialTurno
+from .models import Turno, HistorialTurno, LogReasignacion
 
 
 class HistorialTurnoInline(admin.TabularInline):
@@ -36,6 +36,7 @@ class TurnoAdmin(admin.ModelAdmin):
         "servicio_nombre",
         "estado_badge",
         "precio_final",
+        "senia_pagada",
         "puede_cancelar_display",
         "created_at_formateado",
     ]
@@ -81,6 +82,7 @@ class TurnoAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "precio_final",
+                    "senia_pagada",
                     "duracion",
                     "fecha_hora_fin",
                 )
@@ -175,6 +177,8 @@ class TurnoAdmin(admin.ModelAdmin):
             "completado": "#4CAF50",  # Verde
             "cancelado": "#F44336",  # Rojo
             "no_asistio": "#757575",  # Gris
+            "oferta_enviada": "#FF9800",  # Naranja intenso
+            "expirada": "#9E9E9E",  # Gris claro
         }
         color = colores.get(obj.estado, "#000000")
         return format_html(
@@ -314,6 +318,30 @@ class TurnoAdmin(admin.ModelAdmin):
             return
 
         super().save_model(request, obj, form, change)
+
+
+@admin.register(LogReasignacion)
+class LogReasignacionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "turno_cancelado",
+        "turno_ofrecido",
+        "cliente_notificado",
+        "monto_descuento",
+        "fecha_envio",
+        "estado_final",
+        "expires_at",
+    )
+    list_filter = ("estado_final", "fecha_envio")
+    search_fields = (
+        "cliente_notificado__nombre_completo",
+        "turno_cancelado__id",
+        "turno_ofrecido__id",
+    )
+    readonly_fields = (
+        "token",
+        "fecha_envio",
+    )
 
 
 @admin.register(HistorialTurno)

@@ -542,6 +542,7 @@ export default function UsuariosPage() {
                         const nombreCompleto = getNombreCompleto(empleado);
                         const email = getEmail(empleado);
                         const especialidad = getEspecialidad(empleado);
+                        const servicios = empleado.servicios || [];
                         return (
                           <Card key={empleado.id} className="hover:shadow-md transition-shadow">
                             <CardHeader className="pb-3">
@@ -557,6 +558,18 @@ export default function UsuariosPage() {
                                     <p className="text-sm text-gray-500">
                                       {especialidad}
                                     </p>
+                                    {servicios.length > 0 && (
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        {servicios.map((servicio) => (
+                                          <span
+                                            key={servicio.id}
+                                            className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700"
+                                          >
+                                            {servicio.nombre}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                                 <Badge variant={empleado.is_disponible ? 'default' : 'secondary'}>

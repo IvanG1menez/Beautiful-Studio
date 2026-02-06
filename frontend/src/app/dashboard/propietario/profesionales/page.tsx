@@ -3,6 +3,7 @@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { empleadosService } from '@/services/empleados';
@@ -28,11 +29,13 @@ export default function ProfesionalesPage() {
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterEspecialidad, setFilterEspecialidad] = useState<string>('all');
+  const [filterServicio, setFilterServicio] = useState<string>('');
+  const [filterCategoria, setFilterCategoria] = useState<string>('');
   const [filterDisponible, setFilterDisponible] = useState<string>('all');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [empleadoToDelete, setEmpleadoToDelete] = useState<Empleado | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [expandedEmpleadoId, setExpandedEmpleadoId] = useState<number | null>(null);
   const itemsPerPage = 10;
 
   const loadEmpleados = async (page = 1) => {
@@ -59,11 +62,35 @@ export default function ProfesionalesPage() {
   // Resetear a página 1 cuando cambian los filtros
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterEspecialidad, filterDisponible]);
+  }, [searchTerm, filterServicio, filterCategoria, filterDisponible]);
 
   const parseDiasTrabajo = (dias: string): string[] => {
     if (!dias) return [];
     return dias.split(',').map(d => d.trim()).filter(d => d);
+  };
+
+  const getHorariosAgrupados = (empleado: Empleado) => {
+    const agrupados: { [key: string]: { hora_inicio: string; hora_fin: string }[] } = {};
+    (empleado.horarios_detallados || []).forEach((horario) => {
+      const dia = horario.dia_semana_display;
+      if (!agrupados[dia]) {
+        agrupados[dia] = [];
+      }
+      agrupados[dia].push({
+        hora_inicio: horario.hora_inicio,
+        hora_fin: horario.hora_fin,
+      });
+    });
+
+    Object.keys(agrupados).forEach((dia) => {
+      agrupados[dia].sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
+    });
+
+    return agrupados;
+  };
+
+  const formatRangos = (rangos: { hora_inicio: string; hora_fin: string }[]) => {
+    return rangos.map((r) => `${r.hora_inicio} - ${r.hora_fin}`).join(' / ');
   };
 
   // Filtrar empleados localmente
@@ -75,22 +102,48 @@ export default function ProfesionalesPage() {
       emp.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.user_dni?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Filtro de especialidad
-    const matchesEspecialidad = filterEspecialidad === 'all' ||
-      emp.especialidades?.toLowerCase().includes(filterEspecialidad.toLowerCase());
+    // Filtro de servicio
+    const matchesServicio = !filterServicio ||
+      (emp.servicios || []).some((servicio) => servicio.id.toString() === filterServicio);
+
+    // Filtro de categoría
+    const matchesCategoria = !filterCategoria ||
+      (emp.servicios || []).some((servicio) => servicio.categoria_nombre === filterCategoria);
 
     // Filtro de disponibilidad
     const matchesDisponible = filterDisponible === 'all' ||
       (filterDisponible === 'disponible' && emp.is_disponible) ||
       (filterDisponible === 'no_disponible' && !emp.is_disponible);
 
-    return matchesSearch && matchesEspecialidad && matchesDisponible;
+    return matchesSearch && matchesServicio && matchesCategoria && matchesDisponible;
   });
 
-  // Obtener especialidades únicas para el filtro
-  const especialidadesUnicas = Array.from(
-    new Set(empleados.map(emp => emp.especialidades).filter(Boolean))
+  const serviciosOptions: ComboboxOption[] = Array.from(
+    new Map(
+      empleados
+        .flatMap((emp) => emp.servicios || [])
+        .map((servicio) => [
+          servicio.id,
+          {
+            value: servicio.id.toString(),
+            label: servicio.nombre,
+            description: servicio.categoria_nombre,
+          },
+        ])
+    ).values()
   );
+
+  const categoriasOptions: ComboboxOption[] = Array.from(
+    new Set(
+      empleados
+        .flatMap((emp) => emp.servicios || [])
+        .map((servicio) => servicio.categoria_nombre)
+        .filter(Boolean)
+    )
+  ).map((categoria) => ({
+    value: categoria,
+    label: categoria,
+  }));
 
   // Calcular paginación en el frontend
   const totalFilteredItems = filteredEmpleados.length;
@@ -171,7 +224,7 @@ export default function ProfesionalesPage() {
               <span>Filtros de Búsqueda</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               {/* Búsqueda por texto */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -183,20 +236,25 @@ export default function ProfesionalesPage() {
                 />
               </div>
 
-              {/* Filtro por especialidad */}
-              <Select value={filterEspecialidad} onValueChange={setFilterEspecialidad}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todas las especialidades" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas las especialidades</SelectItem>
-                  {especialidadesUnicas.map((esp) => (
-                    <SelectItem key={esp} value={esp || ''}>
-                      {esp}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Filtro por servicio */}
+              <Combobox
+                options={serviciosOptions}
+                value={filterServicio}
+                onValueChange={setFilterServicio}
+                placeholder="Todos los servicios"
+                searchPlaceholder="Buscar servicio..."
+                emptyMessage="No se encontraron servicios"
+              />
+
+              {/* Filtro por categoría */}
+              <Combobox
+                options={categoriasOptions}
+                value={filterCategoria}
+                onValueChange={setFilterCategoria}
+                placeholder="Todas las categorías"
+                searchPlaceholder="Buscar categoría..."
+                emptyMessage="No se encontraron categorías"
+              />
 
               {/* Filtro por disponibilidad */}
               <Select value={filterDisponible} onValueChange={setFilterDisponible}>
@@ -232,32 +290,48 @@ export default function ProfesionalesPage() {
                   key={empleado.id}
                   className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
                 >
-                  <div className="flex justify-between items-start">
+                  <div
+                    className="flex justify-between items-start cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() =>
+                      setExpandedEmpleadoId(
+                        expandedEmpleadoId === empleado.id ? null : empleado.id
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        setExpandedEmpleadoId(
+                          expandedEmpleadoId === empleado.id ? null : empleado.id
+                        );
+                      }
+                    }}
+                  >
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold text-lg">
                           {empleado.first_name + ' ' + empleado.last_name || 'Sin nombre'}
                         </h3>
-                        {empleado.user_dni && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                            DNI: {empleado.user_dni}
-                          </span>
-                        )}
                       </div>
-                      <p className="text-gray-600 capitalize">{empleado.especialidades}</p>
-                      <p className="text-sm text-gray-500">{empleado.email}</p>
-                      {empleado.biografia && (
-                        <p className="text-sm text-gray-400 mt-1 line-clamp-2">{empleado.biografia}</p>
-                      )}
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {parseDiasTrabajo(empleado.dias_trabajo).map((dia, idx) => (
-                          <span
-                            key={idx}
-                            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
-                          >
-                            {DIAS_MAP[dia] || dia}
+                      {empleado.servicios && empleado.servicios.length > 0 ? (
+                        <div className="mt-1 text-sm text-gray-700">
+                          <span className="font-medium">
+                            {empleado.servicios[0].nombre}
                           </span>
-                        ))}
+                          <span className="text-gray-500">
+                            {' '}- {empleado.servicios[0].categoria_nombre}
+                          </span>
+                          {empleado.servicios.length > 1 && (
+                            <span className="text-gray-400">
+                              {' '}+{empleado.servicios.length - 1} más
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">Sin servicios asignados</p>
+                      )}
+                      <p className="text-sm text-gray-500">{empleado.email}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
                         {empleado.is_disponible ? (
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                             Disponible
@@ -273,7 +347,10 @@ export default function ProfesionalesPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => router.push(`/dashboard/propietario/profesionales/${empleado.id}/editar`)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/dashboard/propietario/profesionales/${empleado.id}/editar`);
+                        }}
                       >
                         <Edit className="w-4 h-4 mr-2" />
                         Editar
@@ -281,13 +358,59 @@ export default function ProfesionalesPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDeleteClick(empleado)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(empleado);
+                        }}
                         className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
+                  {expandedEmpleadoId === empleado.id && (
+                    <div className="mt-4 border-t pt-4 text-sm text-gray-600">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {empleado.user_dni && (
+                          <div>
+                            <span className="font-medium text-gray-700">DNI:</span>{' '}
+                            {empleado.user_dni}
+                          </div>
+                        )}
+                        {empleado.horarios_detallados && empleado.horarios_detallados.length > 0 ? (
+                          <div className="md:col-span-2">
+                            <span className="font-medium text-gray-700">Horarios por día:</span>
+                            <div className="mt-2 space-y-1 text-gray-600">
+                              {Object.entries(getHorariosAgrupados(empleado)).map(([dia, rangos]) => (
+                                <div key={dia}>
+                                  <span className="font-medium">{dia}:</span>{' '}
+                                  {formatRangos(rangos)}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-medium text-gray-700">Horario:</span>{' '}
+                            {empleado.horario_entrada?.slice(0, 5)} - {empleado.horario_salida?.slice(0, 5)}
+                          </div>
+                        )}
+                      </div>
+                      {empleado.biografia && (
+                        <p className="mt-2 text-gray-500">{empleado.biografia}</p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {parseDiasTrabajo(empleado.dias_trabajo).map((dia, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
+                          >
+                            {DIAS_MAP[dia] || dia}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

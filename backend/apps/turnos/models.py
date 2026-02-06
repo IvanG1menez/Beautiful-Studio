@@ -1,5 +1,6 @@
 """Modelos para la app de turnos"""
 
+import uuid
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -18,6 +19,8 @@ class Turno(models.Model):
         ("completado", "Completado"),
         ("cancelado", "Cancelado"),
         ("no_asistio", "No Asistió"),
+        ("oferta_enviada", "Oferta enviada"),
+        ("expirada", "Expirada"),
     ]
     """ Relación con otros modelos """
     cliente = models.ForeignKey(
@@ -58,11 +61,18 @@ class Turno(models.Model):
         null=True,
         verbose_name="Precio final",
     )
+    senia_pagada = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        verbose_name="Seña pagada",
+        help_text="Monto de seña ya abonada por el cliente",
+    )
     fecha_hora_completado = models.DateTimeField(
         blank=True,
         null=True,
         verbose_name="Fecha y hora de finalización",
-        help_text="Registra cuándo se marcó el turno como completado"
+        help_text="Registra cuándo se marcó el turno como completado",
     )
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
@@ -85,16 +95,10 @@ class Turno(models.Model):
     def __str__(self):
         try:
             cliente_nombre = (
-                (
-                    self.cliente.nombre_completo
-                    if self.cliente
-                    else "Cliente desconocido"
-                )
+                self.cliente.nombre_completo if self.cliente else "Cliente desconocido"
             )
             servicio_nombre = (
-                self.servicio.nombre
-                if self.servicio
-                else "Servicio desconocido"
+                self.servicio.nombre if self.servicio else "Servicio desconocido"
             )
             fecha_str = (
                 self.fecha_hora.strftime("%d/%m/%Y %H:%M")
@@ -132,7 +136,13 @@ class Turno(models.Model):
 
     def puede_cancelar(self):
         """Verifica si el turno puede ser cancelado"""
-        if self.estado in ["completado", "cancelado", "no_asistio"]:
+        if self.estado in [
+            "completado",
+            "cancelado",
+            "no_asistio",
+            "oferta_enviada",
+            "expirada",
+        ]:
             return False
         # No se puede cancelar si falta menos de 2 horas
         from datetime import timedelta
@@ -146,9 +156,7 @@ class HistorialTurno(models.Model):
     Historial de cambios en los turnos
     """
 
-    turno = models.ForeignKey(
-        Turno, on_delete=models.CASCADE, related_name="historial"
-    )
+    turno = models.ForeignKey(Turno, on_delete=models.CASCADE, related_name="historial")
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -174,5 +182,74 @@ class HistorialTurno(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        fecha_formato = self.created_at.strftime('%d/%m/%Y %H:%M')
+        fecha_formato = self.created_at.strftime("%d/%m/%Y %H:%M")
         return f"{self.turno} - {self.accion} - {fecha_formato}"
+
+
+class LogReasignacion(models.Model):
+    """
+    Registro de ofertas de reasignación de turnos tras cancelaciones
+    """
+
+    ESTADO_FINAL_CHOICES = [
+        ("aceptada", "Aceptada"),
+        ("rechazada", "Rechazada"),
+        ("expirada", "Expirada"),
+    ]
+
+    turno_cancelado = models.ForeignKey(
+        Turno,
+        on_delete=models.CASCADE,
+        related_name="reasignaciones_cancelado",
+        verbose_name="Turno cancelado",
+    )
+    turno_ofrecido = models.ForeignKey(
+        Turno,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reasignaciones_ofrecido",
+        verbose_name="Turno ofrecido",
+    )
+    cliente_notificado = models.ForeignKey(
+        "clientes.Cliente",
+        on_delete=models.CASCADE,
+        related_name="reasignaciones_notificadas",
+        verbose_name="Cliente notificado",
+    )
+    monto_descuento = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        verbose_name="Monto de descuento",
+    )
+    token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        verbose_name="Token",
+    )
+    fecha_envio = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Fecha de envío",
+    )
+    expires_at = models.DateTimeField(verbose_name="Expira")
+    estado_final = models.CharField(
+        max_length=20,
+        choices=ESTADO_FINAL_CHOICES,
+        null=True,
+        blank=True,
+        verbose_name="Estado final",
+    )
+
+    class Meta:
+        verbose_name = "Log de Reasignación"
+        verbose_name_plural = "Logs de Reasignación"
+        ordering = ["-fecha_envio"]
+        indexes = [
+            models.Index(fields=["token"]),
+            models.Index(fields=["estado_final", "-fecha_envio"]),
+        ]
+
+    def __str__(self):
+        return f"Reasignación turno #{self.turno_cancelado_id} - {self.cliente_notificado.nombre_completo}"

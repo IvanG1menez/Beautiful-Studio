@@ -26,7 +26,14 @@ interface Servicio {
   categoria: number;
   categoria_nombre: string;
   precio: string;
+  descuento_reasignacion?: string;
+  permite_reacomodamiento?: boolean;
+  tipo_descuento_adelanto?: 'PORCENTAJE' | 'MONTO_FIJO';
+  valor_descuento_adelanto?: string;
+  tiempo_espera_respuesta?: number;
+  porcentaje_sena?: string;
   duracion_minutos: number;
+  duracion_horas?: string;
   descripcion: string;
   is_active: boolean;
 }
@@ -54,6 +61,7 @@ export default function ServiciosAdminPage() {
   // Estados para búsqueda y filtros
   const [searchCategoria, setSearchCategoria] = useState('');
   const [searchServicio, setSearchServicio] = useState('');
+  const [expandedServicioId, setExpandedServicioId] = useState<number | null>(null);
 
   // Estados para paginación
   const [currentPageCategorias, setCurrentPageCategorias] = useState(1);
@@ -520,39 +528,108 @@ export default function ServiciosAdminPage() {
             <CardContent>
               <div className="space-y-4">
                 {paginatedServicios.map((servicio) => (
-                  <div key={servicio.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <h3 className="font-semibold">{servicio.nombre}</h3>
-                        <Badge variant="outline">{servicio.categoria_nombre}</Badge>
-                        <Badge variant={servicio.is_active ? "default" : "secondary"}>
-                          {servicio.is_active ? 'Activo' : 'Inactivo'}
-                        </Badge>
+                  <div key={servicio.id} className="p-4 border rounded-lg hover:bg-gray-50 transition-colors">
+                    <div
+                      className="flex items-start justify-between cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        setExpandedServicioId(
+                          expandedServicioId === servicio.id ? null : servicio.id
+                        )
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          setExpandedServicioId(
+                            expandedServicioId === servicio.id ? null : servicio.id
+                          );
+                        }
+                      }}
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <h3 className="font-semibold">{servicio.nombre}</h3>
+                          <Badge variant="outline">{servicio.categoria_nombre}</Badge>
+                          <Badge variant={servicio.is_active ? "default" : "secondary"}>
+                            {servicio.is_active ? 'Activo' : 'Inactivo'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-gray-500">
+                          <span>💰 ${servicio.precio}</span>
+                          <span>⏱️ {servicio.duracion_minutos} min</span>
+                          {servicio.porcentaje_sena && (
+                            <span>💳 Seña {servicio.porcentaje_sena}%</span>
+                          )}
+                        </div>
                       </div>
-                      {servicio.descripcion && (
-                        <p className="text-sm text-gray-600 mb-2">{servicio.descripcion}</p>
-                      )}
-                      <div className="flex items-center gap-4 text-sm text-gray-500">
-                        <span>💰 ${servicio.precio}</span>
-                        <span>⏱️ {servicio.duracion_minutos} min</span>
+                      <div className="flex space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/dashboard/propietario/servicios/${servicio.id}/editar`);
+                          }}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteServicio(servicio.id, servicio.nombre);
+                          }}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => router.push(`/dashboard/propietario/servicios/${servicio.id}/editar`)}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDeleteServicio(servicio.id, servicio.nombre)}
-                      >
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </Button>
-                    </div>
+
+                    {expandedServicioId === servicio.id && (
+                      <div className="mt-4 border-t pt-4 text-sm text-gray-600">
+                        {servicio.descripcion && (
+                          <p className="text-sm text-gray-600 mb-3">{servicio.descripcion}</p>
+                        )}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                          <div>
+                            <span className="font-medium">Precio:</span> ${servicio.precio}
+                          </div>
+                          <div>
+                            <span className="font-medium">Duración:</span> {servicio.duracion_minutos} min
+                          </div>
+                          {servicio.descuento_reasignacion && (
+                            <div>
+                              <span className="font-medium">Descuento reasignación:</span> ${servicio.descuento_reasignacion}
+                            </div>
+                          )}
+                          {servicio.tipo_descuento_adelanto && servicio.valor_descuento_adelanto && (
+                            <div>
+                              <span className="font-medium">Descuento adelanto:</span>{' '}
+                              {servicio.tipo_descuento_adelanto === 'PORCENTAJE'
+                                ? `${servicio.valor_descuento_adelanto}%`
+                                : `$${servicio.valor_descuento_adelanto}`}
+                            </div>
+                          )}
+                          {servicio.tiempo_espera_respuesta !== undefined && (
+                            <div>
+                              <span className="font-medium">Espera respuesta:</span> {servicio.tiempo_espera_respuesta} min
+                            </div>
+                          )}
+                          {servicio.porcentaje_sena && (
+                            <div>
+                              <span className="font-medium">Seña:</span> {servicio.porcentaje_sena}%
+                            </div>
+                          )}
+                          {servicio.permite_reacomodamiento !== undefined && (
+                            <div>
+                              <span className="font-medium">Reacomodamiento:</span>{' '}
+                              {servicio.permite_reacomodamiento ? 'Sí' : 'No'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {paginatedServicios.length === 0 && (

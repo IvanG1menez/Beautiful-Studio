@@ -56,6 +56,18 @@ export interface Empleado {
   id: number;
   user: User;
   especialidades: 'corte' | 'color' | 'tratamientos' | 'unas' | 'maquillaje' | 'general';
+  servicios?: {
+    id: number;
+    nombre: string;
+    categoria_nombre: string;
+  }[];
+  horarios_detallados?: {
+    id: number;
+    dia_semana: number;
+    dia_semana_display: string;
+    hora_inicio: string;
+    hora_fin: string;
+  }[];
   fecha_ingreso: string;
   horario_entrada: string;
   horario_salida: string;

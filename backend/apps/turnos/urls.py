@@ -10,4 +10,9 @@ router.register(r"", views.TurnoViewSet, basename="turno")
 urlpatterns = [
     path("", include(router.urls)),
     path("<int:turno_id>/historial/", views.historial_turno, name="historial-turno"),
+    path(
+        "reasignacion/<uuid:token>/",
+        views.responder_reasignacion,
+        name="responder-reasignacion",
+    ),
 ]

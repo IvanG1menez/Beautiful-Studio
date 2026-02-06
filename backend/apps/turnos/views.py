@@ -3,7 +3,7 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
@@ -18,6 +18,7 @@ from .serializers import (
     HistorialTurnoSerializer,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
+from apps.turnos.services.reasignacion_service import responder_oferta_reasignacion
 
 
 class TurnoViewSet(viewsets.ModelViewSet):
@@ -316,7 +317,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 # Verificar si el empleado trabaja ese día usando dias_trabajo
                 dias_trabajo = empleado.dias_trabajo.split(",")
                 dias_map = {"L": 0, "M": 1, "Mi": 2, "J": 3, "V": 4, "S": 5, "D": 6}
-                
+
                 # Convertir días de trabajo a números
                 dias_numericos = []
                 for dia in dias_trabajo:
@@ -326,7 +327,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
                         dias_numericos.append(2)
                     elif dia in dias_map:
                         dias_numericos.append(dias_map[dia])
-                
+
                 # Verificar si trabaja ese día
                 if dia_semana not in dias_numericos:
                     return Response(
@@ -336,15 +337,17 @@ class TurnoViewSet(viewsets.ModelViewSet):
                             "horarios": [],
                         }
                     )
-                
+
                 # Usar horario_entrada y horario_salida como un solo rango
                 # Crear un objeto simulado para mantener la compatibilidad
                 class HorarioLegacy:
                     def __init__(self, hora_inicio, hora_fin):
                         self.hora_inicio = hora_inicio
                         self.hora_fin = hora_fin
-                
-                horarios_dia = [HorarioLegacy(empleado.horario_entrada, empleado.horario_salida)]
+
+                horarios_dia = [
+                    HorarioLegacy(empleado.horario_entrada, empleado.horario_salida)
+                ]
 
             # Generar horarios disponibles para todos los rangos del día
             horarios_disponibles = []
@@ -482,7 +485,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
     def metricas_propietario(self, request):
         """
         Obtener métricas financieras y operativas para el propietario
-        
+
         Retorna:
         - total_clientes: Total de clientes registrados
         - total_empleados: Total de empleados activos
@@ -497,192 +500,202 @@ class TurnoViewSet(viewsets.ModelViewSet):
         from apps.clientes.models import Cliente
         from apps.empleados.models import Empleado
         from django.db.models import Sum, Count
-        
+
         # Verificar que sea propietario o admin
-        if request.user.role not in ['propietario', 'superusuario']:
+        if request.user.role not in ["propietario", "superusuario"]:
             return Response(
                 {"error": "No tiene permisos para ver estas métricas"},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
-        
+
         now = timezone.now()
         today = now.date()
         start_of_month = today.replace(day=1)
         proximas_48h = now + timedelta(hours=48)
-        
+
         # Total de clientes y empleados
         total_clientes = Cliente.objects.filter(user__is_active=True).count()
         total_empleados = Empleado.objects.filter(user__is_active=True).count()
-        
+
         # Turnos de hoy
-        turnos_hoy = Turno.objects.filter(
-            fecha_hora__date=today
-        ).exclude(estado='cancelado').count()
-        
+        turnos_hoy = (
+            Turno.objects.filter(fecha_hora__date=today)
+            .exclude(estado="cancelado")
+            .count()
+        )
+
         turnos_completados_hoy = Turno.objects.filter(
-            fecha_hora__date=today,
-            estado='completado'
+            fecha_hora__date=today, estado="completado"
         ).count()
-        
+
         # Ingresos del mes
-        ingresos_mes = Turno.objects.filter(
-            estado='completado',
-            fecha_hora__date__gte=start_of_month
-        ).aggregate(total=Sum('precio_final'))['total'] or 0
-        
+        ingresos_mes = (
+            Turno.objects.filter(
+                estado="completado", fecha_hora__date__gte=start_of_month
+            ).aggregate(total=Sum("precio_final"))["total"]
+            or 0
+        )
+
         # Comisión pendiente (turnos completados sin marca de pago)
         # Asumiendo que hay un campo 'pagado' o similar en el modelo
         # Por ahora calculamos comisión como % de turnos completados
-        comision_pendiente = Turno.objects.filter(
-            estado='completado',
-            # Agregar filtro de pagado=False cuando exista el campo
-        ).aggregate(total=Sum('precio_final'))['total'] or 0
-        
+        comision_pendiente = (
+            Turno.objects.filter(
+                estado="completado",
+                # Agregar filtro de pagado=False cuando exista el campo
+            ).aggregate(total=Sum("precio_final"))["total"]
+            or 0
+        )
+
         # Aplicar % de comisión (por ejemplo 30%)
         porcentaje_comision = 0.30
         comision_pendiente = float(comision_pendiente) * porcentaje_comision
-        
+
         # Turnos pendientes de pago (completados)
         turnos_pendientes_pago = Turno.objects.filter(
-            estado='completado',
+            estado="completado",
             # Agregar filtro de pagado=False cuando exista el campo
         ).count()
-        
+
         # Turnos pendientes de aceptación
-        turnos_pendientes_aceptacion = Turno.objects.filter(
-            estado='pendiente'
-        ).count()
-        
+        turnos_pendientes_aceptacion = Turno.objects.filter(estado="pendiente").count()
+
         # Turnos en las próximas 48 horas
-        turnos_proximos_48h = Turno.objects.filter(
-            fecha_hora__gte=now,
-            fecha_hora__lte=proximas_48h
-        ).exclude(estado__in=['cancelado', 'no_asistio']).count()
-        
-        return Response({
-            'total_clientes': total_clientes,
-            'total_empleados': total_empleados,
-            'turnos_hoy': turnos_hoy,
-            'turnos_completados_hoy': turnos_completados_hoy,
-            'ingresos_mes': float(ingresos_mes),
-            'comision_pendiente': comision_pendiente,
-            'turnos_pendientes_pago': turnos_pendientes_pago,
-            'turnos_pendientes_aceptacion': turnos_pendientes_aceptacion,
-            'turnos_proximos_48h': turnos_proximos_48h,
-        })
+        turnos_proximos_48h = (
+            Turno.objects.filter(fecha_hora__gte=now, fecha_hora__lte=proximas_48h)
+            .exclude(estado__in=["cancelado", "no_asistio"])
+            .count()
+        )
+
+        return Response(
+            {
+                "total_clientes": total_clientes,
+                "total_empleados": total_empleados,
+                "turnos_hoy": turnos_hoy,
+                "turnos_completados_hoy": turnos_completados_hoy,
+                "ingresos_mes": float(ingresos_mes),
+                "comision_pendiente": comision_pendiente,
+                "turnos_pendientes_pago": turnos_pendientes_pago,
+                "turnos_pendientes_aceptacion": turnos_pendientes_aceptacion,
+                "turnos_proximos_48h": turnos_proximos_48h,
+            }
+        )
 
     @action(detail=False, methods=["get"], url_path="turnos-accion")
     def turnos_accion(self, request):
         """
         Obtener turnos que requieren acción del propietario
-        
+
         Query params:
         - tipo: 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion'
         - limit: número máximo de resultados (default: 20)
         """
         # Verificar que sea propietario o admin
-        if request.user.role not in ['propietario', 'superusuario']:
+        if request.user.role not in ["propietario", "superusuario"]:
             return Response(
                 {"error": "No tiene permisos para ver estos turnos"},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
-        
-        tipo = request.query_params.get('tipo', 'proximos_48h')
-        limit = int(request.query_params.get('limit', 20))
-        
+
+        tipo = request.query_params.get("tipo", "proximos_48h")
+        limit = int(request.query_params.get("limit", 20))
+
         now = timezone.now()
         proximas_48h = now + timedelta(hours=48)
-        
-        if tipo == 'proximos_48h':
-            turnos = Turno.objects.filter(
-                fecha_hora__gte=now,
-                fecha_hora__lte=proximas_48h
-            ).exclude(
-                estado__in=['cancelado', 'no_asistio']
-            ).select_related(
-                'cliente__user', 'empleado__user', 'servicio'
-            ).order_by('fecha_hora')[:limit]
-            
-        elif tipo == 'pendientes_pago':
-            turnos = Turno.objects.filter(
-                estado='completado',
-                # Agregar filtro de pagado=False cuando exista el campo
-            ).select_related(
-                'cliente__user', 'empleado__user', 'servicio'
-            ).order_by('-fecha_hora')[:limit]
-            
-        elif tipo == 'pendientes_aceptacion':
-            turnos = Turno.objects.filter(
-                estado='pendiente'
-            ).select_related(
-                'cliente__user', 'empleado__user', 'servicio'
-            ).order_by('fecha_hora')[:limit]
+
+        if tipo == "proximos_48h":
+            turnos = (
+                Turno.objects.filter(fecha_hora__gte=now, fecha_hora__lte=proximas_48h)
+                .exclude(estado__in=["cancelado", "no_asistio"])
+                .select_related("cliente__user", "empleado__user", "servicio")
+                .order_by("fecha_hora")[:limit]
+            )
+
+        elif tipo == "pendientes_pago":
+            turnos = (
+                Turno.objects.filter(
+                    estado="completado",
+                    # Agregar filtro de pagado=False cuando exista el campo
+                )
+                .select_related("cliente__user", "empleado__user", "servicio")
+                .order_by("-fecha_hora")[:limit]
+            )
+
+        elif tipo == "pendientes_aceptacion":
+            turnos = (
+                Turno.objects.filter(estado="pendiente")
+                .select_related("cliente__user", "empleado__user", "servicio")
+                .order_by("fecha_hora")[:limit]
+            )
         else:
             return Response(
-                {"error": "Tipo no válido. Use: proximos_48h, pendientes_pago, pendientes_aceptacion"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "Tipo no válido. Use: proximos_48h, pendientes_pago, pendientes_aceptacion"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         serializer = TurnoListSerializer(turnos, many=True)
-        
-        return Response({
-            'tipo': tipo,
-            'total': turnos.count(),
-            'turnos': serializer.data
-        })
+
+        return Response(
+            {"tipo": tipo, "total": turnos.count(), "turnos": serializer.data}
+        )
 
     @action(detail=False, methods=["post"], url_path="completar-masivo")
     def completar_masivo(self, request):
         """
         Marcar múltiples turnos como completados
-        
+
         Parámetros:
         - turno_ids: Lista de IDs de turnos a completar
         - fecha_desde: Fecha inicio (opcional, si no se envían IDs)
         - fecha_hasta: Fecha fin (opcional, si no se envían IDs)
-        
+
         Retorna:
         - completados: cantidad de turnos marcados como completados
         - errores: lista de errores si los hay
         """
         user = request.user
-        
+
         # Verificar que el usuario sea profesional
         if not hasattr(user, "profesional_profile"):
             return Response(
-                {"error": "Solo los profesionales pueden marcar turnos como completados"},
+                {
+                    "error": "Solo los profesionales pueden marcar turnos como completados"
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
-        
+
         empleado = user.profesional_profile
         turno_ids = request.data.get("turno_ids", [])
         fecha_desde = request.data.get("fecha_desde")
         fecha_hasta = request.data.get("fecha_hasta")
-        
+
         # Construir query base - solo turnos del profesional
         queryset = Turno.objects.filter(empleado=empleado)
-        
+
         # Si se proporcionan IDs específicos
         if turno_ids:
             queryset = queryset.filter(id__in=turno_ids)
         # Si se proporciona rango de fechas
         elif fecha_desde and fecha_hasta:
             queryset = queryset.filter(
-                fecha_hora__gte=fecha_desde,
-                fecha_hora__lte=fecha_hasta
+                fecha_hora__gte=fecha_desde, fecha_hora__lte=fecha_hasta
             )
         else:
             return Response(
-                {"error": "Debe proporcionar turno_ids o un rango de fechas (fecha_desde y fecha_hasta)"},
+                {
+                    "error": "Debe proporcionar turno_ids o un rango de fechas (fecha_desde y fecha_hasta)"
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         # Filtrar solo turnos que NO están ya completados o cancelados
         queryset = queryset.filter(estado__in=["pendiente", "confirmado", "en_proceso"])
-        
+
         completados = 0
         errores = []
-        
+
         for turno in queryset:
             try:
                 turno.estado = "completado"
@@ -690,54 +703,55 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 turno.save()
                 completados += 1
             except Exception as e:
-                errores.append({
-                    "turno_id": turno.id,
-                    "error": str(e)
-                })
-        
-        return Response({
-            "success": True,
-            "completados": completados,
-            "total_seleccionados": queryset.count(),
-            "errores": errores
-        })
-    
+                errores.append({"turno_id": turno.id, "error": str(e)})
+
+        return Response(
+            {
+                "success": True,
+                "completados": completados,
+                "total_seleccionados": queryset.count(),
+                "errores": errores,
+            }
+        )
+
     @action(detail=False, methods=["post"], url_path="completar-ultima-semana")
     def completar_ultima_semana(self, request):
         """
         Marcar todos los turnos de la última semana como completados
-        
+
         Retorna:
         - completados: cantidad de turnos marcados como completados
         - fecha_desde: fecha de inicio del rango
         - fecha_hasta: fecha de fin del rango
         """
         user = request.user
-        
+
         # Verificar que el usuario sea profesional
         if not hasattr(user, "profesional_profile"):
             return Response(
-                {"error": "Solo los profesionales pueden marcar turnos como completados"},
+                {
+                    "error": "Solo los profesionales pueden marcar turnos como completados"
+                },
                 status=status.HTTP_403_FORBIDDEN,
             )
-        
+
         empleado = user.profesional_profile
-        
+
         # Calcular fecha hace 7 días
         ahora = timezone.now()
         hace_7_dias = ahora - timedelta(days=7)
-        
+
         # Buscar turnos de la última semana
         turnos = Turno.objects.filter(
             empleado=empleado,
             fecha_hora__gte=hace_7_dias,
             fecha_hora__lte=ahora,
-            estado__in=["pendiente", "confirmado", "en_proceso"]
+            estado__in=["pendiente", "confirmado", "en_proceso"],
         )
-        
+
         completados = 0
         errores = []
-        
+
         for turno in turnos:
             try:
                 turno.estado = "completado"
@@ -745,78 +759,79 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 turno.save()
                 completados += 1
             except Exception as e:
-                errores.append({
-                    "turno_id": turno.id,
-                    "error": str(e)
-                })
-        
-        return Response({
-            "success": True,
-            "completados": completados,
-            "total_encontrados": turnos.count(),
-            "fecha_desde": hace_7_dias.isoformat(),
-            "fecha_hasta": ahora.isoformat(),
-            "errores": errores
-        })
-    
+                errores.append({"turno_id": turno.id, "error": str(e)})
+
+        return Response(
+            {
+                "success": True,
+                "completados": completados,
+                "total_encontrados": turnos.count(),
+                "fecha_desde": hace_7_dias.isoformat(),
+                "fecha_hasta": ahora.isoformat(),
+                "errores": errores,
+            }
+        )
+
     @action(detail=False, methods=["get"], url_path="pendientes-rango")
     def pendientes_rango(self, request):
         """
         Obtener turnos pendientes en un rango de fechas para el profesional
-        
+
         Parámetros:
         - fecha_desde: Fecha inicio (requerido)
         - fecha_hasta: Fecha fin (requerido)
         - estado: Filtrar por estado (opcional, por defecto: pendiente, confirmado, en_proceso)
-        
+
         Retorna lista de turnos pendientes con información detallada
         """
         user = request.user
-        
+
         # Verificar que el usuario sea profesional
         if not hasattr(user, "profesional_profile"):
             return Response(
                 {"error": "Solo los profesionales pueden acceder a esta función"},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        
+
         empleado = user.profesional_profile
         fecha_desde = request.query_params.get("fecha_desde")
         fecha_hasta = request.query_params.get("fecha_hasta")
         estado_filter = request.query_params.get("estado")
-        
+
         if not fecha_desde or not fecha_hasta:
             return Response(
                 {"error": "Debe proporcionar fecha_desde y fecha_hasta"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         # Construir query
         queryset = Turno.objects.filter(
-            empleado=empleado,
-            fecha_hora__gte=fecha_desde,
-            fecha_hora__lte=fecha_hasta
+            empleado=empleado, fecha_hora__gte=fecha_desde, fecha_hora__lte=fecha_hasta
         )
-        
+
         # Filtrar por estado
         if estado_filter:
             queryset = queryset.filter(estado=estado_filter)
         else:
             # Por defecto, solo turnos que pueden completarse
-            queryset = queryset.filter(estado__in=["pendiente", "confirmado", "en_proceso"])
-        
+            queryset = queryset.filter(
+                estado__in=["pendiente", "confirmado", "en_proceso"]
+            )
+
         # Ordenar por fecha
         queryset = queryset.order_by("fecha_hora")
-        
+
         serializer = TurnoListSerializer(queryset, many=True)
-        
-        return Response({
-            "success": True,
-            "total": queryset.count(),
-            "fecha_desde": fecha_desde,
-            "fecha_hasta": fecha_hasta,
-            "turnos": serializer.data
-        })
+
+        return Response(
+            {
+                "success": True,
+                "total": queryset.count(),
+                "fecha_desde": fecha_desde,
+                "fecha_hasta": fecha_hasta,
+                "turnos": serializer.data,
+            }
+        )
 
 
 @api_view(["GET"])
@@ -852,3 +867,33 @@ def historial_turno(request, turno_id):
         return Response(
             {"error": "Turno no encontrado"}, status=status.HTTP_404_NOT_FOUND
         )
+
+
+@api_view(["GET", "POST"])
+@permission_classes([AllowAny])
+def responder_reasignacion(request, token):
+    """Aceptar o rechazar una oferta de reasignación con token único."""
+    accion = request.data.get("accion") or request.query_params.get("accion")
+
+    if accion not in ["aceptar", "rechazar"]:
+        return Response(
+            {"error": "Acción inválida. Use 'aceptar' o 'rechazar'."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    resultado = responder_oferta_reasignacion(str(token), accion)
+
+    estados_ok = ["aceptada", "rechazada", "expirada", "ya_resuelta"]
+    if resultado.get("status") in estados_ok:
+        return Response(resultado, status=status.HTTP_200_OK)
+
+    if resultado.get("status") in ["token_invalido", "accion_invalida"]:
+        return Response(resultado, status=status.HTTP_400_BAD_REQUEST)
+
+    if resultado.get("status") in [
+        "hueco_no_disponible",
+        "turno_ofrecido_no_disponible",
+    ]:
+        return Response(resultado, status=status.HTTP_409_CONFLICT)
+
+    return Response(resultado, status=status.HTTP_400_BAD_REQUEST)

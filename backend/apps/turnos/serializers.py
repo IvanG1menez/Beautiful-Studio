@@ -51,6 +51,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "estado",
             "estado_display",
             "precio_final",
+            "senia_pagada",
             "puede_cancelar",
             "notas_cliente",
             "notas_empleado",
@@ -93,6 +94,7 @@ class TurnoCreateSerializer(serializers.ModelSerializer):
             "fecha_hora",
             "notas_cliente",
             "precio_final",
+            "senia_pagada",
         ]
 
     def validate(self, data):
@@ -110,16 +112,17 @@ class TurnoCreateSerializer(serializers.ModelSerializer):
         empleado = data["empleado"]
         fecha_hora = data["fecha_hora"]
         servicio = data["servicio"]
-        
+
         # Verificar unique_together antes de otras validaciones
         turno_exacto = Turno.objects.filter(
-            empleado=empleado,
-            fecha_hora=fecha_hora
+            empleado=empleado, fecha_hora=fecha_hora
         ).exclude(id=self.instance.id if self.instance else None)
-        
+
         if turno_exacto.exists():
             raise serializers.ValidationError(
-                {"fecha_hora": "Este horario ya está ocupado. Por favor selecciona otro horario."}
+                {
+                    "fecha_hora": "Este horario ya está ocupado. Por favor selecciona otro horario."
+                }
             )
 
         # Calcular hora de fin del turno
@@ -198,6 +201,7 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
             "notas_cliente",
             "notas_empleado",
             "precio_final",
+            "senia_pagada",
         ]
 
     def validate_estado(self, value):
@@ -208,11 +212,18 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
             # Definir transiciones válidas
             transiciones_validas = {
                 "pendiente": ["confirmado", "cancelado"],
-                "confirmado": ["en_proceso", "cancelado", "no_asistio"],
+                "confirmado": [
+                    "en_proceso",
+                    "cancelado",
+                    "no_asistio",
+                    "oferta_enviada",
+                ],
                 "en_proceso": ["completado", "cancelado"],
                 "completado": [],  # No se puede cambiar
                 "cancelado": [],  # No se puede cambiar
                 "no_asistio": [],  # No se puede cambiar
+                "oferta_enviada": ["confirmado", "expirada"],
+                "expirada": [],
             }
 
             if value != estado_actual and value not in transiciones_validas.get(

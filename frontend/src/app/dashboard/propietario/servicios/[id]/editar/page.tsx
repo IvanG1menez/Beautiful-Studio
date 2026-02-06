@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
@@ -27,6 +29,11 @@ interface Servicio {
   duracion_minutos: number;
   descripcion: string;
   is_active: boolean;
+  permite_reacomodamiento: boolean;
+  tipo_descuento_adelanto: 'PORCENTAJE' | 'MONTO_FIJO';
+  valor_descuento_adelanto: string;
+  tiempo_espera_respuesta: number;
+  porcentaje_sena: string;
 }
 
 export default function EditarServicioPage() {
@@ -51,7 +58,12 @@ export default function EditarServicioPage() {
     precio: '',
     duracion_minutos: '',
     descripcion: '',
-    is_active: true
+    is_active: true,
+    permite_reacomodamiento: false,
+    tipo_descuento_adelanto: 'PORCENTAJE' as 'PORCENTAJE' | 'MONTO_FIJO',
+    valor_descuento_adelanto: '',
+    tiempo_espera_respuesta: '15',
+    porcentaje_sena: '25.00'
   });
 
   const getAuthHeaders = () => {
@@ -96,7 +108,12 @@ export default function EditarServicioPage() {
             precio: servicio.precio,
             duracion_minutos: servicio.duracion_minutos.toString(),
             descripcion: servicio.descripcion || '',
-            is_active: servicio.is_active
+            is_active: servicio.is_active,
+            permite_reacomodamiento: servicio.permite_reacomodamiento ?? false,
+            tipo_descuento_adelanto: servicio.tipo_descuento_adelanto || 'PORCENTAJE',
+            valor_descuento_adelanto: servicio.valor_descuento_adelanto?.toString?.() || servicio.valor_descuento_adelanto || '',
+            tiempo_espera_respuesta: servicio.tiempo_espera_respuesta?.toString?.() || servicio.tiempo_espera_respuesta?.toString() || '15',
+            porcentaje_sena: servicio.porcentaje_sena?.toString?.() || servicio.porcentaje_sena || '25.00'
           });
         } else {
           showNotification(
@@ -165,6 +182,58 @@ export default function EditarServicioPage() {
         return;
       }
 
+      const descuentoValor = formData.valor_descuento_adelanto === ''
+        ? 0
+        : parseFloat(formData.valor_descuento_adelanto);
+      const tiempoEspera = formData.tiempo_espera_respuesta === ''
+        ? 15
+        : parseInt(formData.tiempo_espera_respuesta);
+      const porcentajeSena = formData.porcentaje_sena === ''
+        ? 25
+        : parseFloat(formData.porcentaje_sena);
+
+      if (formData.permite_reacomodamiento) {
+        if (isNaN(descuentoValor) || descuentoValor < 0) {
+          showNotification(
+            'Descuento inválido',
+            'El descuento debe ser un número igual o mayor a 0',
+            'error'
+          );
+          setLoading(false);
+          return;
+        }
+
+        if (formData.tipo_descuento_adelanto === 'PORCENTAJE' && descuentoValor > 100) {
+          showNotification(
+            'Descuento inválido',
+            'El porcentaje de descuento no puede superar el 100%',
+            'error'
+          );
+          setLoading(false);
+          return;
+        }
+
+        if (isNaN(tiempoEspera) || tiempoEspera <= 0) {
+          showNotification(
+            'Tiempo de espera inválido',
+            'El tiempo de espera debe ser un número mayor a 0',
+            'error'
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
+      if (isNaN(porcentajeSena) || porcentajeSena < 0 || porcentajeSena > 100) {
+        showNotification(
+          'Porcentaje de seña inválido',
+          'El porcentaje de seña debe estar entre 0 y 100',
+          'error'
+        );
+        setLoading(false);
+        return;
+      }
+
       // Preparar datos para enviar
       const dataToSend = {
         nombre: formData.nombre,
@@ -172,7 +241,12 @@ export default function EditarServicioPage() {
         precio: precio,
         duracion_minutos: duracion,
         descripcion: formData.descripcion,
-        is_active: formData.is_active
+        is_active: formData.is_active,
+        permite_reacomodamiento: formData.permite_reacomodamiento,
+        tipo_descuento_adelanto: formData.tipo_descuento_adelanto,
+        valor_descuento_adelanto: descuentoValor,
+        tiempo_espera_respuesta: tiempoEspera,
+        porcentaje_sena: porcentajeSena
       };
 
       const response = await fetch(`http://localhost:8000/api/servicios/${servicioId}/`, {
@@ -356,6 +430,107 @@ export default function EditarServicioPage() {
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Configuración de Automatización */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Configuración de Automatización</CardTitle>
+            <CardDescription>Configura el reacomodamiento automático de turnos</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <Label htmlFor="permite_reacomodamiento" className="text-base font-medium">
+                  Permitir reacomodamiento de turnos
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Habilita la lógica de rellenar huecos para este servicio
+                </p>
+              </div>
+              <Switch
+                id="permite_reacomodamiento"
+                checked={formData.permite_reacomodamiento}
+                onCheckedChange={(checked) => handleInputChange('permite_reacomodamiento', checked)}
+              />
+            </div>
+
+            {formData.permite_reacomodamiento && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="tipo_descuento_adelanto">
+                      Tipo de descuento por adelanto
+                    </Label>
+                    <Select
+                      value={formData.tipo_descuento_adelanto}
+                      onValueChange={(value) => handleInputChange('tipo_descuento_adelanto', value)}
+                    >
+                      <SelectTrigger id="tipo_descuento_adelanto">
+                        <SelectValue placeholder="Selecciona el tipo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="PORCENTAJE">%</SelectItem>
+                        <SelectItem value="MONTO_FIJO">$</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="valor_descuento_adelanto">
+                      Valor del descuento (aplica sobre el precio total)
+                    </Label>
+                    <Input
+                      id="valor_descuento_adelanto"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.valor_descuento_adelanto}
+                      onChange={(e) => handleInputChange('valor_descuento_adelanto', e.target.value)}
+                      placeholder={formData.tipo_descuento_adelanto === 'PORCENTAJE' ? '10' : '500'}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      El descuento se aplica sobre el precio total del servicio para mayor transparencia con el cliente.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="tiempo_espera_respuesta">Minutos de espera de respuesta</Label>
+                    <Input
+                      id="tiempo_espera_respuesta"
+                      type="number"
+                      min="1"
+                      value={formData.tiempo_espera_respuesta}
+                      onChange={(e) => handleInputChange('tiempo_espera_respuesta', e.target.value)}
+                      placeholder="15"
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Tiempo antes de pasar la propuesta al siguiente cliente
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="porcentaje_sena">Porcentaje de Seña (0 a 100)</Label>
+                    <Input
+                      id="porcentaje_sena"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={formData.porcentaje_sena}
+                      onChange={(e) => handleInputChange('porcentaje_sena', e.target.value)}
+                      placeholder="25.00"
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Porcentaje que se cobrará por Mercado Pago
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

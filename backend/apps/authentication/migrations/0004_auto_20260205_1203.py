@@ -6,28 +6,28 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('authentication', '0003_alter_auditoriaacciones_accion'),
+        ("authentication", "0003_alter_auditoriaacciones_accion"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='auditoriaacciones',
-            name='accion',
+            model_name="auditoriaacciones",
+            name="accion",
             field=models.CharField(
                 choices=[
-                    ('crear', 'Crear'),
-                    ('editar', 'Editar'),
-                    ('eliminar', 'Eliminar'),
-                    ('login', 'Inicio de Sesión'),
-                    ('logout', 'Cierre de Sesión'),
-                    ('cambio_password', 'Cambio de Contraseña'),
-                    ('cambio_rol', 'Cambio de Rol'),
-                    ('backup', 'Backup'),
-                    ('restaurar', 'Restaurar'),
-                    ('solicitar_reset_password', 'Solicitar Reset Password'),
-                    ('reset_password', 'Reset Password'),
+                    ("crear", "Crear"),
+                    ("editar", "Editar"),
+                    ("eliminar", "Eliminar"),
+                    ("login", "Inicio de Sesión"),
+                    ("logout", "Cierre de Sesión"),
+                    ("cambio_password", "Cambio de Contraseña"),
+                    ("cambio_rol", "Cambio de Rol"),
+                    ("backup", "Backup"),
+                    ("restaurar", "Restaurar"),
+                    ("solicitar_reset_password", "Solicitar Reset Password"),
+                    ("reset_password", "Reset Password"),
                 ],
-                max_length=50
+                max_length=50,
             ),
         ),
     ]

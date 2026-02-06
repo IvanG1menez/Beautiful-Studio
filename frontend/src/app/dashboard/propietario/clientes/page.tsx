@@ -54,6 +54,7 @@ export default function ClientesAdminPage() {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState({ title: '', description: '' });
+  const [expandedClienteId, setExpandedClienteId] = useState<number | null>(null);
 
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState({
@@ -443,88 +444,108 @@ export default function ClientesAdminPage() {
             {paginatedClientes.map((cliente) => (
               <div
                 key={cliente.id}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                className="p-4 border rounded-lg hover:bg-gray-50 transition-colors"
               >
-                <div className="flex-1">
-                  {/* Nombre y badges */}
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <User className="w-4 h-4 text-gray-500" />
-                    <h3 className="font-semibold text-lg">{cliente.nombre_completo}</h3>
-                    {cliente.is_vip && (
-                      <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600">
-                        <Star className="w-3 h-3 mr-1" />
-                        VIP
+                <div
+                  className="flex items-start justify-between cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() =>
+                    setExpandedClienteId(
+                      expandedClienteId === cliente.id ? null : cliente.id
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      setExpandedClienteId(
+                        expandedClienteId === cliente.id ? null : cliente.id
+                      );
+                    }
+                  }}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <User className="w-4 h-4 text-gray-500" />
+                      <h3 className="font-semibold text-lg">{cliente.nombre_completo}</h3>
+                      {cliente.is_vip && (
+                        <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600">
+                          <Star className="w-3 h-3 mr-1" />
+                          VIP
+                        </Badge>
+                      )}
+                      <Badge variant={cliente.is_active ? "default" : "secondary"}>
+                        {cliente.is_active ? 'Activo' : 'Inactivo'}
                       </Badge>
-                    )}
-                    <Badge variant={cliente.is_active ? "default" : "secondary"}>
-                      {cliente.is_active ? 'Activo' : 'Inactivo'}
-                    </Badge>
-                  </div>
-
-                  {/* Información de contacto */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 text-sm text-gray-600">
-                    <div>
-                      <span className="font-medium">Email:</span> {cliente.email}
                     </div>
-                    {cliente.phone && (
-                      <div>
-                        <span className="font-medium">Teléfono:</span> {cliente.phone}
-                      </div>
-                    )}
-                    {cliente.user_dni && (
-                      <div>
-                        <span className="font-medium">DNI:</span> {cliente.user_dni}
-                      </div>
-                    )}
-                    {cliente.edad && (
-                      <div>
-                        <span className="font-medium">Edad:</span> {formatEdad(cliente.edad)}
-                      </div>
-                    )}
+                    <p className="text-sm text-gray-600">{cliente.email}</p>
                   </div>
 
-                  {/* Información adicional */}
-                  {(cliente.tiempo_como_cliente || cliente.preferencias) && (
-                    <div className="mt-2 text-sm text-gray-500 space-y-1">
+                  <div className="flex flex-col sm:flex-row gap-2 ml-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleVIP(cliente.id, cliente.nombre_completo, cliente.is_vip);
+                      }}
+                      title={cliente.is_vip ? 'Quitar VIP' : 'Marcar como VIP'}
+                    >
+                      <Star className={`w-4 h-4 ${cliente.is_vip ? 'fill-yellow-500 text-yellow-500' : ''}`} />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/dashboard/propietario/clientes/${cliente.id}/editar`);
+                      }}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteCliente(cliente.id, cliente.nombre_completo);
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500" />
+                    </Button>
+                  </div>
+                </div>
+
+                {expandedClienteId === cliente.id && (
+                  <div className="mt-4 border-t pt-4 text-sm text-gray-600">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                      {cliente.phone && (
+                        <div>
+                          <span className="font-medium">Teléfono:</span> {cliente.phone}
+                        </div>
+                      )}
+                      {cliente.user_dni && (
+                        <div>
+                          <span className="font-medium">DNI:</span> {cliente.user_dni}
+                        </div>
+                      )}
+                      {cliente.edad && (
+                        <div>
+                          <span className="font-medium">Edad:</span> {formatEdad(cliente.edad)}
+                        </div>
+                      )}
                       {cliente.tiempo_como_cliente && (
                         <div>
                           <span className="font-medium">Cliente desde:</span> {formatTiempoCliente(cliente.tiempo_como_cliente)}
                         </div>
                       )}
-                      {cliente.preferencias && (
-                        <div>
-                          <span className="font-medium">Notas:</span> {cliente.preferencias.substring(0, 100)}{cliente.preferencias.length > 100 ? '...' : ''}
-                        </div>
-                      )}
                     </div>
-                  )}
-                </div>
-
-                {/* Botones de acción */}
-                <div className="flex flex-col sm:flex-row gap-2 ml-4">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleToggleVIP(cliente.id, cliente.nombre_completo, cliente.is_vip)}
-                    title={cliente.is_vip ? 'Quitar VIP' : 'Marcar como VIP'}
-                  >
-                    <Star className={`w-4 h-4 ${cliente.is_vip ? 'fill-yellow-500 text-yellow-500' : ''}`} />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => router.push(`/dashboard/propietario/clientes/${cliente.id}/editar`)}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteCliente(cliente.id, cliente.nombre_completo)}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </Button>
-                </div>
+                    {cliente.preferencias && (
+                      <div className="mt-2 text-sm text-gray-500">
+                        <span className="font-medium">Notas:</span> {cliente.preferencias}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
 

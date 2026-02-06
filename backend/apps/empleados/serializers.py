@@ -185,6 +185,8 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     biografia = serializers.CharField(read_only=True)
     nivel_experiencia = serializers.SerializerMethodField()
+    servicios = serializers.SerializerMethodField()
+    horarios_detallados = serializers.SerializerMethodField()
 
     def get_nivel_experiencia(self, obj):
         """Obtener nivel de experiencia para el servicio actual"""
@@ -204,6 +206,41 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
                     }
         return None
 
+    def get_servicios(self, obj):
+        from .models import EmpleadoServicio
+
+        servicios = (
+            EmpleadoServicio.objects.filter(empleado=obj)
+            .select_related("servicio", "servicio__categoria")
+            .order_by("servicio__categoria__nombre", "servicio__nombre")
+        )
+        return [
+            {
+                "id": relacion.servicio_id,
+                "nombre": relacion.servicio.nombre,
+                "categoria_nombre": relacion.servicio.categoria.nombre,
+            }
+            for relacion in servicios
+        ]
+
+    def get_horarios_detallados(self, obj):
+        from .models import HorarioEmpleado
+
+        horarios = (
+            HorarioEmpleado.objects.filter(empleado=obj, is_active=True)
+            .order_by("dia_semana", "hora_inicio")
+        )
+        return [
+            {
+                "id": horario.id,
+                "dia_semana": horario.dia_semana,
+                "dia_semana_display": horario.get_dia_semana_display(),
+                "hora_inicio": horario.hora_inicio.strftime("%H:%M"),
+                "hora_fin": horario.hora_fin.strftime("%H:%M"),
+            }
+            for horario in horarios
+        ]
+
     class Meta:
         model = Empleado
         fields = (
@@ -216,6 +253,8 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "user_dni",
             "nombre_completo",
             "especialidad_display",
+            "servicios",
+            "horarios_detallados",
             "fecha_ingreso",
             "horario_entrada",
             "horario_salida",
