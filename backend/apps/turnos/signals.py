@@ -283,15 +283,21 @@ def manejar_cancelacion_turno(turno):
         if config_profesional.email_cancelacion_turno:
             EmailService.enviar_email_cancelacion_turno(turno, cancelado_por="cliente")
 
-        # Iniciar flujo de reasignación automática si aplica
+        # Iniciar flujo de reasignación/reacomodamiento automático si aplica
         try:
             if turno.fecha_hora and turno.fecha_hora > timezone.now():
-                from apps.turnos.tasks import iniciar_reasignacion_turno
+                if turno.servicio and turno.servicio.permite_reacomodamiento:
+                    from apps.turnos.tasks import iniciar_reacomodamiento_proceso_2
 
-                iniciar_reasignacion_turno.delay(turno.id)
+                    iniciar_reacomodamiento_proceso_2.delay(turno.id)
+                else:
+                    from apps.turnos.tasks import iniciar_reasignacion_turno
+
+                    iniciar_reasignacion_turno.delay(turno.id)
         except Exception as e:
             logger.error(
-                f"Error iniciando reasignación automática para turno {turno.id}: {str(e)}"
+                "Error iniciando reasignación/reacomodamiento automático "
+                f"para turno {turno.id}: {str(e)}"
             )
 
         logger.info(f"Notificaciones de cancelación enviadas para turno {turno.id}")

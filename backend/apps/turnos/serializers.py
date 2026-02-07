@@ -21,6 +21,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
         source="empleado.get_especialidades_display", read_only=True
     )
     servicio_nombre = serializers.CharField(source="servicio.nombre", read_only=True)
+    servicio_precio = serializers.DecimalField(
+        source="servicio.precio", max_digits=10, decimal_places=2, read_only=True
+    )
     servicio_duracion = serializers.CharField(
         source="servicio.duracion_horas", read_only=True
     )
@@ -30,6 +33,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
     fecha_hora_fin = serializers.DateTimeField(read_only=True)
     puede_cancelar = serializers.SerializerMethodField()
+    reacomodamiento_exitoso = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
@@ -43,6 +47,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "empleado_especialidad",
             "servicio",
             "servicio_nombre",
+            "servicio_precio",
             "servicio_duracion",
             "categoria_nombre",
             "fecha_hora",
@@ -55,12 +60,20 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "puede_cancelar",
             "notas_cliente",
             "notas_empleado",
+            "reacomodamiento_exitoso",
             "created_at",
             "updated_at",
         ]
 
     def get_puede_cancelar(self, obj):
         return obj.puede_cancelar()
+
+    def get_reacomodamiento_exitoso(self, obj):
+        from .models import LogReasignacion
+
+        return LogReasignacion.objects.filter(
+            turno_cancelado=obj, estado_final="aceptada"
+        ).exists()
 
 
 class TurnoDetailSerializer(serializers.ModelSerializer):

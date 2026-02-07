@@ -1,10 +1,10 @@
-import { 
-  Turno, 
-  TurnoFormData,
+import {
+  ApiResponse,
   HistorialTurno,
-  ApiResponse 
+  Turno,
+  TurnoFormData
 } from '@/types';
-import { get, getWithPagination, post, put, patch, del } from './api';
+import { del, get, getWithPagination, patch, post, put } from './api';
 
 export const turnosService = {
   // Listar todos los turnos con paginación
@@ -23,9 +23,9 @@ export const turnosService = {
   // Obtener turnos del día actual
   getToday: async (): Promise<Turno[]> => {
     const today = new Date().toISOString().split('T')[0];
-    const response = await getWithPagination<Turno>('/turnos/', { 
+    const response = await getWithPagination<Turno>('/turnos/', {
       fecha_desde: today,
-      fecha_hasta: today 
+      fecha_hasta: today
     });
     return response.results;
   },
@@ -73,9 +73,9 @@ export const turnosService = {
 
   // Cambiar estado del turno
   changeStatus: async (id: number, estado: string, observaciones?: string): Promise<Turno> => {
-    return await patch<Turno>(`/turnos/${id}/estado/`, { 
-      estado, 
-      observaciones 
+    return await post<Turno>(`/turnos/${id}/cambiar_estado/`, {
+      estado,
+      observaciones
     });
   },
 
@@ -94,7 +94,7 @@ export const turnosService = {
     const updateData: any = { estado: 'completado' };
     if (precioFinal) updateData.precio_final = precioFinal.toString();
     if (notasEmpleado) updateData.notas_empleado = notasEmpleado;
-    
+
     return await patch<Turno>(`/turnos/${id}/`, updateData);
   },
 

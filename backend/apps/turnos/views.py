@@ -7,9 +7,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
-from .models import Turno
-
-from .models import Turno, HistorialTurno
+from .models import Turno, HistorialTurno, LogReasignacion
 from .serializers import (
     TurnoListSerializer,
     TurnoDetailSerializer,
@@ -138,6 +136,37 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(fecha_hora__date__lte=fecha_hasta)
 
         return queryset
+
+    @action(detail=False, methods=["get"], url_path="historial")
+    def historial(self, request):
+        """
+        Obtener turnos del dia para historial.
+        Incluye estados: cancelado, confirmado y completado.
+        """
+        user = request.user
+
+        if not (
+            user.is_staff or user.role in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"error": "No tiene permisos para ver el historial"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        fecha_hoy = timezone.localdate()
+        estados_historial = ["cancelado", "confirmado", "completado"]
+
+        queryset = Turno.objects.select_related(
+            "cliente__user", "empleado__user", "servicio__categoria"
+        ).filter(fecha_hora__date=fecha_hoy, estado__in=estados_historial)
+
+        if hasattr(user, "profesional_profile"):
+            queryset = queryset.filter(empleado=user.profesional_profile)
+
+        queryset = queryset.order_by("-fecha_hora")
+
+        serializer = TurnoListSerializer(queryset, many=True)
+        return Response(serializer.data)
 
     def perform_create(self, serializer):
         """Crear turno y registrar en historial"""
@@ -499,7 +528,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
         """
         from apps.clientes.models import Cliente
         from apps.empleados.models import Empleado
-        from django.db.models import Sum, Count
+        from django.db.models import Sum
 
         # Verificar que sea propietario o admin
         if request.user.role not in ["propietario", "superusuario"]:
@@ -510,7 +539,10 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         now = timezone.now()
         today = now.date()
+        yesterday = today - timedelta(days=1)
         start_of_month = today.replace(day=1)
+        end_prev_month = start_of_month - timedelta(days=1)
+        start_prev_month = end_prev_month.replace(day=1)
         proximas_48h = now + timedelta(hours=48)
 
         # Total de clientes y empleados
@@ -536,6 +568,15 @@ class TurnoViewSet(viewsets.ModelViewSet):
             or 0
         )
 
+        ingresos_mes_prev = (
+            Turno.objects.filter(
+                estado="completado",
+                fecha_hora__date__gte=start_prev_month,
+                fecha_hora__date__lte=end_prev_month,
+            ).aggregate(total=Sum("precio_final"))["total"]
+            or 0
+        )
+
         # Comisión pendiente (turnos completados sin marca de pago)
         # Asumiendo que hay un campo 'pagado' o similar en el modelo
         # Por ahora calculamos comisión como % de turnos completados
@@ -547,14 +588,29 @@ class TurnoViewSet(viewsets.ModelViewSet):
             or 0
         )
 
+        comision_pendiente_prev = (
+            Turno.objects.filter(
+                estado="completado",
+                fecha_hora__date__gte=start_prev_month,
+                fecha_hora__date__lte=end_prev_month,
+            ).aggregate(total=Sum("precio_final"))["total"]
+            or 0
+        )
+
         # Aplicar % de comisión (por ejemplo 30%)
         porcentaje_comision = 0.30
         comision_pendiente = float(comision_pendiente) * porcentaje_comision
+        comision_pendiente_prev = float(comision_pendiente_prev) * porcentaje_comision
 
         # Turnos pendientes de pago (completados)
         turnos_pendientes_pago = Turno.objects.filter(
             estado="completado",
             # Agregar filtro de pagado=False cuando exista el campo
+        ).count()
+
+        turnos_pendientes_pago_prev = Turno.objects.filter(
+            estado="completado",
+            fecha_hora__date=yesterday,
         ).count()
 
         # Turnos pendientes de aceptación
@@ -567,6 +623,47 @@ class TurnoViewSet(viewsets.ModelViewSet):
             .count()
         )
 
+        turnos_hoy_prev = (
+            Turno.objects.filter(fecha_hora__date=yesterday)
+            .exclude(estado="cancelado")
+            .count()
+        )
+
+        def variacion_porcentual(actual, anterior):
+            if anterior in [0, None]:
+                return 0.0 if actual in [0, None] else 100.0
+            return float(((actual - anterior) / anterior) * 100)
+
+        dinero_recuperado = 0
+        logs_reacomodados = LogReasignacion.objects.filter(
+            estado_final="aceptada", fecha_envio__date__gte=start_of_month
+        ).select_related("turno_cancelado__servicio")
+
+        for log in logs_reacomodados:
+            turno_cancelado = log.turno_cancelado
+            if not turno_cancelado:
+                continue
+            precio_turno = turno_cancelado.precio_final or (
+                turno_cancelado.servicio.precio if turno_cancelado.servicio else 0
+            )
+            dinero_recuperado += float(precio_turno or 0)
+
+        dinero_recuperado_prev = 0
+        logs_reacomodados_prev = LogReasignacion.objects.filter(
+            estado_final="aceptada",
+            fecha_envio__date__gte=start_prev_month,
+            fecha_envio__date__lte=end_prev_month,
+        ).select_related("turno_cancelado__servicio")
+
+        for log in logs_reacomodados_prev:
+            turno_cancelado = log.turno_cancelado
+            if not turno_cancelado:
+                continue
+            precio_turno = turno_cancelado.precio_final or (
+                turno_cancelado.servicio.precio if turno_cancelado.servicio else 0
+            )
+            dinero_recuperado_prev += float(precio_turno or 0)
+
         return Response(
             {
                 "total_clientes": total_clientes,
@@ -574,10 +671,26 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 "turnos_hoy": turnos_hoy,
                 "turnos_completados_hoy": turnos_completados_hoy,
                 "ingresos_mes": float(ingresos_mes),
+                "ingresos_mes_variacion": variacion_porcentual(
+                    float(ingresos_mes), float(ingresos_mes_prev)
+                ),
                 "comision_pendiente": comision_pendiente,
+                "comision_pendiente_variacion": variacion_porcentual(
+                    comision_pendiente, comision_pendiente_prev
+                ),
                 "turnos_pendientes_pago": turnos_pendientes_pago,
+                "turnos_pendientes_pago_variacion": variacion_porcentual(
+                    turnos_pendientes_pago, turnos_pendientes_pago_prev
+                ),
                 "turnos_pendientes_aceptacion": turnos_pendientes_aceptacion,
                 "turnos_proximos_48h": turnos_proximos_48h,
+                "turnos_hoy_variacion": variacion_porcentual(
+                    turnos_hoy, turnos_hoy_prev
+                ),
+                "dinero_recuperado": float(dinero_recuperado),
+                "dinero_recuperado_variacion": variacion_porcentual(
+                    float(dinero_recuperado), float(dinero_recuperado_prev)
+                ),
             }
         )
 

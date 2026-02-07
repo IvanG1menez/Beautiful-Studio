@@ -109,3 +109,67 @@ class ReacomodamientoTest(TestCase):
         # El test pasa si el primero de la lista es el que creamos para dentro de 30 días
         self.assertEqual(candidatos[0].id, turno_objetivo.id)
         print("[OK FINAL] El motor de búsqueda inversa funciona perfectamente.")
+
+    def test_flujo_completo_cancelacion_y_mail(self):
+        print("\n[TEST INTEGRACIÓN] Creando escenario para cancelación...")
+        ahora = timezone.now()
+
+        # 1. Creamos lo mínimo necesario
+        cat = CategoriaServicio.objects.create(nombre="Test", is_active=True)
+        srv = Servicio.objects.create(
+            nombre="Limpieza Facial",
+            precio=Decimal("5000.00"),
+            duracion_minutos=45,
+            categoria=cat,
+            permite_reacomodamiento=True,
+            valor_descuento_adelanto=Decimal("10.00"),
+            tipo_descuento_adelanto="PORCENTAJE",
+        )
+        user_c = User.objects.create(
+            username="c_test", first_name="Juan", email="juan@test.com"
+        )
+        clie = Cliente.objects.create(user=user_c)
+        user_e = User.objects.create(
+            username="e_test", first_name="Emp", email="emp@test.com"
+        )
+        empl = Empleado.objects.create(
+            user=user_e,
+            fecha_ingreso=ahora.date(),
+            horario_entrada=ahora.time(),
+            horario_salida=(ahora + timedelta(hours=8)).time(),
+            dias_trabajo="L,M,M,J,V",
+        )
+
+        # 2. Creamos el turno que vamos a cancelar y el turno del CANDIDATO (el lejano)
+        turno_cancelar = Turno.objects.create(
+            cliente=clie,
+            servicio=srv,
+            empleado=empl,
+            fecha_hora=ahora + timedelta(days=1),
+        )
+        turno_candidato = Turno.objects.create(
+            cliente=clie,
+            servicio=srv,
+            empleado=empl,
+            fecha_hora=ahora + timedelta(days=20),
+        )
+
+        print(f"  📍 Turno a cancelar ID: {turno_cancelar.id}")
+
+        # 3. ACTIVAR MODO ASÍNCRONO SIMULADO (Para que Celery corra aquí mismo)
+        # Si Copilot te creó una tarea de Celery, esto hace que el test la ejecute al instante
+        with self.settings(CELERY_TASK_ALWAYS_EAGER=True):
+            turno_cancelar.estado = "cancelado"
+            turno_cancelar.save()
+
+        print("  ✅ Turno cancelado. Verificando bandeja de salida...")
+
+        from django.core import mail
+
+        # Verificamos si se generó el mail
+        if len(mail.outbox) > 0:
+            print(f"  📧 ¡ÉXITO! Mail enviado a: {mail.outbox[0].to[0]}")
+            print(f"  💰 Asunto: {mail.outbox[0].subject}")
+            self.assertIn("Juan", mail.outbox[0].body)
+        else:
+            self.fail("El mail no se envió. Revisá si la Signal está conectada.")

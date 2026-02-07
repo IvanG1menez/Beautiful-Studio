@@ -21,6 +21,8 @@ import {
   Scissors,
   Settings,
   Shield,
+  Sparkles,
+  TrendingDown,
   TrendingUp,
   Users
 } from 'lucide-react';
@@ -32,44 +34,58 @@ interface DashboardStats {
   total_empleados: number;
   turnos_hoy: number;
   ingresos_mes: number;
+  ingresos_mes_variacion: number;
   turnos_completados_hoy: number;
   comision_pendiente: number;
+  comision_pendiente_variacion: number;
   turnos_pendientes_pago: number;
+  turnos_pendientes_pago_variacion: number;
   turnos_pendientes_aceptacion: number;
   turnos_proximos_48h: number;
+  turnos_hoy_variacion: number;
+  dinero_recuperado: number;
+  dinero_recuperado_variacion: number;
 }
 
 interface TurnoAdmin {
   id: number;
-  cliente: {
+  cliente?: {
     id: number;
     nombre_completo: string;
     email: string;
   };
-  empleado: {
+  cliente_nombre?: string;
+  empleado?: {
     id: number;
     nombre_completo: string;
   };
-  servicio: {
+  empleado_nombre?: string;
+  servicio?: {
     id: number;
     nombre: string;
     precio: number;
   };
+  servicio_nombre?: string;
+  servicio_precio?: number;
   fecha_hora: string;
   estado: string;
   precio_final: number;
   notas?: string;
+  reacomodamiento_exitoso?: boolean;
 }
 
 export default function DashboardAdminPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [turnosRecientes, setTurnosRecientes] = useState<TurnoAdmin[]>([]);
   const [turnosAccion, setTurnosAccion] = useState<TurnoAdmin[]>([]);
+  const [turnosHistorial, setTurnosHistorial] = useState<TurnoAdmin[]>([]);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [accionTab, setAccionTab] = useState<'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion'>('proximos_48h');
+  const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
 
   const { user } = useAuth();
   const router = useRouter();
@@ -169,6 +185,24 @@ export default function DashboardAdminPage() {
     }
   };
 
+  const loadHistorial = async () => {
+    try {
+      setLoadingHistorial(true);
+      const response = await authenticatedFetch('/turnos/historial/');
+
+      if (response.ok) {
+        const data = await response.json();
+        setTurnosHistorial(Array.isArray(data) ? data : []);
+      } else {
+        console.error('Error fetching historial:', response.status);
+      }
+    } catch (error) {
+      console.error('Error loading historial:', error);
+    } finally {
+      setLoadingHistorial(false);
+    }
+  };
+
   // Cargar turnos que requieren acción
   const loadTurnosAccion = async (tipo: 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion') => {
     try {
@@ -226,6 +260,100 @@ export default function DashboardAdminPage() {
     }
   };
 
+  const formatDelta = (value?: number | null) => {
+    if (value === null || value === undefined) {
+      return '--';
+    }
+    const sign = value > 0 ? '+' : '';
+    return `${sign}${value.toFixed(1)}%`;
+  };
+
+  const renderDelta = (value: number | null | undefined, label: string) => {
+    const isPositive = (value ?? 0) >= 0;
+    const Icon = isPositive ? TrendingUp : TrendingDown;
+    return (
+      <div className={`text-xs flex items-center gap-1 ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+        <Icon className="w-3 h-3" />
+        <span>{formatDelta(value)}</span>
+        <span className="text-muted-foreground">{label}</span>
+      </div>
+    );
+  };
+
+  const getEstadoHistorialStyles = (estado: string) => {
+    switch (estado.toLowerCase()) {
+      case 'cancelado':
+        return 'bg-red-100 text-red-700 border-red-200';
+      case 'confirmado':
+        return 'bg-green-100 text-green-700 border-green-200';
+      case 'completado':
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
+  };
+
+  const getEstadoHistorialLabel = (estado: string) => {
+    if (estado.toLowerCase() === 'completado') {
+      return 'Realizado';
+    }
+    return estado;
+  };
+
+  const historialCancelados = turnosHistorial.filter(
+    (turno) => turno.estado.toLowerCase() === 'cancelado'
+  ).length;
+
+  const getServicioNombre = (turno: TurnoAdmin) => {
+    return turno.servicio?.nombre || turno.servicio_nombre || 'Servicio';
+  };
+
+  const getClienteNombre = (turno: TurnoAdmin) => {
+    return turno.cliente?.nombre_completo || turno.cliente_nombre || 'Cliente';
+  };
+
+  const getEmpleadoNombre = (turno: TurnoAdmin) => {
+    return turno.empleado?.nombre_completo || turno.empleado_nombre || 'Profesional';
+  };
+
+  const getPrecioTurno = (turno: TurnoAdmin) => {
+    if (turno.precio_final) {
+      return turno.precio_final;
+    }
+    return turno.servicio?.precio || turno.servicio_precio || 0;
+  };
+
+  const changeTurnoEstado = async (turnoId: number, estado: string, observaciones?: string) => {
+    try {
+      setActionLoadingId(turnoId);
+      setError(null);
+      const response = await authenticatedFetch(`/turnos/${turnoId}/cambiar_estado/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          estado,
+          observaciones
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || 'No se pudo actualizar el estado del turno.';
+        setError(errorMessage);
+        return;
+      }
+
+      await Promise.all([
+        loadTurnosAccion(accionTab),
+        loadStats()
+      ]);
+    } catch (error) {
+      console.error('Error cambiando estado del turno:', error);
+      setError('No se pudo actualizar el estado del turno. Por favor, intenta nuevamente.');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   // Mostrar loading mientras se verifica autenticación
   if (isLoading) {
     return (
@@ -259,6 +387,19 @@ export default function DashboardAdminPage() {
             </div>
             <div className="flex space-x-3">
               <Button
+                variant="outline"
+                onClick={() => {
+                  setActiveTab('historial');
+                  loadHistorial();
+                }}
+              >
+                <Clock className="w-4 h-4 mr-2" />
+                Historial
+                {historialCancelados > 0 && (
+                  <Badge className="ml-2 bg-red-500">{historialCancelados}</Badge>
+                )}
+              </Button>
+              <Button
                 onClick={() => router.push('/dashboard/propietario/configuracion')}
                 className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
               >
@@ -287,9 +428,20 @@ export default function DashboardAdminPage() {
           </div>
         )}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs value={activeTab} onValueChange={(value) => {
+          setActiveTab(value);
+          if (value === 'historial') {
+            loadHistorial();
+          }
+        }} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview">Resumen</TabsTrigger>
+            <TabsTrigger value="historial" className="relative">
+              Historial
+              {historialCancelados > 0 && (
+                <Badge className="ml-2 bg-red-500">{historialCancelados}</Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="turnos">Turnos</TabsTrigger>
             <TabsTrigger value="reportes">Reportes</TabsTrigger>
           </TabsList>
@@ -297,7 +449,7 @@ export default function DashboardAdminPage() {
           {/* Tab: Resumen */}
           <TabsContent value="overview" className="space-y-6">
             {/* Tarjetas de estadísticas principales */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Ingresos del Mes</CardTitle>
@@ -307,10 +459,7 @@ export default function DashboardAdminPage() {
                   <div className="text-2xl font-bold text-green-600">
                     {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.ingresos_mes?.toFixed(2) || 0}`}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    <TrendingUp className="w-3 h-3 inline mr-1" />
-                    Mes actual
-                  </p>
+                  {renderDelta(stats?.ingresos_mes_variacion, 'vs mes pasado')}
                 </CardContent>
               </Card>
 
@@ -323,9 +472,7 @@ export default function DashboardAdminPage() {
                   <div className="text-2xl font-bold">
                     {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_hoy || 0}
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {stats?.turnos_completados_hoy || 0} completados
-                  </p>
+                  {renderDelta(stats?.turnos_hoy_variacion, 'vs ayer')}
                 </CardContent>
               </Card>
 
@@ -338,9 +485,7 @@ export default function DashboardAdminPage() {
                   <div className="text-2xl font-bold text-orange-700">
                     {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
                   </div>
-                  <p className="text-xs text-orange-600">
-                    Por pagar a profesionales
-                  </p>
+                  {renderDelta(stats?.comision_pendiente_variacion, 'vs mes pasado')}
                 </CardContent>
               </Card>
 
@@ -353,9 +498,20 @@ export default function DashboardAdminPage() {
                   <div className="text-2xl font-bold text-red-700">
                     {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_pendientes_pago || 0}
                   </div>
-                  <p className="text-xs text-red-600">
-                    Requieren cierre de caja
-                  </p>
+                  {renderDelta(stats?.turnos_pendientes_pago_variacion, 'vs ayer')}
+                </CardContent>
+              </Card>
+
+              <Card className="border-blue-200 bg-blue-50">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium text-blue-900">Dinero Recuperado</CardTitle>
+                  <Sparkles className="h-4 w-4 text-blue-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-700">
+                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.dinero_recuperado?.toFixed(2) || 0}`}
+                  </div>
+                  {renderDelta(stats?.dinero_recuperado_variacion, 'vs mes pasado')}
                 </CardContent>
               </Card>
             </div>
@@ -453,13 +609,19 @@ export default function DashboardAdminPage() {
                                 {getEstadoIcon(turno.estado)}
                                 <div>
                                   <div className="flex items-center space-x-2">
-                                    <span className="font-medium">{turno.servicio.nombre}</span>
+                                    <span className="font-medium">{getServicioNombre(turno)}</span>
                                     <Badge variant={getEstadoBadgeVariant(turno.estado)}>
                                       {turno.estado}
                                     </Badge>
+                                    {turno.reacomodamiento_exitoso && (
+                                      <span className="flex items-center text-xs text-blue-600">
+                                        <Sparkles className="w-3 h-3 mr-1" />
+                                        Reacomodado
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-sm text-gray-600">
-                                    {turno.cliente.nombre_completo} • {turno.empleado.nombre_completo}
+                                    {getClienteNombre(turno)} • {getEmpleadoNombre(turno)}
                                   </p>
                                   <p className="text-sm text-gray-500">
                                     {dateFormatted} - {timeFormatted}
@@ -468,7 +630,7 @@ export default function DashboardAdminPage() {
                               </div>
                               <div className="text-right">
                                 <p className="font-semibold text-green-600">
-                                  ${turno.precio_final || turno.servicio.precio}
+                                  ${getPrecioTurno(turno)}
                                 </p>
                                 <div className="flex space-x-1 mt-1">
                                   <Button size="sm" variant="ghost">
@@ -508,11 +670,17 @@ export default function DashboardAdminPage() {
                                 <DollarSign className="w-5 h-5 text-red-600" />
                                 <div>
                                   <div className="flex items-center space-x-2">
-                                    <span className="font-medium">{turno.servicio.nombre}</span>
+                                    <span className="font-medium">{getServicioNombre(turno)}</span>
                                     <Badge className="bg-red-500">Pendiente Pago</Badge>
+                                    {turno.reacomodamiento_exitoso && (
+                                      <span className="flex items-center text-xs text-blue-600">
+                                        <Sparkles className="w-3 h-3 mr-1" />
+                                        Reacomodado
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-sm text-gray-700">
-                                    Profesional: {turno.empleado.nombre_completo}
+                                    Profesional: {getEmpleadoNombre(turno)}
                                   </p>
                                   <p className="text-sm text-gray-600">
                                     Completado: {dateFormatted} - {timeFormatted}
@@ -521,7 +689,7 @@ export default function DashboardAdminPage() {
                               </div>
                               <div className="text-right">
                                 <p className="font-bold text-red-700">
-                                  ${turno.precio_final || turno.servicio.precio}
+                                  ${getPrecioTurno(turno)}
                                 </p>
                                 <Button size="sm" className="mt-2 bg-red-600 hover:bg-red-700">
                                   Marcar como Pagado
@@ -557,11 +725,17 @@ export default function DashboardAdminPage() {
                                 <Clock className="w-5 h-5 text-orange-600" />
                                 <div>
                                   <div className="flex items-center space-x-2">
-                                    <span className="font-medium">{turno.servicio.nombre}</span>
+                                    <span className="font-medium">{getServicioNombre(turno)}</span>
                                     <Badge className="bg-orange-500">Pendiente</Badge>
+                                    {turno.reacomodamiento_exitoso && (
+                                      <span className="flex items-center text-xs text-blue-600">
+                                        <Sparkles className="w-3 h-3 mr-1" />
+                                        Reacomodado
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-sm text-gray-700">
-                                    {turno.cliente.nombre_completo} → {turno.empleado.nombre_completo}
+                                    {getClienteNombre(turno)} → {getEmpleadoNombre(turno)}
                                   </p>
                                   <p className="text-sm text-gray-600">
                                     Solicitado para: {dateFormatted} - {timeFormatted}
@@ -570,14 +744,25 @@ export default function DashboardAdminPage() {
                               </div>
                               <div className="text-right">
                                 <p className="font-semibold text-orange-700">
-                                  ${turno.precio_final || turno.servicio.precio}
+                                  ${getPrecioTurno(turno)}
                                 </p>
                                 <div className="flex space-x-2 mt-2">
-                                  <Button size="sm" className="bg-green-600 hover:bg-green-700">
-                                    Aceptar
+                                  <Button
+                                    size="sm"
+                                    className="bg-green-600 hover:bg-green-700"
+                                    onClick={() => changeTurnoEstado(turno.id, 'confirmado')}
+                                    disabled={actionLoadingId === turno.id}
+                                  >
+                                    {actionLoadingId === turno.id ? 'Procesando...' : 'Aceptar'}
                                   </Button>
-                                  <Button size="sm" variant="outline" className="text-red-600 border-red-600">
-                                    Rechazar
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-red-600 border-red-600"
+                                    onClick={() => changeTurnoEstado(turno.id, 'cancelado')}
+                                    disabled={actionLoadingId === turno.id}
+                                  >
+                                    {actionLoadingId === turno.id ? 'Procesando...' : 'Rechazar'}
                                   </Button>
                                 </div>
                               </div>
@@ -624,6 +809,64 @@ export default function DashboardAdminPage() {
                   <BarChart3 className="w-12 h-12 mx-auto mb-4" />
                   <p>Funcionalidad de gestión de turnos en desarrollo</p>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Tab: Historial */}
+          <TabsContent value="historial" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Historial de Turnos</CardTitle>
+                <CardDescription>Turnos del día con estados cancelado, confirmado y realizado</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loadingHistorial ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span className="ml-2">Cargando historial...</span>
+                  </div>
+                ) : turnosHistorial.length > 0 ? (
+                  <div className="space-y-4">
+                    {turnosHistorial.map((turno) => {
+                      const dateFormatted = formatDate(turno.fecha_hora);
+                      const timeFormatted = formatTime(turno.fecha_hora);
+                      return (
+                        <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{getServicioNombre(turno)}</span>
+                              <Badge className={getEstadoHistorialStyles(turno.estado)}>
+                                {getEstadoHistorialLabel(turno.estado)}
+                              </Badge>
+                              {user?.role && ['propietario', 'superusuario'].includes(user.role) && turno.reacomodamiento_exitoso && (
+                                <Badge variant="outline" className="border-blue-200 text-blue-700">
+                                  Reacomodado
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-600">
+                              {getClienteNombre(turno)} • {getEmpleadoNombre(turno)}
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              {dateFormatted} - {timeFormatted}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-gray-900">
+                              ${getPrecioTurno(turno)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500">No hay turnos para mostrar hoy</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

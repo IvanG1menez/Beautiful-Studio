@@ -95,9 +95,7 @@ def crear_servicios(categorias, servicios_por_categoria=10):
             )
 
             if created:
-                print(
-                    f"  ✅ {categoria.nombre} - {nombre}: ${precio} ({duracion} min)"
-                )
+                print(f"  ✅ {categoria.nombre} - {nombre}: ${precio} ({duracion} min)")
             servicios_creados.append(servicio)
 
     return servicios_creados
@@ -126,9 +124,7 @@ def asignar_servicios_a_profesionales(servicios):
                 defaults={"nivel_experiencia": random.randint(1, 4)},
             )
 
-        print(
-            f"  ✅ {profesional.nombre_completo} -> {len(seleccion)} servicio(s)"
-        )
+        print(f"  ✅ {profesional.nombre_completo} -> {len(seleccion)} servicio(s)")
 
 
 def resumen():

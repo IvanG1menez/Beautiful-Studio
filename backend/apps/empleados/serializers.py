@@ -226,10 +226,9 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
     def get_horarios_detallados(self, obj):
         from .models import HorarioEmpleado
 
-        horarios = (
-            HorarioEmpleado.objects.filter(empleado=obj, is_active=True)
-            .order_by("dia_semana", "hora_inicio")
-        )
+        horarios = HorarioEmpleado.objects.filter(
+            empleado=obj, is_active=True
+        ).order_by("dia_semana", "hora_inicio")
         return [
             {
                 "id": horario.id,

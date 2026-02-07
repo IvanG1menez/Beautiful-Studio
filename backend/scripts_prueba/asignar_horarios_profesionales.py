@@ -90,12 +90,14 @@ def asignar_horarios():
         profesional.horario_salida = horario_salida
         profesional.dias_trabajo = dias_trabajo
         profesional.is_disponible = True
-        profesional.save(update_fields=[
-            "horario_entrada",
-            "horario_salida",
-            "dias_trabajo",
-            "is_disponible",
-        ])
+        profesional.save(
+            update_fields=[
+                "horario_entrada",
+                "horario_salida",
+                "dias_trabajo",
+                "is_disponible",
+            ]
+        )
 
         print(
             f"  ✅ {profesional.nombre_completo} -> días {dias_trabajo} ({len(rangos_creados)} rango(s))"

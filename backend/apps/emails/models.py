@@ -65,6 +65,7 @@ class NotificacionConfig(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "notificaciones_notificacionconfig"
         verbose_name = "Configuración de Notificación"
         verbose_name_plural = "Configuraciones de Notificaciones"
 
@@ -105,6 +106,7 @@ class Notificacion(models.Model):
     leida_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        db_table = "notificaciones_notificacion"
         verbose_name = "Notificación"
         verbose_name_plural = "Notificaciones"
         ordering = ["-created_at"]
@@ -143,6 +145,7 @@ class PasswordResetToken(models.Model):
     used_at = models.DateTimeField(null=True, blank=True, verbose_name="Usado el")
 
     class Meta:
+        db_table = "notificaciones_passwordresettoken"
         verbose_name = "Token de Recuperación de Contraseña"
         verbose_name_plural = "Tokens de Recuperación de Contraseña"
         ordering = ["-created_at"]
