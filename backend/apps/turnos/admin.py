@@ -1,4 +1,5 @@
 from django.contrib import admin
+from simple_history.admin import SimpleHistoryAdmin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
@@ -25,7 +26,7 @@ class HistorialTurnoInline(admin.TabularInline):
 
 
 @admin.register(Turno)
-class TurnoAdmin(admin.ModelAdmin):
+class TurnoAdmin(SimpleHistoryAdmin):
     """Administración de Turnos en Django Admin"""
 
     list_display = [

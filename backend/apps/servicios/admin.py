@@ -1,4 +1,5 @@
 from django.contrib import admin
+from simple_history.admin import SimpleHistoryAdmin
 from .models import CategoriaServicio, Servicio
 
 
@@ -11,7 +12,7 @@ class CategoriaServicioAdmin(admin.ModelAdmin):
 
 
 @admin.register(Servicio)
-class ServicioAdmin(admin.ModelAdmin):
+class ServicioAdmin(SimpleHistoryAdmin):
     list_display = (
         "nombre",
         "categoria",

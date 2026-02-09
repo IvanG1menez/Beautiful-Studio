@@ -8,13 +8,24 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
+from simple_history.utils import update_change_reason
 
 from apps.turnos.models import Turno, LogReasignacion
+from apps.turnos.utils import get_system_history_user
 from apps.emails.services import EmailService
 
 logger = logging.getLogger(__name__)
 
 ESTADOS_ACTIVOS = ["pendiente", "confirmado", "en_proceso", "oferta_enviada"]
+
+
+def _save_turno_with_history(turno: Turno, reason: str, update_fields=None) -> None:
+    turno._history_user = get_system_history_user()
+    update_change_reason(turno, reason)
+    if update_fields:
+        turno.save(update_fields=update_fields)
+    else:
+        turno.save()
 
 
 def _slot_libre(turno_cancelado: Turno) -> bool:
@@ -89,7 +100,11 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
     )
 
     candidato.estado = "oferta_enviada"
-    candidato.save(update_fields=["estado", "updated_at"])
+    _save_turno_with_history(
+        candidato,
+        "Oferta enviada por reasignacion",
+        update_fields=["estado", "updated_at"],
+    )
 
     enviado = EmailService.enviar_email_oferta_reasignacion(
         turno_cancelado=turno_cancelado,
@@ -105,7 +120,11 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
             f"No se pudo enviar email de oferta para turno {candidato.id}. Revirtiendo estado."
         )
         candidato.estado = "confirmado"
-        candidato.save(update_fields=["estado", "updated_at"])
+        _save_turno_with_history(
+            candidato,
+            "Reversion de oferta enviada",
+            update_fields=["estado", "updated_at"],
+        )
         log_reasignacion.estado_final = "rechazada"
         log_reasignacion.save(update_fields=["estado_final"])
         return {"status": "email_fallido"}
@@ -144,8 +163,12 @@ def expirar_oferta_reasignacion(log_id: int) -> dict:
         log_reasignacion.turno_ofrecido
         and log_reasignacion.turno_ofrecido.estado == "oferta_enviada"
     ):
-        Turno.objects.filter(pk=log_reasignacion.turno_ofrecido_id).update(
-            estado="expirada"
+        turno_ofrecido = log_reasignacion.turno_ofrecido
+        turno_ofrecido.estado = "expirada"
+        _save_turno_with_history(
+            turno_ofrecido,
+            "Oferta expirada por reasignacion",
+            update_fields=["estado", "updated_at"],
         )
 
     iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
@@ -187,8 +210,12 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
             log_reasignacion.turno_ofrecido
             and log_reasignacion.turno_ofrecido.estado == "oferta_enviada"
         ):
-            Turno.objects.filter(pk=log_reasignacion.turno_ofrecido_id).update(
-                estado="confirmado"
+            turno_ofrecido = log_reasignacion.turno_ofrecido
+            turno_ofrecido.estado = "confirmado"
+            _save_turno_with_history(
+                turno_ofrecido,
+                "Oferta rechazada por cliente",
+                update_fields=["estado", "updated_at"],
             )
 
         iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
@@ -230,15 +257,30 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         precio_total = Decimal(turno_cancelado.servicio.precio)
         monto_final = _calcular_monto_final(precio_total, descuento, senia_pagada)
 
-        Turno.objects.filter(pk=turno_cancelado.pk).update(
-            cliente_id=turno_ofrecido.cliente_id,
-            estado="confirmado",
-            precio_final=monto_final,
-            senia_pagada=senia_pagada,
-            notas_cliente=turno_ofrecido.notas_cliente,
+        turno_cancelado.cliente_id = turno_ofrecido.cliente_id
+        turno_cancelado.estado = "confirmado"
+        turno_cancelado.precio_final = monto_final
+        turno_cancelado.senia_pagada = senia_pagada
+        turno_cancelado.notas_cliente = turno_ofrecido.notas_cliente
+        _save_turno_with_history(
+            turno_cancelado,
+            "Oferta aceptada, turno reasignado",
+            update_fields=[
+                "cliente",
+                "estado",
+                "precio_final",
+                "senia_pagada",
+                "notas_cliente",
+                "updated_at",
+            ],
         )
 
-        Turno.objects.filter(pk=turno_ofrecido.pk).update(estado="cancelado")
+        turno_ofrecido.estado = "cancelado"
+        _save_turno_with_history(
+            turno_ofrecido,
+            "Oferta aceptada, turno ofrecido cancelado",
+            update_fields=["estado", "updated_at"],
+        )
 
         log_reasignacion.estado_final = "aceptada"
         log_reasignacion.save(update_fields=["estado_final"])

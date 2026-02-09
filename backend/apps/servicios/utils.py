@@ -84,9 +84,7 @@ def enviar_propuesta_reacomodamiento(turno_candidato, servicio) -> bool:
             fail_silently=False,
         )
 
-        logger.info(
-            f"Email de propuesta de reacomodamiento enviado a {email_destino}"
-        )
+        logger.info(f"Email de propuesta de reacomodamiento enviado a {email_destino}")
         return True
 
     except Exception as e:

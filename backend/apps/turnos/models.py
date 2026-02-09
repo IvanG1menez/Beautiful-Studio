@@ -5,6 +5,7 @@ from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from simple_history.models import HistoricalRecords
 
 
 class Turno(models.Model):
@@ -80,6 +81,7 @@ class Turno(models.Model):
     updated_at = models.DateTimeField(
         auto_now=True, verbose_name="Fecha de actualización"
     )
+    history = HistoricalRecords()
 
     class Meta:
         """Meta datos del modelo"""

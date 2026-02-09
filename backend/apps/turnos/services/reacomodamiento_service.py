@@ -27,7 +27,10 @@ def iniciar_reacomodamiento(turno_cancelado_id: int) -> dict:
     if turno_cancelado.estado != "cancelado":
         return {"status": "turno_no_cancelado"}
 
-    if not turno_cancelado.servicio or not turno_cancelado.servicio.permite_reacomodamiento:
+    if (
+        not turno_cancelado.servicio
+        or not turno_cancelado.servicio.permite_reacomodamiento
+    ):
         return {"status": "servicio_sin_reacomodamiento"}
 
     if turno_cancelado.fecha_hora and turno_cancelado.fecha_hora <= timezone.now():
@@ -54,7 +57,5 @@ def iniciar_reacomodamiento(turno_cancelado_id: int) -> dict:
     if not enviado:
         return {"status": "email_fallido"}
 
-    logger.info(
-        f"Propuesta de reacomodamiento enviada al turno {candidato.id}"
-    )
+    logger.info(f"Propuesta de reacomodamiento enviada al turno {candidato.id}")
     return {"status": "propuesta_enviada", "turno_id": candidato.id}

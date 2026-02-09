@@ -7,6 +7,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
@@ -31,6 +32,7 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
@@ -53,12 +55,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             const currentUser = await authService.getProfile();
             console.log('[AuthContext] Token válido, usuario cargado:', currentUser);
             setUser(currentUser);
+            setToken(token);
           } catch (error) {
             // Token inválido, limpiar datos
             console.error('[AuthContext] Token inválido o error en getProfile:', error);
             console.log('[AuthContext] Limpiando sesión...');
             await authService.logout();
             setUser(null);
+            setToken(null);
           }
         } else {
           console.log('[AuthContext] No hay usuario guardado o token');
@@ -84,6 +88,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // Se cerró sesión en otra pestaña
         console.log('Sesión cerrada en otra pestaña');
         setUser(null);
+        setToken(null);
         // Redirigir usando window.location para evitar error de listener asíncrono
         window.location.href = '/login';
       }
@@ -132,6 +137,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       setUser(userData);
+      setToken(authService.getToken());
     } catch (error: any) {
       // Re-lanzar el error con el mensaje procesado
       const errorMessage = error?.message || 'Error al iniciar sesión';
@@ -147,6 +153,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(true);
       const response = await authService.register(data);
       setUser(response.user);
+      setToken(authService.getToken());
     } catch (error: any) {
       // Re-lanzar el error con el mensaje procesado
       const errorMessage = error?.message || 'Error al registrar usuario';
@@ -162,10 +169,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(true);
       await authService.logout();
       setUser(null);
+      setToken(null);
     } catch (error) {
       console.error('Error al cerrar sesión:', error);
       // Aunque falle la petición al servidor, limpiar datos locales
       setUser(null);
+      setToken(null);
     } finally {
       setIsLoading(false);
     }
@@ -182,6 +191,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const value: AuthContextType = {
     user,
+    token,
     isLoading,
     isAuthenticated,
     login,

@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "django_celery_beat",
     "django_celery_results",
     "social_django",  # Google OAuth
+    "simple_history",
     # Local apps
     "apps.authentication",
     "apps.users",
@@ -73,6 +74,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "simple_history.middleware.HistoryRequestMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

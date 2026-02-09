@@ -7,6 +7,7 @@ import {
   Bell,
   ChevronLeft,
   ChevronRight,
+  History,
   LayoutDashboard,
   MessageSquare,
   Scissors,
@@ -71,6 +72,12 @@ export default function DashboardPropietarioLayout({
       icon: MessageSquare,
       href: '/dashboard/propietario/encuestas',
       active: pathname?.startsWith('/dashboard/propietario/encuestas'),
+    },
+    {
+      label: 'Historial',
+      icon: History,
+      href: '/dashboard/propietario/historial',
+      active: pathname?.startsWith('/dashboard/propietario/historial'),
     },
     {
       label: 'Notificaciones',

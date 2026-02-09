@@ -1,4 +1,5 @@
 from django.db import models
+from simple_history.models import HistoricalRecords
 
 
 class CategoriaServicio(models.Model):
@@ -84,6 +85,7 @@ class Servicio(models.Model):
     updated_at = models.DateTimeField(
         auto_now=True, verbose_name="Fecha de actualización"
     )
+    history = HistoricalRecords()
 
     class Meta:
         verbose_name = "Servicio"

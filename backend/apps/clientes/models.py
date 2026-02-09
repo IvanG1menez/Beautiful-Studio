@@ -2,6 +2,7 @@
 
 from django.db import models
 from django.conf import settings
+from simple_history.models import HistoricalRecords
 
 
 class Cliente(models.Model):
@@ -33,6 +34,7 @@ class Cliente(models.Model):
     updated_at = models.DateTimeField(
         auto_now=True, verbose_name="Fecha de actualización"
     )
+    history = HistoricalRecords()
 
     class Meta:
         """Meta datos del modelo"""
