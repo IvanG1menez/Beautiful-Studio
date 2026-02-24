@@ -2,6 +2,7 @@ import {
   CategoriaServicio, 
   Servicio, 
   ServicioFormData,
+  Sala,
   ApiResponse 
 } from '@/types';
 import { get, getWithPagination, post, put, patch, del } from './api';
@@ -87,6 +88,30 @@ export const serviciosService = {
     // Activar/desactivar servicio
     toggleActive: async (id: number, isActive: boolean): Promise<Servicio> => {
       return await patch<Servicio>(`/servicios/${id}/`, { is_active: isActive });
+    },
+  },
+
+  // Salas
+  salas: {
+    list: async (): Promise<Sala[]> => {
+      const response = await getWithPagination<Sala>('/servicios/salas/');
+      return response.results;
+    },
+
+    get: async (id: number): Promise<Sala> => {
+      return await get<Sala>(`/servicios/salas/${id}/`);
+    },
+
+    create: async (data: Omit<Sala, 'id' | 'categorias'>): Promise<Sala> => {
+      return await post<Sala>('/servicios/salas/', data);
+    },
+
+    update: async (id: number, data: Partial<Sala>): Promise<Sala> => {
+      return await patch<Sala>(`/servicios/salas/${id}/`, data);
+    },
+
+    delete: async (id: number): Promise<void> => {
+      return await del(`/servicios/salas/${id}/`);
     },
   },
 };

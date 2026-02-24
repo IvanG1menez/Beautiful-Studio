@@ -9,8 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { ChevronLeft, ChevronRight, DoorClosed, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 interface Categoria {
@@ -18,6 +18,17 @@ interface Categoria {
   nombre: string;
   descripcion: string;
   is_active: boolean;
+  sala?: number | null;
+  sala_nombre?: string;
+  sala_capacidad?: number;
+}
+
+interface Sala {
+  id: number;
+  nombre: string;
+  capacidad_simultanea: number;
+  categorias: { id: number; nombre: string }[];
+  categorias_count?: number;
 }
 
 interface Servicio {
@@ -40,15 +51,26 @@ interface Servicio {
 
 export default function ServiciosAdminPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Estados para categorías
   const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [salas, setSalas] = useState<Sala[]>([]);
   const [categoriaDialogOpen, setCategoriaDialogOpen] = useState(false);
   const [editingCategoria, setEditingCategoria] = useState<Categoria | null>(null);
   const [categoriaForm, setCategoriaForm] = useState({
     nombre: '',
     descripcion: '',
+    sala: '',
     is_active: true
+  });
+
+  // Estados para salas
+  const [salaDialogOpen, setSalaDialogOpen] = useState(false);
+  const [editingSala, setEditingSala] = useState<Sala | null>(null);
+  const [salaForm, setSalaForm] = useState({
+    nombre: '',
+    capacidad_simultanea: '1'
   });
 
   // Estados para servicios
@@ -61,11 +83,13 @@ export default function ServiciosAdminPage() {
   // Estados para búsqueda y filtros
   const [searchCategoria, setSearchCategoria] = useState('');
   const [searchServicio, setSearchServicio] = useState('');
+  const [searchSala, setSearchSala] = useState('');
   const [expandedServicioId, setExpandedServicioId] = useState<number | null>(null);
 
   // Estados para paginación
   const [currentPageCategorias, setCurrentPageCategorias] = useState(1);
   const [currentPageServicios, setCurrentPageServicios] = useState(1);
+  const [currentPageSalas, setCurrentPageSalas] = useState(1);
   const itemsPerPage = 5;
 
   // Estados para modales de confirmación y notificación
@@ -92,9 +116,11 @@ export default function ServiciosAdminPage() {
     try {
       const headers = getAuthHeaders();
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-      const [categoriasRes, serviciosRes] = await Promise.all([
+      
+      const [categoriasRes, serviciosRes, salasRes] = await Promise.all([
         fetch(`${baseUrl}/servicios/categorias/`, { headers }),
-        fetch(`${baseUrl}/servicios/`, { headers })
+        fetch(`${baseUrl}/servicios/`, { headers }),
+        fetch(`${baseUrl}/servicios/salas/`, { headers })
       ]);
 
       if (categoriasRes.ok) {
@@ -105,6 +131,11 @@ export default function ServiciosAdminPage() {
       if (serviciosRes.ok) {
         const serviciosData = await serviciosRes.json();
         setServicios(serviciosData.results || serviciosData);
+      }
+
+      if (salasRes.ok) {
+        const salasData = await salasRes.json();
+        setSalas(salasData.results || salasData);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -117,6 +148,13 @@ export default function ServiciosAdminPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && ['categorias', 'servicios', 'salas'].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
   // Funciones de filtrado y ordenamiento
   const getFilteredCategorias = () => {
@@ -134,6 +172,12 @@ export default function ServiciosAdminPage() {
     );
   };
 
+  const getFilteredSalas = () => {
+    return salas.filter(sala =>
+      sala.nombre.toLowerCase().includes(searchSala.toLowerCase())
+    );
+  };
+
   // Funciones de paginación
   const getPaginatedCategorias = () => {
     const filtered = getFilteredCategorias();
@@ -147,12 +191,22 @@ export default function ServiciosAdminPage() {
     return filtered.slice(startIndex, startIndex + itemsPerPage);
   };
 
+  const getPaginatedSalas = () => {
+    const filtered = getFilteredSalas();
+    const startIndex = (currentPageSalas - 1) * itemsPerPage;
+    return filtered.slice(startIndex, startIndex + itemsPerPage);
+  };
+
   const getTotalPagesCategorias = () => {
     return Math.ceil(getFilteredCategorias().length / itemsPerPage);
   };
 
   const getTotalPagesServicios = () => {
     return Math.ceil(getFilteredServicios().length / itemsPerPage);
+  };
+
+  const getTotalPagesSalas = () => {
+    return Math.ceil(getFilteredSalas().length / itemsPerPage);
   };
 
   // Función para mostrar confirmación modal
@@ -186,11 +240,16 @@ export default function ServiciosAdminPage() {
 
     const method = editingCategoria ? 'PUT' : 'POST';
 
+    const payload = {
+      ...categoriaForm,
+      sala: categoriaForm.sala ? parseInt(categoriaForm.sala, 10) : null
+    };
+
     try {
       const response = await fetch(url, {
         method,
         headers: getAuthHeaders(),
-        body: JSON.stringify(categoriaForm)
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
@@ -203,7 +262,7 @@ export default function ServiciosAdminPage() {
         );
         setCategoriaDialogOpen(false);
         setEditingCategoria(null);
-        setCategoriaForm({ nombre: '', descripcion: '', is_active: true });
+        setCategoriaForm({ nombre: '', descripcion: '', sala: '', is_active: true });
         fetchData();
       } else {
         const errorData = await response.json();
@@ -226,6 +285,7 @@ export default function ServiciosAdminPage() {
     setCategoriaForm({
       nombre: categoria.nombre,
       descripcion: categoria.descripcion,
+      sala: categoria.sala ? categoria.sala.toString() : '',
       is_active: categoria.is_active
     });
     setCategoriaDialogOpen(true);
@@ -298,6 +358,100 @@ export default function ServiciosAdminPage() {
     );
   };
 
+  // Funciones para salas
+  const handleSalaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const url = editingSala
+      ? `${baseUrl}/servicios/salas/${editingSala.id}/`
+      : `${baseUrl}/servicios/salas/`;
+    const method = editingSala ? 'PUT' : 'POST';
+
+    const capacidad = parseInt(salaForm.capacidad_simultanea, 10);
+    if (!salaForm.nombre || isNaN(capacidad) || capacidad < 1) {
+      showNotification(
+        'Datos inválidos',
+        'La sala requiere un nombre y una capacidad simultánea mayor a 0.',
+        'error'
+      );
+      return;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          nombre: salaForm.nombre,
+          capacidad_simultanea: capacidad
+        })
+      });
+
+      if (response.ok) {
+        showNotification(
+          editingSala ? 'Sala actualizada' : 'Sala creada',
+          editingSala
+            ? 'Los cambios de la sala se guardaron correctamente.'
+            : 'La nueva sala ha sido creada exitosamente.',
+          'success'
+        );
+        setSalaDialogOpen(false);
+        setEditingSala(null);
+        setSalaForm({ nombre: '', capacidad_simultanea: '1' });
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        const errorMessage = errorData.detail || errorData.error || 'No se pudo guardar la sala.';
+        showNotification('Error al guardar sala', errorMessage, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+    }
+  };
+
+  const handleEditSala = (sala: Sala) => {
+    setEditingSala(sala);
+    setSalaForm({
+      nombre: sala.nombre,
+      capacidad_simultanea: sala.capacidad_simultanea.toString()
+    });
+    setSalaDialogOpen(true);
+  };
+
+  const handleDeleteSala = async (salaId: number, nombreSala: string) => {
+    showConfirmDialog(
+      '¿Eliminar sala? ',
+      `Esta acción no se puede deshacer. Se eliminará la sala "${nombreSala}".`,
+      async () => {
+        try {
+          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+          const response = await fetch(`${baseUrl}/servicios/salas/${salaId}/`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+          });
+
+          if (response.ok || response.status === 204) {
+            showNotification(
+              'Sala eliminada',
+              `La sala "${nombreSala}" ha sido eliminada correctamente.`,
+              'success'
+            );
+            fetchData();
+          } else {
+            const errorData = await response.json();
+            const errorMessage = errorData.detail || errorData.error || 'No se pudo eliminar la sala.';
+            showNotification('Error al eliminar', errorMessage, 'error');
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+        }
+      }
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -309,8 +463,18 @@ export default function ServiciosAdminPage() {
 
   const paginatedCategorias = getPaginatedCategorias();
   const paginatedServicios = getPaginatedServicios();
+  const paginatedSalas = getPaginatedSalas();
   const totalPagesCategorias = getTotalPagesCategorias();
   const totalPagesServicios = getTotalPagesServicios();
+  const totalPagesSalas = getTotalPagesSalas();
+  const selectedSala = categoriaForm.sala
+    ? salas.find((sala) => sala.id === parseInt(categoriaForm.sala, 10))
+    : null;
+  const categoriasCompartidas = selectedSala
+    ? selectedSala.categorias.filter(
+        (cat) => cat.id !== (editingCategoria ? editingCategoria.id : null)
+      )
+    : [];
 
   return (
     <div className="container mx-auto p-6">
@@ -322,7 +486,7 @@ export default function ServiciosAdminPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="categorias" className="flex items-center gap-2">
             <Tag className="w-4 h-4" />
             Categorías ({getFilteredCategorias().length})
@@ -330,6 +494,10 @@ export default function ServiciosAdminPage() {
           <TabsTrigger value="servicios" className="flex items-center gap-2">
             <Scissors className="w-4 h-4" />
             Servicios ({getFilteredServicios().length})
+          </TabsTrigger>
+          <TabsTrigger value="salas" className="flex items-center gap-2">
+            <DoorClosed className="w-4 h-4" />
+            Salas ({getFilteredSalas().length})
           </TabsTrigger>
         </TabsList>
 
@@ -348,7 +516,7 @@ export default function ServiciosAdminPage() {
                   <DialogTrigger asChild>
                     <Button onClick={() => {
                       setEditingCategoria(null);
-                      setCategoriaForm({ nombre: '', descripcion: '', is_active: true });
+                      setCategoriaForm({ nombre: '', descripcion: '', sala: '', is_active: true });
                     }}>
                       <Plus className="w-4 h-4 mr-2" />
                       Nueva Categoría
@@ -383,6 +551,28 @@ export default function ServiciosAdminPage() {
                           placeholder="Descripción opcional de la categoría"
                           rows={3}
                         />
+                      </div>
+                      <div>
+                        <Label htmlFor="categoria-sala">Sala</Label>
+                        <select
+                          id="categoria-sala"
+                          value={categoriaForm.sala}
+                          onChange={(e) => setCategoriaForm({ ...categoriaForm, sala: e.target.value })}
+                          className="w-full border rounded-md px-3 py-2 text-sm"
+                        >
+                          <option value="">Sin sala asignada</option>
+                          {salas.map((sala) => (
+                            <option key={sala.id} value={sala.id}>
+                              {sala.nombre} (Capacidad: {sala.capacidad_simultanea})
+                            </option>
+                          ))}
+                        </select>
+                        {selectedSala && categoriasCompartidas.length > 0 && (
+                          <p className="mt-2 text-sm text-amber-700">
+                            Esta sala ya está vinculada a {categoriasCompartidas.map((cat) => cat.nombre).join(', ')}.
+                            Compartirán la capacidad de {selectedSala.capacidad_simultanea} puestos.
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center space-x-2">
                         <input
@@ -663,6 +853,182 @@ export default function ServiciosAdminPage() {
                       size="sm"
                       onClick={() => setCurrentPageServicios(prev => Math.min(totalPagesServicios, prev + 1))}
                       disabled={currentPageServicios === totalPagesServicios}
+                    >
+                      Siguiente
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TAB SALAS */}
+        <TabsContent value="salas" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <CardTitle>Salas</CardTitle>
+                  <CardDescription>
+                    Gestiona las salas físicas y su capacidad simultánea
+                  </CardDescription>
+                </div>
+                <Dialog open={salaDialogOpen} onOpenChange={setSalaDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      onClick={() => {
+                        setEditingSala(null);
+                        setSalaForm({ nombre: '', capacidad_simultanea: '1' });
+                      }}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Nueva Sala
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {editingSala ? 'Editar Sala' : 'Nueva Sala'}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {editingSala
+                          ? 'Modifica los datos de la sala'
+                          : 'Crea una nueva sala física'}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleSalaSubmit} className="space-y-4">
+                      <div>
+                        <Label htmlFor="sala-nombre">Nombre *</Label>
+                        <Input
+                          id="sala-nombre"
+                          value={salaForm.nombre}
+                          onChange={(e) => setSalaForm({ ...salaForm, nombre: e.target.value })}
+                          placeholder="Ej: Sala Principal"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="sala-capacidad">Capacidad simultánea *</Label>
+                        <Input
+                          id="sala-capacidad"
+                          type="number"
+                          min="1"
+                          value={salaForm.capacidad_simultanea}
+                          onChange={(e) => setSalaForm({ ...salaForm, capacidad_simultanea: e.target.value })}
+                          placeholder="3"
+                          required
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button type="button" variant="outline" onClick={() => setSalaDialogOpen(false)}>
+                          Cancelar
+                        </Button>
+                        <Button type="submit">
+                          {editingSala ? 'Actualizar' : 'Crear'} Sala
+                        </Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              <div className="relative mt-4">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Buscar salas..."
+                  value={searchSala}
+                  onChange={(e) => {
+                    setSearchSala(e.target.value);
+                    setCurrentPageSalas(1);
+                  }}
+                  className="pl-10"
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="hidden md:grid grid-cols-12 gap-4 text-xs uppercase text-gray-500">
+                  <div className="col-span-4">Nombre</div>
+                  <div className="col-span-2">Capacidad</div>
+                  <div className="col-span-4">Categorías asociadas</div>
+                  <div className="col-span-2 text-right">Acciones</div>
+                </div>
+                {paginatedSalas.map((sala) => (
+                  <div
+                    key={sala.id}
+                    className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-4 border rounded-lg"
+                  >
+                    <div className="md:col-span-4">
+                      <p className="font-semibold">{sala.nombre}</p>
+                    </div>
+                    <div className="md:col-span-2 text-sm">
+                      {sala.capacidad_simultanea} puestos
+                    </div>
+                    <div className="md:col-span-4 text-sm">
+                      {sala.categorias.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {sala.categorias.map((cat) => (
+                            <Badge key={cat.id} variant="outline">
+                              {cat.nombre}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-500">Sin categorías</span>
+                      )}
+                    </div>
+                    <div className="md:col-span-2 flex md:justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditSala(sala)}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteSala(sala.id, sala.nombre)}
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {paginatedSalas.length === 0 && (
+                  <p className="text-center text-gray-500 py-8">
+                    {searchSala
+                      ? 'No se encontraron salas que coincidan con la búsqueda.'
+                      : 'No hay salas registradas. Crea la primera sala para comenzar.'}
+                  </p>
+                )}
+              </div>
+
+              {totalPagesSalas > 1 && (
+                <div className="flex items-center justify-between mt-6 pt-4 border-t">
+                  <p className="text-sm text-gray-600">
+                    Mostrando {((currentPageSalas - 1) * itemsPerPage) + 1} - {Math.min(currentPageSalas * itemsPerPage, getFilteredSalas().length)} de {getFilteredSalas().length}
+                  </p>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageSalas(prev => Math.max(1, prev - 1))}
+                      disabled={currentPageSalas === 1}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      Anterior
+                    </Button>
+                    <span className="text-sm">
+                      Página {currentPageSalas} de {totalPagesSalas}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageSalas(prev => Math.min(totalPagesSalas, prev + 1))}
+                      disabled={currentPageSalas === totalPagesSalas}
                     >
                       Siguiente
                       <ChevronRight className="w-4 h-4" />

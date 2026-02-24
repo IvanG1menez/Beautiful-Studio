@@ -18,6 +18,9 @@ interface Categoria {
   nombre: string;
   descripcion: string;
   is_active: boolean;
+  sala?: number | null;
+  sala_nombre?: string;
+  sala_capacidad?: number;
 }
 
 interface Servicio {
@@ -304,6 +307,10 @@ export default function EditarServicioPage() {
     description: categoria.descripcion
   }));
 
+  const categoriaSeleccionada = categorias.find(
+    (categoria) => categoria.id.toString() === formData.categoria
+  );
+
   if (loadingData) {
     return (
       <div className="container mx-auto py-6 max-w-4xl">
@@ -367,6 +374,21 @@ export default function EditarServicioPage() {
                 searchPlaceholder="Buscar categoría..."
                 emptyMessage="No se encontraron categorías"
               />
+
+              {categoriaSeleccionada && (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                  <p>
+                    Este servicio se brindará en: {categoriaSeleccionada.sala_nombre || 'Sala sin asignar'}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/dashboard/propietario/servicios?tab=categorias')}
+                    className="mt-2 text-blue-700 underline"
+                  >
+                    Cambiar sala de la categoría
+                  </button>
+                </div>
+              )}
 
               <p className="text-sm text-muted-foreground">
                 Los servicios se organizan por categorías para facilitar la navegación

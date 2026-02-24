@@ -30,6 +30,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
     categoria_nombre = serializers.CharField(
         source="servicio.categoria.nombre", read_only=True
     )
+    sala_nombre = serializers.CharField(source="sala.nombre", read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
     fecha_hora_fin = serializers.DateTimeField(read_only=True)
     puede_cancelar = serializers.SerializerMethodField()
@@ -50,6 +51,8 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "servicio_precio",
             "servicio_duracion",
             "categoria_nombre",
+            "sala",
+            "sala_nombre",
             "fecha_hora",
             "fecha_hora_fin",
             "fecha_hora_completado",
@@ -82,6 +85,7 @@ class TurnoDetailSerializer(serializers.ModelSerializer):
     cliente = ClienteListSerializer(read_only=True)
     empleado = EmpleadoListSerializer(read_only=True)
     servicio = ServicioSerializer(read_only=True)
+    sala_nombre = serializers.CharField(source="sala.nombre", read_only=True)
     estado_display = serializers.CharField(source="get_estado_display", read_only=True)
     fecha_hora_fin = serializers.DateTimeField(read_only=True)
     duracion = serializers.CharField(read_only=True)
@@ -125,6 +129,12 @@ class TurnoCreateSerializer(serializers.ModelSerializer):
         empleado = data["empleado"]
         fecha_hora = data["fecha_hora"]
         servicio = data["servicio"]
+        sala = servicio.categoria.sala if servicio.categoria else None
+
+        if not sala:
+            raise serializers.ValidationError(
+                {"sala": "La categoría seleccionada no tiene sala asignada."}
+            )
 
         # Verificar unique_together antes de otras validaciones
         turno_exacto = Turno.objects.filter(
@@ -193,12 +203,24 @@ class TurnoCreateSerializer(serializers.ModelSerializer):
                 }
             )
 
+        try:
+            turno_tmp = Turno(servicio=servicio, fecha_hora=fecha_hora, sala=sala)
+            turno_tmp.validar_capacidad_salas(fecha_hora=fecha_hora, servicio=servicio)
+        except Exception as exc:
+            mensaje = getattr(exc, "messages", None)
+            detalle = mensaje[0] if mensaje else str(exc)
+            raise serializers.ValidationError({"sala": detalle})
+
         return data
 
     def create(self, validated_data):
         # Establecer precio final si no se proporciona
         if not validated_data.get("precio_final"):
             validated_data["precio_final"] = validated_data["servicio"].precio
+
+        servicio = validated_data.get("servicio")
+        if servicio and servicio.categoria:
+            validated_data["sala"] = servicio.categoria.sala
 
         return super().create(validated_data)
 
@@ -216,6 +238,28 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
             "precio_final",
             "senia_pagada",
         ]
+
+    def validate(self, data):
+        servicio = self.instance.servicio if self.instance else None
+        fecha_hora = data.get("fecha_hora")
+
+        sala = servicio.categoria.sala if servicio and servicio.categoria else None
+
+        if fecha_hora is not None:
+            if not sala:
+                raise serializers.ValidationError(
+                    {"sala": "La categoría seleccionada no tiene sala asignada."}
+                )
+            try:
+                self.instance.validar_capacidad_salas(
+                    fecha_hora=fecha_hora, servicio=servicio
+                )
+            except Exception as exc:
+                mensaje = getattr(exc, "messages", None)
+                detalle = mensaje[0] if mensaje else str(exc)
+                raise serializers.ValidationError({"sala": detalle})
+
+        return data
 
     def validate_estado(self, value):
         """Validar transiciones de estado permitidas"""

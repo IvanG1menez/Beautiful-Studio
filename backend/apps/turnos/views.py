@@ -43,7 +43,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
 
     queryset = Turno.objects.select_related(
-        "cliente__user", "empleado__user", "servicio__categoria"
+        "cliente__user", "empleado__user", "servicio__categoria", "sala"
     ).all()
     permission_classes = [IsAuthenticated]
     pagination_class = CustomPageNumberPagination

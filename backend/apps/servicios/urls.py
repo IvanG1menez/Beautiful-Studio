@@ -2,12 +2,24 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Salas
+    path("salas/", views.SalaListView.as_view(), name="sala-list"),
+    path("salas/<int:pk>/", views.SalaDetailView.as_view(), name="sala-detail"),
     # Categorías
-    path('categorias/', views.CategoriaServicioListView.as_view(), name='categoria-list'),
-    path('categorias/<int:pk>/', views.CategoriaServicioDetailView.as_view(), name='categoria-detail'),
-    
+    path(
+        "categorias/", views.CategoriaServicioListView.as_view(), name="categoria-list"
+    ),
+    path(
+        "categorias/<int:pk>/",
+        views.CategoriaServicioDetailView.as_view(),
+        name="categoria-detail",
+    ),
     # Servicios
-    path('', views.ServicioListView.as_view(), name='servicio-list'),
-    path('<int:pk>/', views.ServicioDetailView.as_view(), name='servicio-detail'),
-    path('categoria/<int:categoria_id>/', views.servicios_por_categoria, name='servicios-por-categoria'),
+    path("", views.ServicioListView.as_view(), name="servicio-list"),
+    path("<int:pk>/", views.ServicioDetailView.as_view(), name="servicio-detail"),
+    path(
+        "categoria/<int:categoria_id>/",
+        views.servicios_por_categoria,
+        name="servicios-por-categoria",
+    ),
 ]

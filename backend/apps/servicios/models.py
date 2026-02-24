@@ -2,6 +2,26 @@ from django.db import models
 from simple_history.models import HistoricalRecords
 
 
+class Sala(models.Model):
+    """
+    Salas físicas del estudio
+    """
+
+    nombre = models.CharField(max_length=100, verbose_name="Nombre")
+    capacidad_simultanea = models.PositiveIntegerField(
+        default=1, verbose_name="Capacidad simultánea"
+    )
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "Sala"
+        verbose_name_plural = "Salas"
+        ordering = ["nombre"]
+
+    def __str__(self):
+        return self.nombre
+
+
 class CategoriaServicio(models.Model):
     """
     Categorías de servicios (ej: Corte, Coloración, Tratamientos)
@@ -9,6 +29,14 @@ class CategoriaServicio(models.Model):
 
     nombre = models.CharField(max_length=100, verbose_name="Nombre")
     descripcion = models.TextField(blank=True, null=True, verbose_name="Descripción")
+    sala = models.ForeignKey(
+        "servicios.Sala",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="categorias",
+        verbose_name="Sala",
+    )
     is_active = models.BooleanField(default=True, verbose_name="Activo")
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"

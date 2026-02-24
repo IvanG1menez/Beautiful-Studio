@@ -35,8 +35,18 @@ export interface CategoriaServicio {
   id: number;
   nombre: string;
   descripcion?: string;
+  sala?: number | null;
+  sala_nombre?: string;
+  sala_capacidad?: number;
   is_active: boolean;
   created_at: string;
+}
+
+export interface Sala {
+  id: number;
+  nombre: string;
+  capacidad_simultanea: number;
+  categorias: { id: number; nombre: string }[];
 }
 
 export interface Servicio {

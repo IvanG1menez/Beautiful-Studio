@@ -1,12 +1,12 @@
 from django.contrib import admin
 from simple_history.admin import SimpleHistoryAdmin
-from .models import CategoriaServicio, Servicio
+from .models import CategoriaServicio, Servicio, Sala
 
 
 @admin.register(CategoriaServicio)
 class CategoriaServicioAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "is_active", "created_at")
-    list_filter = ("is_active", "created_at")
+    list_display = ("nombre", "sala", "is_active", "created_at")
+    list_filter = ("is_active", "created_at", "sala")
     search_fields = ("nombre", "descripcion")
     ordering = ("nombre",)
 
@@ -26,3 +26,10 @@ class ServicioAdmin(SimpleHistoryAdmin):
     search_fields = ("nombre", "descripcion")
     ordering = ("categoria__nombre", "nombre")
     list_select_related = ("categoria",)
+
+
+@admin.register(Sala)
+class SalaAdmin(SimpleHistoryAdmin):
+    list_display = ("nombre", "capacidad_simultanea")
+    search_fields = ("nombre",)
+    ordering = ("nombre",)

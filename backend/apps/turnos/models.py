@@ -42,6 +42,14 @@ class Turno(models.Model):
         related_name="turnos",
         verbose_name="Servicio",
     )
+    sala = models.ForeignKey(
+        "servicios.Sala",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="turnos",
+        verbose_name="Sala",
+    )
     fecha_hora = models.DateTimeField(verbose_name="Fecha y hora")
     estado = models.CharField(
         max_length=15,
@@ -120,6 +128,56 @@ class Turno(models.Model):
         #         "No se puede programar un turno en el pasado."
         #     )
         pass
+
+    def validar_capacidad_salas(self, fecha_hora=None, servicio=None):
+        """Valida la disponibilidad de capacidad física por sala."""
+        from datetime import timedelta
+
+        servicio_actual = servicio or self.servicio
+        fecha_hora_actual = fecha_hora or self.fecha_hora
+
+        if not servicio_actual or not fecha_hora_actual:
+            return
+
+        sala_actual = (
+            servicio_actual.categoria.sala if servicio_actual.categoria else None
+        )
+
+        if not sala_actual:
+            raise ValidationError("La categoría no tiene sala asignada.")
+
+        if sala_actual.capacidad_simultanea <= 0:
+            raise ValidationError("Capacidad física de la sala agotada.")
+
+        hora_fin = fecha_hora_actual + timedelta(
+            minutes=servicio_actual.duracion_minutos
+        )
+
+        turnos_existentes = Turno.objects.select_related("servicio", "sala").filter(
+            sala=sala_actual,
+            estado__in=["pendiente", "confirmado", "en_proceso"],
+        )
+
+        if self.pk:
+            turnos_existentes = turnos_existentes.exclude(pk=self.pk)
+
+        ocupados = 0
+        for turno in turnos_existentes:
+            if not turno.fecha_hora or not turno.servicio:
+                continue
+            turno_fin = turno.fecha_hora + timedelta(
+                minutes=turno.servicio.duracion_minutos
+            )
+            if fecha_hora_actual < turno_fin and hora_fin > turno.fecha_hora:
+                ocupados += 1
+
+        if ocupados >= sala_actual.capacidad_simultanea:
+            raise ValidationError("Capacidad física de la sala agotada.")
+
+    def save(self, *args, **kwargs):
+        if self.servicio and self.servicio.categoria:
+            self.sala = self.servicio.categoria.sala
+        super().save(*args, **kwargs)
 
     @property
     def fecha_hora_fin(self):

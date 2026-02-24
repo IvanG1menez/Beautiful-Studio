@@ -1,12 +1,24 @@
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from .models import CategoriaServicio, Servicio
+from django.utils import timezone
+from .models import CategoriaServicio, Servicio, Sala
 from .serializers import (
     CategoriaServicioSerializer,
     ServicioSerializer,
     ServicioListSerializer,
+    SalaSerializer,
 )
+
+
+class IsPropietarioOrAdmin(permissions.BasePermission):
+    """Permisos para propietario/admin en endpoints de infraestructura."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        return user.is_staff or user.role in ["propietario", "superusuario"]
 
 
 class CategoriaServicioListView(generics.ListCreateAPIView):
@@ -24,8 +36,8 @@ class CategoriaServicioListView(generics.ListCreateAPIView):
             self.request.user.is_staff
             or self.request.user.role in ["admin", "propietario"]
         ):
-            return CategoriaServicio.objects.all()
-        return CategoriaServicio.objects.filter(is_active=True)
+            return CategoriaServicio.objects.select_related("sala").all()
+        return CategoriaServicio.objects.filter(is_active=True).select_related("sala")
 
 
 class CategoriaServicioDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -33,7 +45,7 @@ class CategoriaServicioDetailView(generics.RetrieveUpdateDestroyAPIView):
     Vista para ver, actualizar y eliminar categorías de servicios
     """
 
-    queryset = CategoriaServicio.objects.all()
+    queryset = CategoriaServicio.objects.select_related("sala").all()
     serializer_class = CategoriaServicioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
@@ -69,6 +81,46 @@ class ServicioDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Servicio.objects.all()
     serializer_class = ServicioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+
+class SalaListView(generics.ListCreateAPIView):
+    """
+    Vista para listar y crear salas
+    """
+
+    serializer_class = SalaSerializer
+    permission_classes = [IsPropietarioOrAdmin]
+    queryset = Sala.objects.prefetch_related("categorias").all()
+
+
+class SalaDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Vista para ver, actualizar y eliminar salas
+    """
+
+    serializer_class = SalaSerializer
+    permission_classes = [IsPropietarioOrAdmin]
+    queryset = Sala.objects.prefetch_related("categorias").all()
+
+    def destroy(self, request, *args, **kwargs):
+        sala = self.get_object()
+        from apps.turnos.models import Turno
+
+        tiene_turnos_futuros = Turno.objects.filter(
+            sala=sala,
+            fecha_hora__gte=timezone.now(),
+            estado__in=["pendiente", "confirmado", "en_proceso"],
+        ).exists()
+
+        if tiene_turnos_futuros:
+            return Response(
+                {
+                    "error": "No se puede eliminar una sala con turnos futuros pendientes."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return super().destroy(request, *args, **kwargs)
 
 
 @api_view(["GET"])
