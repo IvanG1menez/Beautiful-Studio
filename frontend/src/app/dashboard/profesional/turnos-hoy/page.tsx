@@ -36,6 +36,7 @@ import {
   Filter,
   Loader2,
   Mail,
+  MapPin,
   Phone,
   Scissors,
   Search,
@@ -559,6 +560,21 @@ export default function TurnosHoyPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Sala */}
+              {((turno as any).sala_nombre || turno.sala_nombre) && (
+                <div className="flex items-start gap-3">
+                  <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
+                  <div>
+                    <div className="font-medium text-gray-900">
+                      {(turno as any).sala_nombre || turno.sala_nombre}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      Sala asignada
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Cliente */}
               <div className="flex items-start gap-3">

@@ -23,6 +23,9 @@ class ServicioSerializer(serializers.ModelSerializer):
     """
 
     categoria_nombre = serializers.CharField(source="categoria.nombre", read_only=True)
+    sala_nombre = serializers.CharField(
+        source="categoria.sala.nombre", read_only=True, allow_null=True
+    )
     duracion_horas = serializers.ReadOnlyField()
 
     class Meta:
@@ -33,6 +36,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             "descripcion",
             "categoria",
             "categoria_nombre",
+            "sala_nombre",
             "precio",
             "descuento_reasignacion",
             "permite_reacomodamiento",
@@ -40,6 +44,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             "valor_descuento_adelanto",
             "tiempo_espera_respuesta",
             "porcentaje_sena",
+            "frecuencia_recurrencia_dias",
             "duracion_minutos",
             "duracion_horas",
             "is_active",
@@ -55,6 +60,9 @@ class ServicioListSerializer(serializers.ModelSerializer):
     """
 
     categoria_nombre = serializers.CharField(source="categoria.nombre", read_only=True)
+    sala_nombre = serializers.CharField(
+        source="categoria.sala.nombre", read_only=True, allow_null=True
+    )
     duracion_horas = serializers.ReadOnlyField()
 
     class Meta:
@@ -65,6 +73,7 @@ class ServicioListSerializer(serializers.ModelSerializer):
             "descripcion",
             "categoria",
             "categoria_nombre",
+            "sala_nombre",
             "precio",
             "descuento_reasignacion",
             "permite_reacomodamiento",
@@ -72,6 +81,7 @@ class ServicioListSerializer(serializers.ModelSerializer):
             "valor_descuento_adelanto",
             "tiempo_espera_respuesta",
             "porcentaje_sena",
+            "frecuencia_recurrencia_dias",
             "duracion_minutos",
             "duracion_horas",
             "is_active",

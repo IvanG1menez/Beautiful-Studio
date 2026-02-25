@@ -105,6 +105,11 @@ class Servicio(models.Model):
         verbose_name="Porcentaje de seña",
         help_text="Porcentaje que se cobrará por Mercado Pago",
     )
+    frecuencia_recurrencia_dias = models.PositiveIntegerField(
+        default=30,
+        verbose_name="Frecuencia de retorno sugerida (días)",
+        help_text="Días sugeridos entre visitas. Usado para identificar clientes inactivos. Si es 0, usa la configuración global.",
+    )
     duracion_minutos = models.PositiveIntegerField(verbose_name="Duración (minutos)")
     is_active = models.BooleanField(default=True, verbose_name="Activo")
     created_at = models.DateTimeField(

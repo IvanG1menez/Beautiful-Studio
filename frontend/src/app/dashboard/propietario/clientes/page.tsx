@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users, X } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users, X, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { formatCurrency } from '@/lib/utils';
 
 interface Cliente {
   id: number;
@@ -27,6 +28,8 @@ interface Cliente {
   nombre_completo: string;
   edad?: number;
   tiempo_como_cliente?: number;
+  saldo_billetera?: number;
+  tiene_billetera?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -476,6 +479,12 @@ export default function ClientesAdminPage() {
                       <Badge variant={cliente.is_active ? "default" : "secondary"}>
                         {cliente.is_active ? 'Activo' : 'Inactivo'}
                       </Badge>
+                      {cliente.saldo_billetera !== undefined && cliente.saldo_billetera > 0 && (
+                        <Badge variant="outline" className="border-green-500 text-green-700 bg-green-50">
+                          <Wallet className="w-3 h-3 mr-1" />
+                          {formatCurrency(cliente.saldo_billetera)}
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-sm text-gray-600">{cliente.email}</p>
                   </div>
@@ -539,6 +548,23 @@ export default function ClientesAdminPage() {
                         </div>
                       )}
                     </div>
+                    {/* Información de Billetera */}
+                    {cliente.saldo_billetera !== undefined && (
+                      <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="w-4 h-4 text-green-600" />
+                          <span className="font-medium text-green-900">Saldo en Billetera:</span>
+                          <span className="text-lg font-bold text-green-700">
+                            {formatCurrency(cliente.saldo_billetera)}
+                          </span>
+                        </div>
+                        {cliente.saldo_billetera > 0 && (
+                          <p className="text-xs text-green-600 mt-1">
+                            💡 El cliente tiene crédito disponible para usar en futuras reservas
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {cliente.preferencias && (
                       <div className="mt-2 text-sm text-gray-500">
                         <span className="font-medium">Notas:</span> {cliente.preferencias}

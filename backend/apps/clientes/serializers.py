@@ -28,7 +28,7 @@ class ClienteListSerializer(serializers.ModelSerializer):
 
     # Objeto user completo
     user = ClienteUserSerializer(read_only=True)
-    
+
     # Datos del usuario (mantener por compatibilidad)
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
@@ -42,7 +42,9 @@ class ClienteListSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     edad = serializers.IntegerField(read_only=True)
     tiempo_como_cliente = serializers.IntegerField(read_only=True)
-    
+    saldo_billetera = serializers.SerializerMethodField()
+    tiene_billetera = serializers.SerializerMethodField()
+
     # Campos anotados (desde la query)
     total_turnos = serializers.IntegerField(read_only=True, default=0)
     ultimo_turno = serializers.DateTimeField(read_only=True, required=False)
@@ -68,6 +70,8 @@ class ClienteListSerializer(serializers.ModelSerializer):
             "nombre_completo",
             "edad",
             "tiempo_como_cliente",
+            "saldo_billetera",
+            "tiene_billetera",
             "total_turnos",
             "ultimo_turno",
             "turnos_completados",
@@ -83,6 +87,20 @@ class ClienteListSerializer(serializers.ModelSerializer):
             "tiempo_como_cliente",
         ]
 
+    def get_saldo_billetera(self, obj):
+        """Obtener el saldo de la billetera"""
+        try:
+            return float(obj.billetera.saldo)
+        except:
+            return 0.0
+
+    def get_tiene_billetera(self, obj):
+        """Verificar si tiene billetera"""
+        try:
+            return obj.billetera is not None
+        except:
+            return False
+
 
 class ClienteDetailSerializer(serializers.ModelSerializer):
     """Serializer para detalle de cliente"""
@@ -91,6 +109,8 @@ class ClienteDetailSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     edad = serializers.IntegerField(read_only=True)
     tiempo_como_cliente = serializers.IntegerField(read_only=True)
+    saldo_billetera = serializers.SerializerMethodField()
+    tiene_billetera = serializers.SerializerMethodField()
 
     class Meta:
         model = Cliente
@@ -105,6 +125,8 @@ class ClienteDetailSerializer(serializers.ModelSerializer):
             "nombre_completo",
             "edad",
             "tiempo_como_cliente",
+            "saldo_billetera",
+            "tiene_billetera",
             "created_at",
             "updated_at",
         ]
@@ -115,7 +137,23 @@ class ClienteDetailSerializer(serializers.ModelSerializer):
             "nombre_completo",
             "edad",
             "tiempo_como_cliente",
+            "saldo_billetera",
+            "tiene_billetera",
         ]
+
+    def get_saldo_billetera(self, obj):
+        """Obtener el saldo de la billetera"""
+        try:
+            return float(obj.billetera.saldo)
+        except:
+            return 0.0
+
+    def get_tiene_billetera(self, obj):
+        """Verificar si tiene billetera"""
+        try:
+            return obj.billetera is not None
+        except:
+            return False
 
 
 class ClienteCreateSerializer(serializers.ModelSerializer):
@@ -243,3 +281,78 @@ class ClienteUpdateSerializer(serializers.ModelSerializer):
         instance.save()
 
         return instance
+
+
+class MovimientoBilleteraSerializer(serializers.ModelSerializer):
+    """Serializer para movimientos de billetera"""
+
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    turno_info = serializers.SerializerMethodField()
+
+    class Meta:
+        model = None  # Será importado dinámicamente
+        fields = [
+            "id",
+            "tipo",
+            "tipo_display",
+            "monto",
+            "saldo_anterior",
+            "saldo_nuevo",
+            "descripcion",
+            "turno",
+            "turno_info",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import MovimientoBilletera
+
+        self.Meta.model = MovimientoBilletera
+
+    def get_turno_info(self, obj):
+        """Información básica del turno relacionado"""
+        if obj.turno:
+            return {
+                "id": obj.turno.id,
+                "fecha_hora": obj.turno.fecha_hora,
+                "servicio": obj.turno.servicio.nombre if obj.turno.servicio else None,
+                "estado": obj.turno.estado,
+            }
+        return None
+
+
+class BilleteraSerializer(serializers.ModelSerializer):
+    """Serializer para billetera del cliente"""
+
+    cliente_nombre = serializers.CharField(
+        source="cliente.nombre_completo", read_only=True
+    )
+    movimientos = MovimientoBilleteraSerializer(many=True, read_only=True)
+    ultimos_movimientos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = None  # Será importado dinámicamente
+        fields = [
+            "id",
+            "cliente",
+            "cliente_nombre",
+            "saldo",
+            "created_at",
+            "updated_at",
+            "movimientos",
+            "ultimos_movimientos",
+        ]
+        read_only_fields = ["id", "cliente", "saldo", "created_at", "updated_at"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .models import Billetera
+
+        self.Meta.model = Billetera
+
+    def get_ultimos_movimientos(self, obj):
+        """Devuelve los últimos 10 movimientos"""
+        movimientos = obj.movimientos.all()[:10]
+        return MovimientoBilleteraSerializer(movimientos, many=True).data

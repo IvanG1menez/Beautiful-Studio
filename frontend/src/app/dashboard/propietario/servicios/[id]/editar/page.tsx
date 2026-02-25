@@ -37,6 +37,7 @@ interface Servicio {
   valor_descuento_adelanto: string;
   tiempo_espera_respuesta: number;
   porcentaje_sena: string;
+  frecuencia_recurrencia_dias: number;
 }
 
 export default function EditarServicioPage() {
@@ -66,7 +67,8 @@ export default function EditarServicioPage() {
     tipo_descuento_adelanto: 'PORCENTAJE' as 'PORCENTAJE' | 'MONTO_FIJO',
     valor_descuento_adelanto: '',
     tiempo_espera_respuesta: '15',
-    porcentaje_sena: '25.00'
+    porcentaje_sena: '25.00',
+    frecuencia_recurrencia_dias: '30'
   });
 
   const getAuthHeaders = () => {
@@ -116,7 +118,8 @@ export default function EditarServicioPage() {
             tipo_descuento_adelanto: servicio.tipo_descuento_adelanto || 'PORCENTAJE',
             valor_descuento_adelanto: servicio.valor_descuento_adelanto?.toString?.() || servicio.valor_descuento_adelanto || '',
             tiempo_espera_respuesta: servicio.tiempo_espera_respuesta?.toString?.() || servicio.tiempo_espera_respuesta?.toString() || '15',
-            porcentaje_sena: servicio.porcentaje_sena?.toString?.() || servicio.porcentaje_sena || '25.00'
+            porcentaje_sena: servicio.porcentaje_sena?.toString?.() || servicio.porcentaje_sena || '25.00',
+            frecuencia_recurrencia_dias: servicio.frecuencia_recurrencia_dias?.toString() || '30'
           });
         } else {
           showNotification(
@@ -249,7 +252,8 @@ export default function EditarServicioPage() {
         tipo_descuento_adelanto: formData.tipo_descuento_adelanto,
         valor_descuento_adelanto: descuentoValor,
         tiempo_espera_respuesta: tiempoEspera,
-        porcentaje_sena: porcentajeSena
+        porcentaje_sena: porcentajeSena,
+        frecuencia_recurrencia_dias: parseInt(formData.frecuencia_recurrencia_dias) || 30
       };
 
       const response = await fetch(`http://localhost:8000/api/servicios/${servicioId}/`, {
@@ -451,6 +455,30 @@ export default function EditarServicioPage() {
                   Tiempo aproximado del servicio
                 </p>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Fidelización y Retorno */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Fidelización y Retorno de Clientes</CardTitle>
+            <CardDescription>Configura la frecuencia sugerida de retorno para este servicio</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="frecuencia_recurrencia_dias">Frecuencia de retorno sugerida (días)</Label>
+              <Input
+                id="frecuencia_recurrencia_dias"
+                type="number"
+                min="0"
+                value={formData.frecuencia_recurrencia_dias}
+                onChange={(e) => handleInputChange('frecuencia_recurrencia_dias', e.target.value)}
+                placeholder="30"
+              />
+              <p className="text-sm text-muted-foreground">
+                Este servicio se ofrecerá a clientes que no hayan vuelto en los días definidos en su ficha. Si es 0, se usará la configuración global.
+              </p>
             </div>
           </CardContent>
         </Card>

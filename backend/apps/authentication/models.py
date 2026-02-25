@@ -205,3 +205,75 @@ class ConfiguracionSSO(models.Model):
         """
         self.pk = 1
         super().save(*args, **kwargs)
+
+
+class ConfiguracionGlobal(models.Model):
+    """
+    Modelo para configuración global del negocio (Singleton)
+    Parámetros de billetera, fidelización y capacidad
+    """
+
+    # Reglas de Billetera Virtual
+    min_horas_cancelacion_credito = models.IntegerField(
+        default=24,
+        verbose_name="Horas mínimas de antelación para crédito",
+        help_text="Horas de antelación requeridas para que una cancelación genere crédito en billetera",
+    )
+
+    # Parámetros de Reincorporación
+    margen_fidelizacion_dias = models.IntegerField(
+        default=60,
+        verbose_name="Días de inactividad para reincorporación",
+        help_text="Días promedio de inactividad antes de considerar al cliente para campañas de fidelización",
+    )
+
+    descuento_fidelizacion_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=15.00,
+        verbose_name="Porcentaje de descuento para fidelización",
+        help_text="Porcentaje de descuento a aplicar en ofertas de reincorporación (ej: 15.00 para 15%)",
+    )
+
+    # Capacidad Global
+    capacidad_maxima_global = models.IntegerField(
+        default=0,
+        verbose_name="Capacidad máxima global del local",
+        help_text="Límite total de turnos simultáneos en todo el local (0 = sin límite, usa solo capacidad de salas)",
+    )
+
+    # Metadatos
+    activo = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuración Global"
+        verbose_name_plural = "Configuración Global"
+
+    def __str__(self) -> str:
+        return f"Configuración Global - Actualizado: {self.updated_at.strftime('%Y-%m-%d %H:%M')}"
+
+    @classmethod
+    def get_config(cls):
+        """
+        Método para obtener o crear la configuración (Singleton)
+        """
+        config, created = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                "min_horas_cancelacion_credito": 24,
+                "margen_fidelizacion_dias": 60,
+                "descuento_fidelizacion_pct": 15.00,
+                "capacidad_maxima_global": 0,
+                "activo": True,
+            },
+        )
+        return config
+
+    def save(self, *args, **kwargs):
+        """
+        Override save para asegurar que solo exista un registro (Singleton)
+        """
+        self.pk = 1
+        super().save(*args, **kwargs)

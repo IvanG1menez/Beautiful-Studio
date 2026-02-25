@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { formatTime } from '@/lib/dateUtils';
 import { Turno } from '@/types';
-import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, User, X } from 'lucide-react';
+import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, User, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
@@ -523,6 +523,16 @@ export default function AgendaEmpleadoPage() {
                             ({(turno as any).servicio_duracion || turno.servicio?.duracion_minutos || 0} min)
                           </span>
                         </div>
+
+                        {/* Sala */}
+                        {((turno as any).sala_nombre || turno.sala_nombre) && (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-gray-400" />
+                            <span className="text-gray-700">
+                              <span className="font-medium">Sala:</span> {(turno as any).sala_nombre || turno.sala_nombre}
+                            </span>
+                          </div>
+                        )}
 
                         {/* Fecha/Hora de solicitud */}
                         {turno.created_at && (

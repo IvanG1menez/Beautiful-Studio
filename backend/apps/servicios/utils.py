@@ -57,6 +57,18 @@ def enviar_propuesta_reacomodamiento(turno_candidato, servicio) -> bool:
             f"{base_url}/reacomodamiento/confirmar?turno={turno_candidato.id}"
         )
 
+        # Verificar si el cliente tiene saldo en su billetera
+        saldo_disponible = Decimal("0.00")
+        tiene_saldo = False
+        try:
+            from apps.clientes.models import Billetera
+
+            billetera = Billetera.objects.get(cliente=turno_candidato.cliente)
+            saldo_disponible = billetera.saldo
+            tiene_saldo = saldo_disponible > 0
+        except:
+            pass
+
         context = {
             "nombre": cliente_user.first_name or cliente_user.username,
             "servicio_nombre": servicio.nombre,
@@ -66,6 +78,8 @@ def enviar_propuesta_reacomodamiento(turno_candidato, servicio) -> bool:
             "nuevo_precio": nuevo_precio,
             "confirmar_url": confirmar_url,
             "tiempo_espera": servicio.tiempo_espera_respuesta,
+            "tiene_saldo": tiene_saldo,
+            "saldo_disponible": saldo_disponible,
         }
 
         html_message = render_to_string(

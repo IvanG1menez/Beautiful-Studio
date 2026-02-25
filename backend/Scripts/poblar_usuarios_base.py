@@ -11,7 +11,7 @@ django.setup()
 from django.db import transaction
 from apps.users.models import User
 from apps.empleados.models import Empleado, EmpleadoServicio
-from apps.clientes.models import Cliente
+from apps.clientes.models import Cliente, Billetera
 from apps.servicios.models import Sala, CategoriaServicio, Servicio
 
 
@@ -29,7 +29,7 @@ def crear_usuarios_base():
     """
     with transaction.atomic():
         print("🔄 Creando usuarios base del sistema...\n")
-        
+
         # ==================== PROPIETARIO ====================
         print("👤 Creando usuario propietario...")
         propietario, created = User.objects.get_or_create(
@@ -42,7 +42,7 @@ def crear_usuarios_base():
                 "phone": "+54 11 1234-5678",
                 "is_staff": True,
                 "is_active": True,
-            }
+            },
         )
         if created:
             propietario.set_password("propietario123")
@@ -50,25 +50,24 @@ def crear_usuarios_base():
             print(f"  ✓ Propietario creado: {propietario.email}")
         else:
             print(f"  ⚠️  Propietario ya existe: {propietario.email}")
-        
+
         # ==================== SALA Y CATEGORÍA ====================
         print("\n🏢 Creando sala y categoría de servicio...")
         sala, _ = Sala.objects.get_or_create(
-            nombre="Sala Principal",
-            defaults={"capacidad_simultanea": 3}
+            nombre="Sala Principal", defaults={"capacidad_simultanea": 3}
         )
         print(f"  ✓ Sala: {sala.nombre}")
-        
+
         categoria, _ = CategoriaServicio.objects.get_or_create(
             nombre="Corte y Peinado",
             defaults={
                 "descripcion": "Servicios de corte y peinado profesional",
                 "sala": sala,
-                "is_active": True
-            }
+                "is_active": True,
+            },
         )
         print(f"  ✓ Categoría: {categoria.nombre}")
-        
+
         # ==================== SERVICIO ====================
         print("\n💇 Creando servicio...")
         servicio, _ = Servicio.objects.get_or_create(
@@ -77,12 +76,15 @@ def crear_usuarios_base():
                 "descripcion": "Corte de cabello profesional",
                 "categoria": categoria,
                 "precio": 5000.00,
+                "porcentaje_sena": 25.00,
                 "duracion_minutos": 60,
-                "is_active": True
-            }
+                "is_active": True,
+            },
         )
-        print(f"  ✓ Servicio: {servicio.nombre} - ${servicio.precio}")
-        
+        print(
+            f"  ✓ Servicio: {servicio.nombre} - ${servicio.precio} (Seña: {servicio.porcentaje_sena}%)"
+        )
+
         # ==================== PROFESIONAL ====================
         print("\n👨‍💼 Creando usuario profesional...")
         profesional_user, created = User.objects.get_or_create(
@@ -94,7 +96,7 @@ def crear_usuarios_base():
                 "role": "profesional",
                 "phone": "+54 11 2345-6789",
                 "is_active": True,
-            }
+            },
         )
         if created:
             profesional_user.set_password("empleado123")
@@ -102,7 +104,7 @@ def crear_usuarios_base():
             print(f"  ✓ Usuario profesional creado: {profesional_user.email}")
         else:
             print(f"  ⚠️  Usuario profesional ya existe: {profesional_user.email}")
-        
+
         # Crear perfil Empleado
         empleado, created = Empleado.objects.get_or_create(
             user=profesional_user,
@@ -115,25 +117,25 @@ def crear_usuarios_base():
                 "is_disponible": True,
                 "biografia": "Especialista en corte y peinado con 5 años de experiencia",
                 "promedio_calificacion": 9.5,
-                "total_encuestas": 0
-            }
+                "total_encuestas": 0,
+            },
         )
         if created:
             print(f"  ✓ Perfil empleado creado para {empleado.nombre_completo}")
         else:
             print(f"  ⚠️  Perfil empleado ya existe para {empleado.nombre_completo}")
-        
+
         # Asociar empleado con servicio
         empleado_servicio, created = EmpleadoServicio.objects.get_or_create(
             empleado=empleado,
             servicio=servicio,
-            defaults={"nivel_experiencia": 3}  # Avanzado
+            defaults={"nivel_experiencia": 3},  # Avanzado
         )
         if created:
             print(f"  ✓ Servicio '{servicio.nombre}' asociado al profesional")
         else:
             print(f"  ⚠️  Servicio ya estaba asociado al profesional")
-        
+
         # ==================== CLIENTE ====================
         print("\n👥 Creando usuario cliente...")
         cliente_user, created = User.objects.get_or_create(
@@ -145,7 +147,7 @@ def crear_usuarios_base():
                 "role": "cliente",
                 "phone": "+54 11 3456-7890",
                 "is_active": True,
-            }
+            },
         )
         if created:
             cliente_user.set_password("cliente123")
@@ -153,7 +155,7 @@ def crear_usuarios_base():
             print(f"  ✓ Usuario cliente creado: {cliente_user.email}")
         else:
             print(f"  ⚠️  Usuario cliente ya existe: {cliente_user.email}")
-        
+
         # Crear perfil Cliente
         cliente, created = Cliente.objects.get_or_create(
             user=cliente_user,
@@ -161,17 +163,29 @@ def crear_usuarios_base():
                 "fecha_nacimiento": date(1990, 5, 15),
                 "direccion": "Av. Corrientes 1234, CABA",
                 "preferencias": "Prefiere turnos por la mañana",
-                "is_vip": False
-            }
+                "is_vip": False,
+            },
         )
         if created:
             print(f"  ✓ Perfil cliente creado para {cliente.nombre_completo}")
         else:
             print(f"  ⚠️  Perfil cliente ya existe para {cliente.nombre_completo}")
-        
-        print("\n" + "="*60)
+
+        # Crear billetera con saldo inicial
+        billetera, created = Billetera.objects.get_or_create(
+            cliente=cliente, defaults={"saldo": 1000.00}
+        )
+        if created:
+            print(f"  ✓ Billetera creada con saldo inicial de $1000.00")
+        else:
+            # Actualizar saldo a 1000 si ya existe
+            billetera.saldo = 1000.00
+            billetera.save()
+            print(f"  ⚠️  Billetera ya existe - Saldo actualizado a $1000.00")
+
+        print("\n" + "=" * 60)
         print("✅ USUARIOS BASE CREADOS EXITOSAMENTE")
-        print("="*60)
+        print("=" * 60)
         print("\n📋 CREDENCIALES:")
         print("\n🔑 PROPIETARIO:")
         print("   Email: propietario@beautifulstudio.com")
@@ -182,7 +196,7 @@ def crear_usuarios_base():
         print("\n🔑 CLIENTE:")
         print("   Email: cliente1@beautifulstudio.com")
         print("   Contraseña: cliente123")
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
 
 
 if __name__ == "__main__":
@@ -191,5 +205,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Error al crear usuarios base: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

@@ -17,6 +17,7 @@ import {
   Clock,
   Loader2,
   Mail,
+  MapPin,
   Phone,
   Scissors,
   Star,
@@ -448,9 +449,15 @@ export default function DashboardEmpleadoPage() {
                               <p className="text-gray-600 mb-1">
                                 <strong>Hora:</strong> {timeFormatted}
                               </p>
-                              <p className="text-gray-600">
+                              <p className="text-gray-600 mb-1">
                                 <strong>Duración:</strong> {(turno as any).servicio_duracion || turno.servicio?.duracion_minutos || 0} min
                               </p>
+                              {((turno as any).sala_nombre || turno.sala_nombre) && (
+                                <p className="text-gray-600 flex items-center gap-1">
+                                  <MapPin className="w-4 h-4" />
+                                  <strong>Sala:</strong> {(turno as any).sala_nombre || turno.sala_nombre}
+                                </p>
+                              )}
                             </div>
                             <div className="text-right">
                               <p className="font-semibold text-green-600">
@@ -517,6 +524,11 @@ export default function DashboardEmpleadoPage() {
                               </div>
                               <p className="text-sm text-gray-600">
                                 {(turno as any).cliente_nombre || turno.cliente?.nombre_completo || 'Cliente'} • {dateFormatted} • {timeFormatted}
+                                {((turno as any).sala_nombre || turno.sala_nombre) && (
+                                  <span className="inline-flex items-center gap-1 ml-2">
+                                    • <MapPin className="w-3 h-3" /> {(turno as any).sala_nombre || turno.sala_nombre}
+                                  </span>
+                                )}
                               </p>
                             </div>
                             <span className="font-semibold text-green-600">

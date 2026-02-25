@@ -29,6 +29,37 @@ export interface Cliente {
   nombre_completo: string;
   email: string;
   telefono?: string;
+  saldo_billetera?: number;
+  tiene_billetera?: boolean;
+}
+
+export interface MovimientoBilletera {
+  id: number;
+  tipo: 'credito' | 'debito';
+  tipo_display: string;
+  monto: string;
+  saldo_anterior: string;
+  saldo_nuevo: string;
+  descripcion?: string;
+  turno?: number;
+  turno_info?: {
+    id: number;
+    fecha_hora: string;
+    servicio: string;
+    estado: string;
+  };
+  created_at: string;
+}
+
+export interface Billetera {
+  id: number;
+  cliente: number;
+  cliente_nombre: string;
+  saldo: string;
+  created_at: string;
+  updated_at: string;
+  movimientos?: MovimientoBilletera[];
+  ultimos_movimientos?: MovimientoBilletera[];
 }
 
 export interface CategoriaServicio {
@@ -106,6 +137,8 @@ export interface Turno {
   cliente: Cliente;
   empleado: Empleado;
   servicio: Servicio;
+  sala?: number;
+  sala_nombre?: string;
   fecha_hora: string;
   estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio';
   notas_cliente?: string;

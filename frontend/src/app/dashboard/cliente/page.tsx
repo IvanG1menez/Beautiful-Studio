@@ -4,7 +4,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatDate, formatTime } from '@/lib/dateUtils';
+import { formatCurrency } from '@/lib/utils';
+import WalletCard from '@/components/WalletCard';
 import {
   AlertCircle,
   ArrowRight,
@@ -15,10 +18,13 @@ import {
   MapPin,
   Phone,
   User,
-  XCircle
+  XCircle,
+  TrendingUp,
+  TrendingDown
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import type { Billetera, MovimientoBilletera } from '@/types';
 
 // Interfaces
 interface Turno {
@@ -49,6 +55,8 @@ interface Cliente {
   fecha_nacimiento: string;
   direccion: string;
   preferencias: string;
+  saldo_billetera?: number;
+  tiene_billetera?: boolean;
   user: {
     id: number;
     email: string;
@@ -96,6 +104,10 @@ export default function DashboardClientePage() {
   const [perfilCliente, setPerfilCliente] = useState<Cliente | null>(null);
   const [loadingTurnos, setLoadingTurnos] = useState(true);
   const [loadingPerfil, setLoadingPerfil] = useState(true);
+  const [billetera, setBilletera] = useState<Billetera | null>(null);
+  const [loadingBilletera, setLoadingBilletera] = useState(true);
+  const [movimientos, setMovimientos] = useState<MovimientoBilletera[]>([]);
+  const [showMovimientosDialog, setShowMovimientosDialog] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
@@ -105,6 +117,7 @@ export default function DashboardClientePage() {
       setIsClient(true);
       loadPerfilData();
       loadTurnosData();
+      loadBilleteraData();
     }
   }, [router]);
 
@@ -119,19 +132,57 @@ export default function DashboardClientePage() {
   const loadPerfilData = async () => {
     try {
       setLoadingPerfil(true);
-      const response = await fetch('http://localhost:8000/api/users/profile/', {
+      const response = await fetch('http://localhost:8000/api/clientes/me/', {
         headers: getAuthHeaders()
       });
 
       if (response.ok) {
         const data = await response.json();
-        setPerfilCliente(data.cliente_profile);
+        setPerfilCliente(data);
       }
     } catch (error) {
       console.error('Error loading perfil:', error);
     } finally {
       setLoadingPerfil(false);
     }
+  };
+
+  const loadBilleteraData = async () => {
+    try {
+      setLoadingBilletera(true);
+      const response = await fetch('http://localhost:8000/api/clientes/me/billetera/', {
+        headers: getAuthHeaders()
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setBilletera(data);
+      }
+    } catch (error) {
+      console.error('Error loading billetera:', error);
+    } finally {
+      setLoadingBilletera(false);
+    }
+  };
+
+  const loadMovimientosData = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/clientes/me/billetera/movimientos/', {
+        headers: getAuthHeaders()
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMovimientos(data);
+      }
+    } catch (error) {
+      console.error('Error loading movimientos:', error);
+    }
+  };
+
+  const handleVerHistorial = async () => {
+    setShowMovimientosDialog(true);
+    await loadMovimientosData();
   };
 
   const loadTurnosData = async () => {
@@ -423,6 +474,14 @@ export default function DashboardClientePage() {
 
           {/* Sidebar - Mi Perfil */}
           <div className="space-y-6">
+            {/* Billetera Card */}
+            {!loadingBilletera && billetera && (
+              <WalletCard 
+                saldo={parseFloat(billetera.saldo)} 
+                onVerHistorial={handleVerHistorial}
+              />
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle>Mi Perfil</CardTitle>
@@ -522,6 +581,84 @@ export default function DashboardClientePage() {
           </div>
         </div>
       </div>
+
+      {/* Dialog de Historial de Movimientos */}
+      <Dialog open={showMovimientosDialog} onOpenChange={setShowMovimientosDialog}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Historial de Movimientos</DialogTitle>
+            <DialogDescription>
+              Registro completo de créditos y débitos en tu billetera
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 mt-4">
+            {movimientos.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No hay movimientos registrados</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {movimientos.map((mov) => (
+                  <div 
+                    key={mov.id} 
+                    className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          {mov.tipo === 'credito' ? (
+                            <div className="p-1.5 bg-green-100 rounded-full">
+                              <TrendingUp className="w-4 h-4 text-green-600" />
+                            </div>
+                          ) : (
+                            <div className="p-1.5 bg-red-100 rounded-full">
+                              <TrendingDown className="w-4 h-4 text-red-600" />
+                            </div>
+                          )}
+                          <span className="font-semibold">{mov.tipo_display}</span>
+                          <Badge variant={mov.tipo === 'credito' ? 'default' : 'destructive'}>
+                            {mov.tipo === 'credito' ? '+' : '-'}{formatCurrency(parseFloat(mov.monto))}
+                          </Badge>
+                        </div>
+                        
+                        <p className="text-sm text-gray-600 mb-2">
+                          {mov.descripcion || 'Sin descripción'}
+                        </p>
+                        
+                        {mov.turno_info && (
+                          <div className="text-xs text-gray-500 bg-gray-50 rounded p-2 mt-2">
+                            <strong>Turno relacionado:</strong> {mov.turno_info.servicio} - 
+                            {new Date(mov.turno_info.fecha_hora).toLocaleDateString('es-ES')}
+                          </div>
+                        )}
+                        
+                        <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
+                          <span>Saldo anterior: {formatCurrency(parseFloat(mov.saldo_anterior))}</span>
+                          <span>→</span>
+                          <span className="font-semibold">Saldo nuevo: {formatCurrency(parseFloat(mov.saldo_nuevo))}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="text-right text-sm text-gray-500 ml-4">
+                        <p>{new Date(mov.created_at).toLocaleDateString('es-ES', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                        })}</p>
+                        <p className="text-xs">{new Date(mov.created_at).toLocaleTimeString('es-ES', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

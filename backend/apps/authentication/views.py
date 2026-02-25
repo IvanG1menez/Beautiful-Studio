@@ -8,7 +8,13 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 
-from .models import PermisoAdicional, Configuracion, AuditoriaAcciones, ConfiguracionSSO
+from .models import (
+    PermisoAdicional,
+    Configuracion,
+    AuditoriaAcciones,
+    ConfiguracionSSO,
+    ConfiguracionGlobal,
+)
 from .serializers import (
     RegisterSerializer,
     UserSerializer,
@@ -18,6 +24,7 @@ from .serializers import (
     UsuarioBasicoSerializer,
     ConfiguracionSSOSerializer,
     ConfiguracionSSOPublicSerializer,
+    ConfiguracionGlobalSerializer,
 )
 
 
@@ -533,6 +540,56 @@ def configuracion_sso_view(request):
                     usuario=request.user,
                     accion="editar",
                     modelo_afectado="ConfiguracionSSO",
+                    objeto_id=config.id,
+                    detalles={"cambios": request.data},
+                    ip_address=get_client_ip(request),
+                    user_agent=request.META.get("HTTP_USER_AGENT", ""),
+                )
+            except Exception as e:
+                # Si falla la auditoría, registrar en logs pero no fallar la request
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning(f"No se pudo registrar auditoría: {e}")
+
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def configuracion_global_view(request):
+    """
+    Vista para gestionar configuración global del negocio (solo propietario)
+    GET: Obtener configuración completa
+    PATCH: Actualizar configuración (solo propietario)
+    """
+    # Verificar que el usuario sea propietario
+    if request.user.role != "propietario":
+        return Response(
+            {"error": "Solo el propietario puede gestionar la configuración global"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    config = ConfiguracionGlobal.get_config()
+
+    if request.method == "GET":
+        serializer = ConfiguracionGlobalSerializer(config)
+        return Response(serializer.data)
+
+    elif request.method == "PATCH":
+        serializer = ConfiguracionGlobalSerializer(
+            config, data=request.data, partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+
+            # Registrar acción en auditoría
+            try:
+                AuditoriaAcciones.objects.create(
+                    usuario=request.user,
+                    accion="editar",
+                    modelo_afectado="ConfiguracionGlobal",
                     objeto_id=config.id,
                     detalles={"cambios": request.data},
                     ip_address=get_client_ip(request),

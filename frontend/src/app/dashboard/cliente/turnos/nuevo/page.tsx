@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Clock, Loader2, Search, User } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -8,11 +8,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { formatCurrency } from '@/lib/utils';
+import type { Billetera } from '@/types';
 
 interface Categoria {
   id: number;
@@ -26,7 +30,9 @@ interface Servicio {
   descripcion: string;
   categoria: number;
   categoria_nombre: string;
+  sala_nombre?: string;
   precio: string;
+  porcentaje_sena: string;
   duracion_minutos: number;
   duracion_horas: string;
   is_active: boolean;
@@ -99,6 +105,15 @@ export default function NuevoTurnoPage() {
   const [success, setSuccess] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
+  // Estados para billetera
+  const [billetera, setBilletera] = useState<Billetera | null>(null);
+  const [usarSaldo, setUsarSaldo] = useState(false);
+  const [loadingBilletera, setLoadingBilletera] = useState(false);
+  
+  // Estados para dialog de confirmación
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [usarSaldoEnSena, setUsarSaldoEnSena] = useState(false);
+
   // Estados para búsqueda y paginación de profesionales
   const [searchEmpleado, setSearchEmpleado] = useState('');
   const [filterEspecialidad, setFilterEspecialidad] = useState<string>('all');
@@ -120,7 +135,80 @@ export default function NuevoTurnoPage() {
   // Cargar categorías al montar
   useEffect(() => {
     fetchCategorias();
+    loadBilleteraData();
   }, []);
+
+  // Cargar billetera del cliente
+  const loadBilleteraData = async () => {
+    try {
+      setLoadingBilletera(true);
+      const response = await fetch(`${API_BASE_URL}/clientes/me/billetera/`, {
+        headers: getAuthHeaders()
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setBilletera(data);
+      }
+    } catch (error) {
+      console.error('Error loading billetera:', error);
+    } finally {
+      setLoadingBilletera(false);
+    }
+  };
+
+  // Calcular precio final con descuento de saldo
+  const calcularPrecioFinal = () => {
+    if (!servicioSeleccionado) return 0;
+    
+    const precioServicio = parseFloat(servicioSeleccionado.precio);
+    
+    if (usarSaldo && billetera) {
+      const saldoDisponible = parseFloat(billetera.saldo);
+      const descuento = Math.min(precioServicio, saldoDisponible);
+      return Math.max(0, precioServicio - descuento);
+    }
+    
+    return precioServicio;
+  };
+
+  const getSaldoUtilizado = () => {
+    if (!servicioSeleccionado || !billetera || !usarSaldo) return 0;
+    
+    const precioServicio = parseFloat(servicioSeleccionado.precio);
+    const saldoDisponible = parseFloat(billetera.saldo);
+    
+    return Math.min(precioServicio, saldoDisponible);
+  };
+  
+  // Calcular monto de seña
+  const calcularMontoSena = () => {
+    if (!servicioSeleccionado) return 0;
+    const precioServicio = parseFloat(servicioSeleccionado.precio);
+    const porcentajeSena = parseFloat(servicioSeleccionado.porcentaje_sena || '0');
+    return (precioServicio * porcentajeSena) / 100;
+  };
+  
+  // Calcular monto final de seña con descuento de billetera
+  const calcularSenaFinal = () => {
+    const montoSena = calcularMontoSena();
+    
+    if (usarSaldoEnSena && billetera) {
+      const saldoDisponible = parseFloat(billetera.saldo);
+      const descuento = Math.min(montoSena, saldoDisponible);
+      return Math.max(0, montoSena - descuento);
+    }
+    
+    return montoSena;
+  };
+  
+  // Calcular saldo utilizado en seña
+  const getSaldoUtilizadoEnSena = () => {
+    if (!servicioSeleccionado || !billetera || !usarSaldoEnSena) return 0;
+    const montoSena = calcularMontoSena();
+    const saldoDisponible = parseFloat(billetera.saldo);
+    return Math.min(montoSena, saldoDisponible);
+  };
 
   // Cargar servicios cuando se selecciona categoría
   useEffect(() => {
@@ -318,6 +406,7 @@ export default function NuevoTurnoPage() {
   const handleSubmit = async () => {
     if (!servicioSeleccionado || !empleadoSeleccionado || !fechaSeleccionada || !horarioSeleccionado) {
       setError('Por favor completa todos los campos requeridos');
+      setShowConfirmDialog(false);
       return;
     }
 
@@ -336,6 +425,7 @@ export default function NuevoTurnoPage() {
       });
 
       if (!profileResponse.ok) {
+        setShowConfirmDialog(false);
         throw new Error('No se pudo obtener el perfil del cliente');
       }
 
@@ -377,6 +467,7 @@ export default function NuevoTurnoPage() {
 
       if (response.ok) {
         setSuccess(true);
+        setShowConfirmDialog(false);
         setTimeout(() => {
           router.push('/dashboard/cliente/turnos');
         }, 2000);
@@ -393,6 +484,9 @@ export default function NuevoTurnoPage() {
 
         console.error('Error del servidor:', errorData);
 
+        // Cerrar dialog para mostrar el error en la pantalla principal
+        setShowConfirmDialog(false);
+
         // Manejar errores de validación
         if (errorData.non_field_errors) {
           // Errores de validación de conjunto único
@@ -406,6 +500,12 @@ export default function NuevoTurnoPage() {
             ? errorData.fecha_hora[0]
             : errorData.fecha_hora;
           setError(mensajeError);
+        } else if (errorData.sala) {
+          // Error de sala
+          const mensajeError = Array.isArray(errorData.sala)
+            ? errorData.sala[0]
+            : errorData.sala;
+          setError(mensajeError);
         } else if (errorData.detail) {
           setError(errorData.detail);
         } else if (errorData.error) {
@@ -416,11 +516,17 @@ export default function NuevoTurnoPage() {
             : errorData.notas_cliente;
           setError(mensajeError);
         } else {
-          setError('Error al crear el turno. Por favor verifica los datos.');
+          // Mostrar todos los errores si hay múltiples campos
+          const errores = Object.entries(errorData).map(([key, value]) => {
+            const mensaje = Array.isArray(value) ? value[0] : value;
+            return `${key}: ${mensaje}`;
+          }).join(', ');
+          setError(errores || 'Error al crear el turno. Por favor verifica los datos.');
         }
       }
     } catch (error: any) {
       console.error('Error creating turno:', error);
+      setShowConfirmDialog(false);
       setError(error.message || 'Error al crear el turno. Por favor intenta nuevamente.');
     } finally {
       setLoading(false);
@@ -1255,6 +1361,20 @@ export default function NuevoTurnoPage() {
 
                 <div className="border-t border-gray-100"></div>
 
+                {/* Sala */}
+                {servicioSeleccionado?.sala_nombre && (
+                  <>
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase mb-1">Sala</p>
+                      <div className="flex items-center gap-2 text-gray-900">
+                        <MapPin className="w-4 h-4 text-primary" />
+                        <span className="font-medium">{servicioSeleccionado.sala_nombre}</span>
+                      </div>
+                    </div>
+                    <div className="border-t border-gray-100"></div>
+                  </>
+                )}
+
                 {/* Profesional */}
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase mb-1">Profesional</p>
@@ -1308,12 +1428,71 @@ export default function NuevoTurnoPage() {
                 {/* Precio */}
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase mb-1">Precio</p>
+                  
+                  {/* Precio original */}
                   <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-bold text-primary">
+                    <span className={`text-3xl font-bold ${usarSaldo && billetera ? 'text-gray-400 line-through' : 'text-primary'}`}>
                       ${servicioSeleccionado?.precio}
                     </span>
                     <span className="text-sm text-gray-600">ARS</span>
                   </div>
+
+                  {/* Selector de usar saldo */}
+                  {billetera && parseFloat(billetera.saldo) > 0 && (
+                    <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Wallet className="w-5 h-5 text-green-600" />
+                          <div>
+                            <p className="font-semibold text-green-900">Usar saldo disponible</p>
+                            <p className="text-sm text-green-700">
+                              Tienes {formatCurrency(parseFloat(billetera.saldo))} disponible
+                            </p>
+                          </div>
+                        </div>
+                        <Switch
+                          checked={usarSaldo}
+                          onCheckedChange={setUsarSaldo}
+                          className="data-[state=checked]:bg-green-600"
+                        />
+                      </div>
+                      
+                      {usarSaldo && (
+                        <div className="pt-3 border-t border-green-200">
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-green-700">Precio original:</span>
+                            <span className="font-medium">{formatCurrency(parseFloat(servicioSeleccionado?.precio || '0'))}</span>
+                          </div>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="text-green-700">Saldo utilizado:</span>
+                            <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizado())}</span>
+                          </div>
+                          <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
+                            <span className="text-green-900">Total a pagar:</span>
+                            <span className={calcularPrecioFinal() === 0 ? 'text-green-600' : 'text-green-900'}>
+                              {formatCurrency(calcularPrecioFinal())}
+                            </span>
+                          </div>
+                          {calcularPrecioFinal() === 0 && (
+                            <p className="text-xs text-green-600 mt-2 text-center">
+                              🎉 ¡Tu saldo cubre el 100% del servicio!
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Precio final cuando se usa saldo */}
+                  {usarSaldo && billetera && parseFloat(billetera.saldo) > 0 && calcularPrecioFinal() !== 0 && (
+                    <div className="mt-3 flex items-baseline gap-1">
+                      <span className="text-sm text-gray-600">Total a pagar:</span>
+                      <span className="text-3xl font-bold text-primary">
+                        {formatCurrency(calcularPrecioFinal())}
+                      </span>
+                      <span className="text-sm text-gray-600">ARS</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1355,27 +1534,148 @@ export default function NuevoTurnoPage() {
                 Atrás
               </Button>
               <Button
-                onClick={handleSubmit}
+                onClick={() => setShowConfirmDialog(true)}
                 disabled={loading}
                 size="lg"
-                className="min-w-[150px]"
               >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Confirmando...
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4 mr-2" />
-                    Confirmar Turno
-                  </>
-                )}
+                <Check className="w-4 h-4 mr-2" />
+                Confirmar Turno
               </Button>
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Dialog de confirmación con cálculo de seña */}
+      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Confirmar Reserva</DialogTitle>
+            <DialogDescription>
+              Revisa el detalle del pago antes de confirmar tu turno
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Información del servicio */}
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h4 className="font-semibold text-gray-900 mb-2">Resumen del servicio</h4>
+              <p className="text-sm text-gray-600">{servicioSeleccionado?.nombre}</p>
+              <div className="flex justify-between items-center mt-2">
+                <span className="text-sm text-gray-600">Precio total:</span>
+                <span className="text-lg font-bold text-gray-900">{formatCurrency(parseFloat(servicioSeleccionado?.precio || '0'))}</span>
+              </div>
+            </div>
+
+            {/* Cálculo de seña */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start gap-2 mb-3">
+                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-blue-900 mb-1">Monto de Seña Requerido</h4>
+                  <p className="text-sm text-blue-700">
+                    Para reservar tu turno debes abonar el <strong>{servicioSeleccionado?.porcentaje_sena}%</strong> del precio total como seña
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center pt-3 border-t border-blue-200">
+                <span className="font-medium text-blue-900">Monto de seña:</span>
+                <span className="text-xl font-bold text-blue-900">{formatCurrency(calcularMontoSena())}</span>
+              </div>
+            </div>
+
+            {/* Selector de usar saldo en seña */}
+            {billetera && parseFloat(billetera.saldo) > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-green-600" />
+                    <div>
+                      <p className="font-semibold text-green-900">Usar saldo de billetera</p>
+                      <p className="text-sm text-green-700">
+                        Saldo disponible: {formatCurrency(parseFloat(billetera.saldo))}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={usarSaldoEnSena}
+                    onCheckedChange={setUsarSaldoEnSena}
+                    className="data-[state=checked]:bg-green-600"
+                  />
+                </div>
+                
+                {usarSaldoEnSena && (
+                  <div className="pt-3 border-t border-green-200 space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-green-700">Seña requerida:</span>
+                      <span className="font-medium">{formatCurrency(calcularMontoSena())}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-green-700">Saldo aplicado:</span>
+                      <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizadoEnSena())}</span>
+                    </div>
+                    <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
+                      <span className="text-green-900">Total a pagar ahora:</span>
+                      <span className={calcularSenaFinal() === 0 ? 'text-green-600' : 'text-green-900'}>
+                        {formatCurrency(calcularSenaFinal())}
+                      </span>
+                    </div>
+                    {calcularSenaFinal() === 0 && (
+                      <p className="text-xs text-green-600 mt-2 text-center">
+                        🎉 ¡Tu saldo cubre el 100% de la seña!
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Monto final destacado */}
+            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-lg font-semibold text-gray-900">Pagarás ahora:</span>
+                <span className="text-2xl font-bold text-primary">
+                  {formatCurrency(usarSaldoEnSena ? calcularSenaFinal() : calcularMontoSena())}
+                </span>
+              </div>
+              <p className="text-xs text-gray-600 mt-2">
+                El resto se abona al finalizar el servicio
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowConfirmDialog(false);
+                setUsarSaldoEnSena(false);
+              }}
+              disabled={loading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading}
+              className={usarSaldoEnSena && calcularSenaFinal() === 0 ? 'bg-green-600 hover:bg-green-700' : ''}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Procesando...
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4 mr-2" />
+                  Confirmar y Pagar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

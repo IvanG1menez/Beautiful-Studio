@@ -165,39 +165,46 @@ class ClienteViewSet(viewsets.ModelViewSet):
         """
         from apps.turnos.models import Turno
         from django.db.models import Count, Max, Q
-        
+
         # Verificar que el usuario sea un profesional
-        if not hasattr(request.user, 'profesional_profile'):
+        if not hasattr(request.user, "profesional_profile"):
             return Response(
                 {"error": "Usuario no tiene perfil de profesional"},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         profesional = request.user.profesional_profile
-        
+
         # Obtener clientes únicos que han tenido turnos con este profesional
-        clientes_ids = Turno.objects.filter(
-            empleado=profesional
-        ).values_list('cliente_id', flat=True).distinct()
-        
+        clientes_ids = (
+            Turno.objects.filter(empleado=profesional)
+            .values_list("cliente_id", flat=True)
+            .distinct()
+        )
+
         # Obtener los clientes con información adicional
-        clientes = Cliente.objects.filter(
-            id__in=clientes_ids
-        ).select_related('user').annotate(
-            total_turnos=Count('turnos', filter=Q(turnos__empleado=profesional)),
-            ultimo_turno=Max('turnos__fecha_hora', filter=Q(turnos__empleado=profesional)),
-            turnos_completados=Count('turnos', filter=Q(
-                turnos__empleado=profesional,
-                turnos__estado='completado'
-            ))
-        ).order_by('-ultimo_turno')
-        
+        clientes = (
+            Cliente.objects.filter(id__in=clientes_ids)
+            .select_related("user")
+            .annotate(
+                total_turnos=Count("turnos", filter=Q(turnos__empleado=profesional)),
+                ultimo_turno=Max(
+                    "turnos__fecha_hora", filter=Q(turnos__empleado=profesional)
+                ),
+                turnos_completados=Count(
+                    "turnos",
+                    filter=Q(turnos__empleado=profesional, turnos__estado="completado"),
+                ),
+            )
+            .order_by("-ultimo_turno")
+        )
+
         # Aplicar paginación
         page = self.paginate_queryset(clientes)
         if page is not None:
             serializer = ClienteListSerializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        
+
         serializer = ClienteListSerializer(clientes, many=True)
         return Response(serializer.data)
 
@@ -231,3 +238,52 @@ def cliente_me_view(request):
             return Response(detail_serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def mi_billetera_view(request):
+    """
+    Vista para obtener la billetera del cliente autenticado
+    """
+    from .models import Billetera
+    from .serializers import BilleteraSerializer
+    from decimal import Decimal
+
+    try:
+        cliente = Cliente.objects.get(user=request.user)
+    except Cliente.DoesNotExist:
+        return Response(
+            {"error": "No se encontró perfil de cliente"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Obtener o crear billetera
+    billetera, created = Billetera.objects.get_or_create(
+        cliente=cliente, defaults={"saldo": Decimal("0.00")}
+    )
+
+    serializer = BilleteraSerializer(billetera)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def movimientos_billetera_view(request):
+    """
+    Vista para obtener los movimientos de la billetera del cliente autenticado
+    """
+    from .models import Billetera, MovimientoBilletera
+    from .serializers import MovimientoBilleteraSerializer
+
+    try:
+        cliente = Cliente.objects.get(user=request.user)
+        billetera = Billetera.objects.get(cliente=cliente)
+    except (Cliente.DoesNotExist, Billetera.DoesNotExist):
+        return Response([], status=status.HTTP_200_OK)
+
+    movimientos = MovimientoBilletera.objects.filter(billetera=billetera).order_by(
+        "-created_at"
+    )
+    serializer = MovimientoBilleteraSerializer(movimientos, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)

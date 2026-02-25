@@ -32,6 +32,12 @@ urlpatterns = [
         views.configuracion_sso_public_view,
         name="configuracion-sso-public",
     ),
+    # Configuración Global
+    path(
+        "configuracion/global/",
+        views.configuracion_global_view,
+        name="configuracion-global",
+    ),
     # Health check
     path("health/", views.health_check, name="health_check"),
     # Incluir todas las rutas de los ViewSets

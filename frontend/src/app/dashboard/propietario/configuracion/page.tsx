@@ -19,16 +19,54 @@ interface SSOConfig {
   client_secret: string;
 }
 
+interface GlobalConfig {
+  id: number;
+  min_horas_cancelacion_credito: number;
+  margen_fidelizacion_dias: number;
+  descuento_fidelizacion_pct: number;
+  capacidad_maxima_global: number;
+  activo: boolean;
+}
+
 export default function ConfiguracionGlobalPage() {
   const [ssoConfig, setSsoConfig] = useState<SSOConfig | null>(null);
+  const [globalConfig, setGlobalConfig] = useState<GlobalConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingGlobal, setIsSavingGlobal] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     fetchSSOConfig();
+    fetchGlobalConfig();
   }, []);
+
+  const fetchGlobalConfig = async () => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+      const token = localStorage.getItem('auth_token');
+      const url = `${API_URL}/configuracion/global/`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error al cargar la configuración global: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setGlobalConfig(data);
+    } catch (error) {
+      console.error('Error al cargar configuración global:', error);
+      toast.error('Error al cargar la configuración global');
+    }
+  };
 
   const fetchSSOConfig = async () => {
     try {
@@ -148,6 +186,66 @@ export default function ConfiguracionGlobalPage() {
   const handleInputChangeSSO = (field: keyof SSOConfig, value: string) => {
     if (!ssoConfig) return;
     setSsoConfig({ ...ssoConfig, [field]: value });
+  };
+
+  const handleSaveGlobal = async () => {
+    if (!globalConfig) return;
+
+    setIsSavingGlobal(true);
+    setError('');
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+      const token = localStorage.getItem('auth_token');
+
+      const response = await fetch(`${API_URL}/configuracion/global/`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${token}`
+        },
+        body: JSON.stringify(globalConfig)
+      });
+
+      if (!response.ok) {
+        let errorData: any = {};
+        try {
+          errorData = await response.json();
+        } catch {
+          const responseText = await response.text();
+          errorData = { error: responseText || `Error ${response.status}` };
+        }
+
+        let errorMessage = '';
+        if (response.status === 403) {
+          errorMessage = 'No tienes permisos para modificar esta configuración.';
+        } else if (response.status === 401) {
+          errorMessage = 'Tu sesión ha expirado. Por favor, inicia sesión nuevamente.';
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        } else {
+          errorMessage = `Error ${response.status}: ${response.statusText}`;
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      setGlobalConfig(data);
+      toast.success('Configuración global guardada exitosamente');
+    } catch (error) {
+      console.error('Error al guardar configuración global:', error);
+      const errorMessage = error instanceof Error ? error.message : 'No se pudo guardar la configuración';
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setIsSavingGlobal(false);
+    }
+  };
+
+  const handleInputChangeGlobal = (field: keyof GlobalConfig, value: number) => {
+    if (!globalConfig) return;
+    setGlobalConfig({ ...globalConfig, [field]: value });
   };
 
   if (isLoading) {
@@ -347,17 +445,149 @@ export default function ConfiguracionGlobalPage() {
 
         {/* Tab: General */}
         <TabsContent value="general" className="space-y-6">
+          {/* Reglas de Billetera Virtual */}
           <Card>
             <CardHeader>
-              <CardTitle>Configuración General</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                💳 Reglas de Billetera Virtual
+              </CardTitle>
               <CardDescription>
-                Configuraciones generales del sistema
+                Parámetros para el sistema de créditos por cancelación
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-gray-500">Próximamente: Configuraciones generales del negocio</p>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="min_horas_cancelacion">
+                  Horas mínimas de antelación para crédito
+                </Label>
+                <Input
+                  id="min_horas_cancelacion"
+                  type="number"
+                  min="0"
+                  value={globalConfig?.min_horas_cancelacion_credito || 24}
+                  onChange={(e) => handleInputChangeGlobal('min_horas_cancelacion_credito', parseInt(e.target.value) || 0)}
+                  className="max-w-xs"
+                />
+                <p className="text-sm text-gray-500">
+                  Si el cliente cancela con al menos esta cantidad de horas de antelación, recibirá crédito en su billetera virtual.
+                </p>
+              </div>
             </CardContent>
           </Card>
+
+          {/* Parámetros de Reincorporación */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                🎯 Parámetros de Reincorporación
+              </CardTitle>
+              <CardDescription>
+                Configuración para campañas de fidelización de clientes inactivos
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="margen_fidelizacion">
+                  Días de inactividad para reincorporación
+                </Label>
+                <Input
+                  id="margen_fidelizacion"
+                  type="number"
+                  min="0"
+                  value={globalConfig?.margen_fidelizacion_dias || 60}
+                  onChange={(e) => handleInputChangeGlobal('margen_fidelizacion_dias', parseInt(e.target.value) || 0)}
+                  className="max-w-xs"
+                />
+                <p className="text-sm text-gray-500">
+                  Días promedio de inactividad antes de considerar al cliente para campañas de fidelización. Se usa para identificar "Oportunidades de Agenda".
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="descuento_fidelizacion">
+                  Porcentaje de descuento para fidelización (%)
+                </Label>
+                <Input
+                  id="descuento_fidelizacion"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={globalConfig?.descuento_fidelizacion_pct || 15}
+                  onChange={(e) => handleInputChangeGlobal('descuento_fidelizacion_pct', parseFloat(e.target.value) || 0)}
+                  className="max-w-xs"
+                />
+                <p className="text-sm text-gray-500">
+                  Porcentaje de descuento que se aplicará automáticamente en las invitaciones de reincorporación (ej: 15 para 15%)
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Capacidad del Local */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                🏢 Capacidad del Local
+              </CardTitle>
+              <CardDescription>
+                Límite global de turnos simultáneos en todo el establecimiento
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="capacidad_maxima">
+                  Capacidad máxima global
+                </Label>
+                <Input
+                  id="capacidad_maxima"
+                  type="number"
+                  min="0"
+                  value={globalConfig?.capacidad_maxima_global || 0}
+                  onChange={(e) => handleInputChangeGlobal('capacidad_maxima_global', parseInt(e.target.value) || 0)}
+                  className="max-w-xs"
+                />
+                <p className="text-sm text-gray-500">
+                  Límite total de turnos simultáneos en todo el local. Usa <strong>0</strong> para sin límite global (solo se considera la capacidad individual de cada sala).
+                </p>
+              </div>
+
+              {globalConfig && globalConfig.capacidad_maxima_global > 0 && (
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="h-5 w-5 text-blue-600 mt-0.5" />
+                    <div className="text-sm text-blue-900">
+                      <p className="font-medium">Capacidad global activa</p>
+                      <p className="text-blue-700 mt-1">
+                        El sistema verificará que no se superen los {globalConfig.capacidad_maxima_global} turnos simultáneos en todo el local, además de la capacidad individual de cada sala.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Botón de guardar configuración general */}
+          <div className="flex justify-end">
+            <Button
+              onClick={handleSaveGlobal}
+              disabled={isSavingGlobal}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              {isSavingGlobal ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Guardar configuración
+                </>
+              )}
+            </Button>
+          </div>
         </TabsContent>
 
         {/* Tab: Notificaciones */}

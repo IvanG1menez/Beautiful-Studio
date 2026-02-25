@@ -18,6 +18,14 @@
           Tenemos un lugar para vos en <strong>{{ servicio_nombre }}</strong>.
         </p>
 
+        {% if tiene_saldo %}
+        <div style="margin: 20px 0; padding: 16px; background: #ecfdf5; border-left: 4px solid #10b981; border-radius: 8px;">
+          <p style="margin: 0 0 8px; font-size: 14px; color: #065f46;">💰 ¡Tenés crédito disponible!</p>
+          <p style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Saldo: ${{ saldo_disponible }}</p>
+          <p style="margin: 8px 0 0; font-size: 14px; color: #047857;">Podés usar este crédito ahora mismo en este turno</p>
+        </div>
+        {% endif %}
+
         <div style="margin: 20px 0; padding: 16px; background: #f9fafb; border-left: 4px solid #6366f1; border-radius: 8px;">
           <p style="margin: 0 0 8px; font-size: 14px; color: #4b5563;">Beneficio aplicado</p>
           <p style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">{{ beneficio }}</p>

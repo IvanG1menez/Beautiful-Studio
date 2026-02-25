@@ -209,6 +209,48 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Obtener configuración global
+        from apps.authentication.models import ConfiguracionGlobal
+
+        config_global = ConfiguracionGlobal.get_config()
+        min_horas_credito = config_global.min_horas_cancelacion_credito
+
+        # Calcular diferencia de horas entre ahora y el turno
+        horas_diferencia = (turno.fecha_hora - timezone.now()).total_seconds() / 3600
+
+        # Si cancela con más de las horas configuradas de anticipación, agregar crédito
+        credito_aplicado = False
+        monto_credito_valor = 0
+
+        if horas_diferencia > min_horas_credito and turno.cliente:
+            from apps.clientes.models import Billetera
+            from decimal import Decimal
+
+            # Obtener o crear billetera
+            billetera, created = Billetera.objects.get_or_create(
+                cliente=turno.cliente, defaults={"saldo": Decimal("0.00")}
+            )
+
+            # Calcular monto a acreditar (precio del servicio o precio final del turno)
+            monto_credito = (
+                turno.precio_final if turno.precio_final else turno.servicio.precio
+            )
+
+            # Agregar crédito
+            billetera.agregar_saldo(
+                monto=monto_credito,
+                motivo=f"Cancelación anticipada del turno #{turno.id} - {turno.servicio.nombre}",
+            )
+
+            # Actualizar el movimiento con referencia al turno
+            ultimo_movimiento = billetera.movimientos.first()
+            if ultimo_movimiento:
+                ultimo_movimiento.turno = turno
+                ultimo_movimiento.save()
+
+            credito_aplicado = True
+            monto_credito_valor = float(monto_credito)
+
         turno.estado = "cancelado"
         turno.save()
 
@@ -219,11 +261,18 @@ class TurnoViewSet(viewsets.ModelViewSet):
             accion="Turno cancelado",
             estado_anterior=turno.estado,
             estado_nuevo="cancelado",
-            observaciones=f"Turno cancelado por {request.user.full_name}",
+            observaciones=f"Turno cancelado por {request.user.full_name}. "
+            f"Crédito {'aplicado' if credito_aplicado else f'no aplicado (menos de {min_horas_credito}hs)'}",
         )
 
         return Response(
-            {"message": "Turno cancelado exitosamente"}, status=status.HTTP_200_OK
+            {
+                "message": "Turno cancelado exitosamente",
+                "credito_aplicado": credito_aplicado,
+                "monto_credito": monto_credito_valor,
+                "horas_antelacion_requerida": min_horas_credito,
+            },
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=False, methods=["get"])
