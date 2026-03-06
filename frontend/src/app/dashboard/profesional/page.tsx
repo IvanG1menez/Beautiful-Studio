@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -103,7 +103,7 @@ export default function DashboardEmpleadoPage() {
       throw new Error('No authentication token found');
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const baseUrl = '/api';
     // La URL base ya incluye /api, no agregar nuevamente
     const fullUrl = url.startsWith('http')
       ? url

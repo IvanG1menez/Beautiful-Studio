@@ -1,13 +1,15 @@
-'use client';
+﻿'use client';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import WalletCard from '@/components/WalletCard';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatDate, formatTime } from '@/lib/dateUtils';
 import { formatCurrency } from '@/lib/utils';
-import WalletCard from '@/components/WalletCard';
+import type { Billetera, MovimientoBilletera } from '@/types';
 import {
   AlertCircle,
   ArrowRight,
@@ -17,14 +19,13 @@ import {
   Loader2,
   MapPin,
   Phone,
-  User,
-  XCircle,
+  TrendingDown,
   TrendingUp,
-  TrendingDown
+  User,
+  XCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { Billetera, MovimientoBilletera } from '@/types';
 
 // Interfaces
 interface Turno {
@@ -121,18 +122,10 @@ export default function DashboardClientePage() {
     }
   }, [router]);
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const loadPerfilData = async () => {
     try {
       setLoadingPerfil(true);
-      const response = await fetch('http://localhost:8000/api/clientes/me/', {
+      const response = await fetch('/api/clientes/me/', {
         headers: getAuthHeaders()
       });
 
@@ -150,7 +143,7 @@ export default function DashboardClientePage() {
   const loadBilleteraData = async () => {
     try {
       setLoadingBilletera(true);
-      const response = await fetch('http://localhost:8000/api/clientes/me/billetera/', {
+      const response = await fetch('/api/clientes/me/billetera/', {
         headers: getAuthHeaders()
       });
 
@@ -167,7 +160,7 @@ export default function DashboardClientePage() {
 
   const loadMovimientosData = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/clientes/me/billetera/movimientos/', {
+      const response = await fetch('/api/clientes/me/billetera/movimientos/', {
         headers: getAuthHeaders()
       });
 
@@ -188,7 +181,7 @@ export default function DashboardClientePage() {
   const loadTurnosData = async () => {
     try {
       setLoadingTurnos(true);
-      const response = await fetch('http://localhost:8000/api/turnos/mis_turnos/?page_size=100', {
+      const response = await fetch('/api/turnos/mis_turnos/?page_size=100', {
         headers: getAuthHeaders()
       });
 
@@ -476,8 +469,8 @@ export default function DashboardClientePage() {
           <div className="space-y-6">
             {/* Billetera Card */}
             {!loadingBilletera && billetera && (
-              <WalletCard 
-                saldo={parseFloat(billetera.saldo)} 
+              <WalletCard
+                saldo={parseFloat(billetera.saldo)}
                 onVerHistorial={handleVerHistorial}
               />
             )}
@@ -591,7 +584,7 @@ export default function DashboardClientePage() {
               Registro completo de créditos y débitos en tu billetera
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4 mt-4">
             {movimientos.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
@@ -600,8 +593,8 @@ export default function DashboardClientePage() {
             ) : (
               <div className="space-y-3">
                 {movimientos.map((mov) => (
-                  <div 
-                    key={mov.id} 
+                  <div
+                    key={mov.id}
                     className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
                   >
                     <div className="flex items-start justify-between">
@@ -621,25 +614,25 @@ export default function DashboardClientePage() {
                             {mov.tipo === 'credito' ? '+' : '-'}{formatCurrency(parseFloat(mov.monto))}
                           </Badge>
                         </div>
-                        
+
                         <p className="text-sm text-gray-600 mb-2">
                           {mov.descripcion || 'Sin descripción'}
                         </p>
-                        
+
                         {mov.turno_info && (
                           <div className="text-xs text-gray-500 bg-gray-50 rounded p-2 mt-2">
-                            <strong>Turno relacionado:</strong> {mov.turno_info.servicio} - 
+                            <strong>Turno relacionado:</strong> {mov.turno_info.servicio} -
                             {new Date(mov.turno_info.fecha_hora).toLocaleDateString('es-ES')}
                           </div>
                         )}
-                        
+
                         <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
                           <span>Saldo anterior: {formatCurrency(parseFloat(mov.saldo_anterior))}</span>
                           <span>→</span>
                           <span className="font-semibold">Saldo nuevo: {formatCurrency(parseFloat(mov.saldo_nuevo))}</span>
                         </div>
                       </div>
-                      
+
                       <div className="text-right text-sm text-gray-500 ml-4">
                         <p>{new Date(mov.created_at).toLocaleDateString('es-ES', {
                           day: '2-digit',

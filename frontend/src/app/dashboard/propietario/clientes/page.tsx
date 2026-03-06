@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users, X, Wallet } from 'lucide-react';
+import { getAuthHeaders } from '@/lib/auth-headers';
+import { formatCurrency } from '@/lib/utils';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users, Wallet, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { formatCurrency } from '@/lib/utils';
 
 interface Cliente {
   id: number;
@@ -66,22 +67,13 @@ export default function ClientesAdminPage() {
     type: 'success' as 'success' | 'error'
   });
 
-  // Función para obtener token y headers
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   // Cargar TODOS los clientes (sin paginación del backend)
   const fetchClientes = async () => {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
       // Usar page_size=1000 para obtener todos los clientes de una vez
-      const response = await fetch('http://localhost:8000/api/clientes/?page_size=1000', { headers });
+      const response = await fetch('/api/clientes/?page_size=1000', { headers });
 
       if (response.ok) {
         const data = await response.json();
@@ -219,7 +211,7 @@ export default function ClientesAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará el cliente "${nombreCliente}" y su usuario asociado.`,
       async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/clientes/${clienteId}/`, {
+          const response = await fetch(`/api/clientes/${clienteId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
           });
@@ -251,7 +243,7 @@ export default function ClientesAdminPage() {
   // Toggle VIP
   const handleToggleVIP = async (clienteId: number, nombreCliente: string, currentVipStatus: boolean) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/clientes/${clienteId}/toggle_vip/`, {
+      const response = await fetch(`/api/clientes/${clienteId}/toggle_vip/`, {
         method: 'POST',
         headers: getAuthHeaders()
       });

@@ -12,11 +12,21 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 from decouple import config
+import os
+from environ import Env
+
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent
+env = Env()
+env.read_env(os.path.join(BASE_DIR, ".env"))
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
+MERCADO_PAAGO_WEBHOOK_URL = env(
+    "MERCADO_PAGO_WEBHOOK_URL",
+    default="https://subarticulately-strifeless-eliza.ngrok-free.dev/api/mercadopago/webhook/",
+)
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
@@ -35,6 +45,14 @@ ALLOWED_HOSTS = config(
     cast=lambda v: [s.strip() for s in v.split(",")],
 )
 
+# En desarrollo, permitir cualquier host (cubre tunnels como ngrok)
+if DEBUG:
+    ALLOWED_HOSTS = ["*"]
+
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = True
 
 # Application definition
 
@@ -64,6 +82,7 @@ INSTALLED_APPS = [
     "apps.empleados",
     "apps.encuestas",
     "apps.emails",
+    "apps.mercadopago",
 ]
 
 MIDDLEWARE = [
@@ -161,8 +180,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        # Solo TokenAuthentication: el frontend usa Token en el header Authorization.
+        # SessionAuthentication fue eliminado porque fuerza validación CSRF en todos
+        # los endpoints POST, lo cual rompe la API cuando se consume desde Next.js.
+        # El admin de Django usa su propio sistema de sesiones y no depende de esto.
         "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -176,19 +201,45 @@ REST_FRAMEWORK = {
     ],
 }
 
-# CORS Configuration for Next.js frontend
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Next.js default development server
-    "http://127.0.0.1:3000",
-    "https://1cxtbsgw-3000.brs.devtunnels.ms",  # Tunnel URL
+    "http://localhost:3000",
+    "https://subarticulately-strifeless-eliza.ngrok-free.dev",
 ]
 
-# Allow credentials for CORS (needed for authentication)
 CORS_ALLOW_CREDENTIALS = True
 
-# Additional CORS settings for development
-CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=True, cast=bool)
+# Requerido para que el middleware CSRF acepte peticiones desde el frontend
+# (el browser envía Origin: http://localhost:3000 cuando el proxy de Next.js
+# reenvía la petición, y Django lo valida contra esta lista)
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "https://subarticulately-strifeless-eliza.ngrok-free.dev",
+]
 
+# Headers adicionales permitidos en CORS
+CORS_ALLOWED_HEADERS = [
+    "Accept",
+    "ngrok-skip-browser-warning",
+    "accept-encoding",
+    "authorization",
+    "Content-Type",
+    "dnt",
+    "origin",
+    "cache-control",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
+CORS_ALLOWED_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
 # Static files configuration
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
@@ -305,3 +356,60 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # Frontend URL for email links
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+
+# ── Mercado Pago ─────────────────────────────────────────────────────────────
+MP_ACCESS_TOKEN = config("MP_ACCESS_TOKEN", default="")
+MP_PUBLIC_KEY = config("MP_PUBLIC_KEY", default="")
+MP_CURRENCY_ID = config("MP_CURRENCY_ID", default="ARS")
+
+MERCADO_PAGO_WEBHOOK_URL = env(
+    "MERCADO_PAGO_WEBHOOK_URL",
+    default="https://subarticulately-strifeless-eliza.ngrok-free.dev/api/mercadopago/webhook/",
+)
+# URLs de retorno
+MERCADO_PAGO_SUCCESS_URL = env(
+    "MERCADO_PAGO_SUCCESS_URL", default="http://localhost:3000/pago-exitoso"
+)
+MERCADO_PAGO_FAILURE_URL = env(
+    "MERCADO_PAGO_FAILURE_URL", default="http://localhost:3000/pago-fallido"
+)
+MERCADO_PAGO_PENDING_URL = env(
+    "MERCADO_PAGO_PENDING_URL", default="http://localhost:3000/pago-pendiente"
+)  # Monto mínimo permitido por Mercado Pago (en ARS). MP rechaza montos menores.
+MP_MIN_AMOUNT = config("MP_MIN_AMOUNT", default=100, cast=float)
+# ──────────────────────────────────────────────────────────────────────────────
+# Logging
+# ──────────────────────────────────────────────────────────────────────────────
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{levelname}] {asctime} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        # Muestra INFO+ para las apps propias (incluye webhook MP, mercadopago, etc.)
+        "apps": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

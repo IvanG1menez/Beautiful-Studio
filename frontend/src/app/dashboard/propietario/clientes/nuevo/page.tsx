@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -36,14 +37,6 @@ export default function NuevoClientePage() {
     preferencias: '',
     is_vip: false
   });
-
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
 
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
@@ -93,7 +86,7 @@ export default function NuevoClientePage() {
         is_vip: formData.is_vip
       };
 
-      const response = await fetch('http://localhost:8000/api/clientes/', {
+      const response = await fetch('/api/clientes/', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(dataToSend)

@@ -1,13 +1,20 @@
 import { ApiError, ApiResponse } from '@/types';
 import axios, { AxiosResponse } from 'axios';
-
 // Configuración base de Axios
-const API_BASE_URL = "http://localhost:8000/api"; // Cambiado a localhost
+// En el browser usamos /api (proxy de Next.js → Django, sin CORS).
+// En el server-side de Next.js se usa la URL completa del backend.
+const isBrowser = typeof window !== 'undefined';
+const API_BASE_URL = isBrowser
+  ? '/api'
+  : `${process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? 'http://localhost:8000'}/api`;
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true, // Para enviar cookies en solicitudes CORS
   headers: {
     'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
   },
 });
 

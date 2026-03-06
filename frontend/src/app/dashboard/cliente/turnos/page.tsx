@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatDate, formatDateTimeReadable, formatTime } from '@/lib/dateUtils';
 import { Calendar, CalendarDays, CheckCircle, Clock, Filter, Loader2, Plus, Search, User, X, XCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -63,21 +64,12 @@ export default function TurnosClientePage() {
     type: 'success' as 'success' | 'error'
   });
 
-  // Función para obtener token y headers
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   // Cargar turnos
   const fetchTurnos = async () => {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const response = await fetch('http://localhost:8000/api/turnos/mis_turnos/?page_size=1000', { headers });
+      const response = await fetch('/api/turnos/mis_turnos/?page_size=1000', { headers });
 
       if (response.ok) {
         const data = await response.json();
@@ -133,7 +125,7 @@ export default function TurnosClientePage() {
       `¿Estás seguro de que deseas cancelar el turno de "${servicioNombre}" para el ${fecha}?`,
       async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/turnos/${turnoId}/`, {
+          const response = await fetch(`/api/turnos/${turnoId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
           });
@@ -500,9 +492,9 @@ export default function TurnosClientePage() {
                 <div
                   key={turno.id}
                   className={`relative flex flex-col md:flex-row md:items-start justify-between p-5 border-l-4 rounded-lg transition-all hover:shadow-md ${isConfirmado ? 'border-l-green-500 bg-green-50/30' :
-                      isPendiente ? 'border-l-yellow-500 bg-yellow-50/30' :
-                        isCompletado ? 'border-l-blue-500 bg-blue-50/30' :
-                          'border-l-gray-400 bg-gray-50/30'
+                    isPendiente ? 'border-l-yellow-500 bg-yellow-50/30' :
+                      isCompletado ? 'border-l-blue-500 bg-blue-50/30' :
+                        'border-l-gray-400 bg-gray-50/30'
                     }`}
                 >
                   {/* Indicador visual de estado */}

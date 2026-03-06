@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowDownRight, ArrowUpRight, Calendar, DollarSign, Loader2, TrendingUp, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -57,14 +58,6 @@ export default function ReportesFinanzasPage() {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Token ${token}` : '',
-    };
-  };
-
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -73,7 +66,7 @@ export default function ReportesFinanzasPage() {
       if (fechaHasta) params.append('fecha_hasta', fechaHasta);
 
       const response = await fetch(
-        `http://localhost:8000/api/turnos/reportes/finanzas/?${params.toString()}`,
+        `/api/turnos/reportes/finanzas/?${params.toString()}`,
         { headers: getAuthHeaders() }
       );
 

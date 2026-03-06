@@ -1,22 +1,22 @@
-import { 
-  LoginCredentials, 
-  LoginResponse, 
-  RegisterData, 
-  User 
+import {
+  LoginCredentials,
+  LoginResponse,
+  RegisterData,
+  User
 } from '@/types';
-import { post, get } from './api';
+import { get, post } from './api';
 
 export const authService = {
   // Iniciar sesión
   login: async (credentials: LoginCredentials): Promise<LoginResponse> => {
     const response = await post<LoginResponse>('/users/login/', credentials);
-    
+
     // Guardar token y usuario en localStorage
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
     }
-    
+
     return response;
   },
 

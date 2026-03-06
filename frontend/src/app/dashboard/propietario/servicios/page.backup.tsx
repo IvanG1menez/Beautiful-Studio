@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowUpDown, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -79,23 +80,14 @@ export default function ServiciosAdminPage() {
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState({ title: '', description: '', type: 'success' as 'success' | 'error' });
 
-  // Función para obtener token y headers correctos
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   // Cargar datos iniciales
   const fetchData = async () => {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
       const [categoriasRes, serviciosRes] = await Promise.all([
-        fetch('http://localhost:8000/api/servicios/categorias/', { headers }),
-        fetch('http://localhost:8000/api/servicios/', { headers })
+        fetch('/api/servicios/categorias/', { headers }),
+        fetch('/api/servicios/', { headers })
       ]);
 
       if (categoriasRes.ok) {
@@ -196,8 +188,8 @@ export default function ServiciosAdminPage() {
     e.preventDefault();
 
     const url = editingCategoria
-      ? `http://localhost:8000/api/servicios/categorias/${editingCategoria.id}/`
-      : 'http://localhost:8000/api/servicios/categorias/';
+      ? `/api/servicios/categorias/${editingCategoria.id}/`
+      : '/api/servicios/categorias/';
 
     const method = editingCategoria ? 'PUT' : 'POST';
 
@@ -252,7 +244,7 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará la categoría "${nombreCategoria}" y todos los servicios asociados quedarán sin categoría.`,
       async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/servicios/categorias/${categoriaId}/`, {
+          const response = await fetch(`/api/servicios/categorias/${categoriaId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
           });
@@ -283,8 +275,8 @@ export default function ServiciosAdminPage() {
     e.preventDefault();
 
     const url = editingServicio
-      ? `http://localhost:8000/api/servicios/${editingServicio.id}/`
-      : 'http://localhost:8000/api/servicios/';
+      ? `/api/servicios/${editingServicio.id}/`
+      : '/api/servicios/';
 
     const method = editingServicio ? 'PUT' : 'POST';
 
@@ -351,7 +343,7 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará el servicio "${nombreServicio}".`,
       async () => {
         try {
-          const response = await fetch(`http://localhost:8000/api/servicios/${servicioId}/`, {
+          const response = await fetch(`/api/servicios/${servicioId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
           });

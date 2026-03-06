@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ChevronLeft, ChevronRight, DoorClosed, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -101,22 +102,13 @@ export default function ServiciosAdminPage() {
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState({ title: '', description: '', type: 'success' as 'success' | 'error' });
 
-  // Función para obtener token y headers correctos
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   // Cargar datos iniciales
   const fetchData = async () => {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-      
+      const baseUrl = '/api';
+
       const [categoriasRes, serviciosRes, salasRes] = await Promise.all([
         fetch(`${baseUrl}/servicios/categorias/`, { headers }),
         fetch(`${baseUrl}/servicios/`, { headers }),
@@ -233,7 +225,7 @@ export default function ServiciosAdminPage() {
   const handleCategoriaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const baseUrl = '/api';
     const url = editingCategoria
       ? `${baseUrl}/servicios/categorias/${editingCategoria.id}/`
       : `${baseUrl}/servicios/categorias/`;
@@ -297,7 +289,7 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará la categoría "${nombreCategoria}" y todos los servicios asociados quedarán sin categoría.`,
       async () => {
         try {
-          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+          const baseUrl = '/api';
           const response = await fetch(`${baseUrl}/servicios/categorias/${categoriaId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
@@ -331,7 +323,7 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará el servicio "${nombreServicio}".`,
       async () => {
         try {
-          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+          const baseUrl = '/api';
           const response = await fetch(`${baseUrl}/servicios/${servicioId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
@@ -362,7 +354,7 @@ export default function ServiciosAdminPage() {
   const handleSalaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const baseUrl = '/api';
     const url = editingSala
       ? `${baseUrl}/servicios/salas/${editingSala.id}/`
       : `${baseUrl}/servicios/salas/`;
@@ -426,7 +418,7 @@ export default function ServiciosAdminPage() {
       `Esta acción no se puede deshacer. Se eliminará la sala "${nombreSala}".`,
       async () => {
         try {
-          const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+          const baseUrl = '/api';
           const response = await fetch(`${baseUrl}/servicios/salas/${salaId}/`, {
             method: 'DELETE',
             headers: getAuthHeaders()
@@ -472,8 +464,8 @@ export default function ServiciosAdminPage() {
     : null;
   const categoriasCompartidas = selectedSala
     ? selectedSala.categorias.filter(
-        (cat) => cat.id !== (editingCategoria ? editingCategoria.id : null)
-      )
+      (cat) => cat.id !== (editingCategoria ? editingCategoria.id : null)
+    )
     : [];
 
   return (

@@ -1,5 +1,9 @@
 from rest_framework import generics, permissions, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+    authentication_classes,
+)
 from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
 from django.contrib.auth import authenticate
@@ -25,6 +29,7 @@ class UserCreateView(generics.CreateAPIView):
 
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    authentication_classes = []  # Sin auth → sin CSRF enforcement (endpoint público)
     permission_classes = [permissions.AllowAny]
 
 
@@ -89,6 +94,7 @@ class CustomObtainAuthToken(ObtainAuthToken):
 
 # Vista personalizada original (mantener como alternativa)
 @api_view(["POST"])
+@authentication_classes([])  # Sin SessionAuthentication → sin CSRF enforcement
 @permission_classes([permissions.AllowAny])
 def login_view(request):
     """

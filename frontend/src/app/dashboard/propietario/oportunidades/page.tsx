@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { AlertCircle, Calendar, Loader2, Mail, Phone, TrendingUp, User, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -48,14 +49,6 @@ export default function OportunidadesAgendaPage() {
   const [mensajePersonalizado, setMensajePersonalizado] = useState('');
   const [enviando, setEnviando] = useState(false);
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Token ${token}` : '',
-    };
-  };
-
   const fetchOportunidades = async () => {
     setLoading(true);
     try {
@@ -65,7 +58,7 @@ export default function OportunidadesAgendaPage() {
       }
 
       const response = await fetch(
-        `http://localhost:8000/api/turnos/oportunidades/?${params.toString()}`,
+        `/api/turnos/oportunidades/?${params.toString()}`,
         { headers: getAuthHeaders() }
       );
 
@@ -100,7 +93,7 @@ export default function OportunidadesAgendaPage() {
     setEnviando(true);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/turnos/oportunidades/${selectedCliente.id}/invitar/`,
+        `/api/turnos/oportunidades/${selectedCliente.id}/invitar/`,
         {
           method: 'POST',
           headers: getAuthHeaders(),

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   AlertDialog,
@@ -67,7 +67,7 @@ export default function AgendaEmpleadoPage() {
     const token = getAuthToken();
     if (!token) throw new Error('No authentication token found');
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const baseUrl = '/api';
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 
     return fetch(fullUrl, {
@@ -327,7 +327,7 @@ export default function AgendaEmpleadoPage() {
 
       // Actualizar el turno usando fetch directamente para mejor control
       const token = localStorage.getItem('auth_token');
-      const response = await fetch(`http://localhost:8000/api/turnos/${turnoActual.id}/`, {
+      const response = await fetch(`/api/turnos/${turnoActual.id}/`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

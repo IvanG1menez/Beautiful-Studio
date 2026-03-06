@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -63,14 +64,6 @@ export default function EditarClientePage() {
     is_vip: false
   });
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
@@ -82,7 +75,7 @@ export default function EditarClientePage() {
       setLoadingData(true);
       try {
         const headers = getAuthHeaders();
-        const response = await fetch(`http://localhost:8000/api/clientes/${clienteId}/`, { headers });
+        const response = await fetch(`/api/clientes/${clienteId}/`, { headers });
 
         if (response.ok) {
           const cliente: ClienteDetalle = await response.json();
@@ -165,7 +158,7 @@ export default function EditarClientePage() {
         is_vip: formData.is_vip
       };
 
-      const response = await fetch(`http://localhost:8000/api/clientes/${clienteId}/`, {
+      const response = await fetch(`/api/clientes/${clienteId}/`, {
         method: 'PUT',
         headers: getAuthHeaders(),
         body: JSON.stringify(dataToSend)

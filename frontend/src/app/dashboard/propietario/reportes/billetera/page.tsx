@@ -1,7 +1,8 @@
-'use client';
+﻿'use client';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowDownRight, ArrowUpRight, Calendar, Loader2, Users, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -31,18 +32,10 @@ export default function ReportesBilleteraPage() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<ReporteData | null>(null);
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Token ${token}` : '',
-    };
-  };
-
   const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/turnos/reportes/billetera/`, {
+      const response = await fetch(`/api/turnos/reportes/billetera/`, {
         headers: getAuthHeaders(),
       });
 
@@ -245,8 +238,8 @@ export default function ReportesBilleteraPage() {
                     <span className="text-lg font-bold text-gray-900">
                       {data.resumen.billeteras_activas > 0
                         ? formatCurrency(
-                            data.resumen.saldo_total_sistema / data.resumen.billeteras_activas
-                          )
+                          data.resumen.saldo_total_sistema / data.resumen.billeteras_activas
+                        )
                         : '$0'}
                     </span>
                   </div>
@@ -255,9 +248,9 @@ export default function ReportesBilleteraPage() {
                     <span className="text-lg font-bold text-gray-900">
                       {data.resumen.total_creditos > 0
                         ? (
-                            (data.resumen.total_debitos / data.resumen.total_creditos) *
-                            100
-                          ).toFixed(1)
+                          (data.resumen.total_debitos / data.resumen.total_creditos) *
+                          100
+                        ).toFixed(1)
                         : '0'}
                       %
                     </span>
@@ -316,15 +309,14 @@ export default function ReportesBilleteraPage() {
                             {movimiento.descripcion}
                           </td>
                           <td
-                            className={`py-3 px-4 text-right font-bold ${
-                              movimiento.tipo_movimiento === 'cancelacion' ||
-                              movimiento.tipo_movimiento === 'credito_admin'
+                            className={`py-3 px-4 text-right font-bold ${movimiento.tipo_movimiento === 'cancelacion' ||
+                                movimiento.tipo_movimiento === 'credito_admin'
                                 ? 'text-green-600'
                                 : 'text-red-600'
-                            }`}
+                              }`}
                           >
                             {movimiento.tipo_movimiento === 'cancelacion' ||
-                            movimiento.tipo_movimiento === 'credito_admin'
+                              movimiento.tipo_movimiento === 'credito_admin'
                               ? '+'
                               : '-'}
                             {formatCurrency(Math.abs(movimiento.monto))}

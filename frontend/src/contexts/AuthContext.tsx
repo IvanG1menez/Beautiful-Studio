@@ -113,10 +113,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (userData.role === 'profesional' || userData.role === 'empleado') {
         try {
           const token = localStorage.getItem('auth_token');
-          const empleadoResponse = await fetch('http://localhost:8000/api/empleados/me/', {
+          // Usar el proxy de Next.js (/api) para evitar CORS
+          const empleadoResponse = await fetch(`/api/empleados/me/`, {
             headers: {
               'Authorization': `Token ${token}`,
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              'ngrok-skip-browser-warning': 'true',
             }
           });
 

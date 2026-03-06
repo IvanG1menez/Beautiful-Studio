@@ -1,8 +1,9 @@
-'use client';
+﻿'use client';
 
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,8 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { formatCurrency } from '@/lib/utils';
 import type { Billetera } from '@/types';
 
@@ -109,10 +110,16 @@ export default function NuevoTurnoPage() {
   const [billetera, setBilletera] = useState<Billetera | null>(null);
   const [usarSaldo, setUsarSaldo] = useState(false);
   const [loadingBilletera, setLoadingBilletera] = useState(false);
-  
+
   // Estados para dialog de confirmación
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [usarSaldoEnSena, setUsarSaldoEnSena] = useState(false);
+
+  // Estados para el flujo de pago con Mercado Pago
+  const [isWaitingPayment, setIsWaitingPayment] = useState(false);
+  const [preferenceId, setPreferenceId] = useState<string>('');
+  // Ref para el intervalo de polling: persiste entre re-renders y evita duplicación
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Estados para búsqueda y paginación de profesionales
   const [searchEmpleado, setSearchEmpleado] = useState('');
@@ -120,23 +127,60 @@ export default function NuevoTurnoPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const empleadosPorPagina = 5;
 
-  // Función para obtener headers con autenticación
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   // Base URL de la API
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+  const API_BASE_URL = '/api';
 
   // Cargar categorías al montar
   useEffect(() => {
     fetchCategorias();
     loadBilleteraData();
   }, []);
+
+  // Polling: verificar si el pago de MP fue aprobado (cada 3 segundos).
+  // Se usa useRef para el intervalo: evita que el re-render destruya y re-cree
+  // el setInterval (el bug del bucle infinito en React StrictMode).
+  useEffect(() => {
+    // Arrancar el polling solo si no hay uno ya corriendo
+    if (isWaitingPayment && preferenceId) {
+      if (pollingIntervalRef.current !== null) return;          // ya existe, no duplicar
+
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(
+            `${API_BASE_URL}/mercadopago/verificar-pago/${preferenceId}/`,
+            { headers: getAuthHeaders() },
+          );
+          if (res.ok) {
+            const payload = await res.json();
+            if (payload.status === 'approved') {
+              // Detener el polling y pasar al estado de éxito
+              clearInterval(pollingIntervalRef.current!);
+              pollingIntervalRef.current = null;
+              setIsWaitingPayment(false);
+              setSuccess(true);
+            }
+          }
+        } catch {
+          // Silenciar errores de red durante el polling
+        }
+      }, 3000);
+    }
+
+    // Si isWaitingPayment pasa a false (cancelación manual u otras rutas)
+    // limpiamos cualquier intervalo activo
+    if (!isWaitingPayment && pollingIntervalRef.current !== null) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
+    // Cleanup al desmontar o al cambiar las deps
+    return () => {
+      if (pollingIntervalRef.current !== null) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [isWaitingPayment, preferenceId]);
 
   // Cargar billetera del cliente
   const loadBilleteraData = async () => {
@@ -160,27 +204,27 @@ export default function NuevoTurnoPage() {
   // Calcular precio final con descuento de saldo
   const calcularPrecioFinal = () => {
     if (!servicioSeleccionado) return 0;
-    
+
     const precioServicio = parseFloat(servicioSeleccionado.precio);
-    
+
     if (usarSaldo && billetera) {
       const saldoDisponible = parseFloat(billetera.saldo);
       const descuento = Math.min(precioServicio, saldoDisponible);
       return Math.max(0, precioServicio - descuento);
     }
-    
+
     return precioServicio;
   };
 
   const getSaldoUtilizado = () => {
     if (!servicioSeleccionado || !billetera || !usarSaldo) return 0;
-    
+
     const precioServicio = parseFloat(servicioSeleccionado.precio);
     const saldoDisponible = parseFloat(billetera.saldo);
-    
+
     return Math.min(precioServicio, saldoDisponible);
   };
-  
+
   // Calcular monto de seña
   const calcularMontoSena = () => {
     if (!servicioSeleccionado) return 0;
@@ -188,20 +232,20 @@ export default function NuevoTurnoPage() {
     const porcentajeSena = parseFloat(servicioSeleccionado.porcentaje_sena || '0');
     return (precioServicio * porcentajeSena) / 100;
   };
-  
+
   // Calcular monto final de seña con descuento de billetera
   const calcularSenaFinal = () => {
     const montoSena = calcularMontoSena();
-    
+
     if (usarSaldoEnSena && billetera) {
       const saldoDisponible = parseFloat(billetera.saldo);
       const descuento = Math.min(montoSena, saldoDisponible);
       return Math.max(0, montoSena - descuento);
     }
-    
+
     return montoSena;
   };
-  
+
   // Calcular saldo utilizado en seña
   const getSaldoUtilizadoEnSena = () => {
     if (!servicioSeleccionado || !billetera || !usarSaldoEnSena) return 0;
@@ -410,128 +454,69 @@ export default function NuevoTurnoPage() {
       return;
     }
 
-    // Prevenir doble submit
-    if (loading) {
-      return;
-    }
+    if (loading) return;
 
     setLoading(true);
     setError('');
 
     try {
-      // Obtener el perfil del cliente actual
-      const profileResponse = await fetch(`${API_BASE_URL}/clientes/me/`, {
-        headers: getAuthHeaders()
-      });
-
-      if (!profileResponse.ok) {
-        setShowConfirmDialog(false);
-        throw new Error('No se pudo obtener el perfil del cliente');
-      }
-
-      const clienteData = await profileResponse.json();
-
-      // Crear el turno
       const fechaHora = `${fechaSeleccionada}T${horarioSeleccionado}:00`;
 
-      const turnoData: any = {
-        cliente: clienteData.id,
-        empleado: empleadoSeleccionado.id,
-        servicio: servicioSeleccionado.id,
-        fecha_hora: fechaHora,
-      };
+      // Créditos de billetera a aplicar sobre la seña
+      const creditosAplicar = usarSaldoEnSena ? getSaldoUtilizadoEnSena() : 0;
 
-      // Agregar notas solo si hay contenido
-      if (notasCliente.trim()) {
-        turnoData.notas_cliente = notasCliente.trim();
-      }
-
-      console.log('=== DATOS DEL TURNO ===');
-      console.log('Cliente ID:', clienteData.id);
-      console.log('Empleado ID:', empleadoSeleccionado.id);
-      console.log('Servicio ID:', servicioSeleccionado.id);
-      console.log('Fecha seleccionada:', fechaSeleccionada);
-      console.log('Horario seleccionado:', horarioSeleccionado);
-      console.log('Fecha/Hora completa:', fechaHora);
-      console.log('Notas:', notasCliente);
-      console.log('Objeto completo:', turnoData);
-      console.log('JSON a enviar:', JSON.stringify(turnoData, null, 2));
-
-      const response = await fetch(`${API_BASE_URL}/turnos/`, {
+      const response = await fetch(`${API_BASE_URL}/mercadopago/preferencia-sin-turno/`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(turnoData)
+        body: JSON.stringify({
+          servicio_id: servicioSeleccionado.id,
+          empleado_id: empleadoSeleccionado.id,
+          fecha_hora: fechaHora,
+          notas_cliente: notasCliente.trim() || '',
+          usar_sena: true,
+          creditos_a_aplicar: creditosAplicar,
+        }),
       });
 
-      console.log('Response status:', response.status);
-
       if (response.ok) {
-        setSuccess(true);
+        const result = await response.json();
         setShowConfirmDialog(false);
-        setTimeout(() => {
-          router.push('/dashboard/cliente/turnos');
-        }, 2000);
+
+        // Caso gratuito: créditos cubren el 100% de la seña → turno ya creado
+        if (result.status === 'free') {
+          setSuccess(true);
+          setLoading(false);
+          return;
+        }
+
+        // Caso normal: abrir Mercado Pago en pestaña nueva y esperar webhook
+        window.open(result.init_point, '_blank');
+        setPreferenceId(result.preference_id);
+        setIsWaitingPayment(true);
       } else {
         const responseText = await response.text();
-        console.error('Error response text:', responseText);
-
-        let errorData;
+        let errorData: any;
         try {
           errorData = JSON.parse(responseText);
         } catch {
           errorData = { error: responseText };
         }
-
-        console.error('Error del servidor:', errorData);
-
-        // Cerrar dialog para mostrar el error en la pantalla principal
         setShowConfirmDialog(false);
-
-        // Manejar errores de validación
-        if (errorData.non_field_errors) {
-          // Errores de validación de conjunto único
-          const mensajeError = Array.isArray(errorData.non_field_errors)
-            ? errorData.non_field_errors[0]
-            : errorData.non_field_errors;
-          setError(mensajeError);
-        } else if (errorData.fecha_hora) {
-          // Puede ser un array o un string
-          const mensajeError = Array.isArray(errorData.fecha_hora)
-            ? errorData.fecha_hora[0]
-            : errorData.fecha_hora;
-          setError(mensajeError);
-        } else if (errorData.sala) {
-          // Error de sala
-          const mensajeError = Array.isArray(errorData.sala)
-            ? errorData.sala[0]
-            : errorData.sala;
-          setError(mensajeError);
-        } else if (errorData.detail) {
-          setError(errorData.detail);
-        } else if (errorData.error) {
-          setError(errorData.error);
-        } else if (errorData.notas_cliente) {
-          const mensajeError = Array.isArray(errorData.notas_cliente)
-            ? errorData.notas_cliente[0]
-            : errorData.notas_cliente;
-          setError(mensajeError);
-        } else {
-          // Mostrar todos los errores si hay múltiples campos
-          const errores = Object.entries(errorData).map(([key, value]) => {
-            const mensaje = Array.isArray(value) ? value[0] : value;
-            return `${key}: ${mensaje}`;
-          }).join(', ');
-          setError(errores || 'Error al crear el turno. Por favor verifica los datos.');
-        }
+        setError(
+          errorData?.detail ||
+          errorData?.error ||
+          'Error al iniciar el pago. Por favor intenta nuevamente.'
+        );
       }
     } catch (error: any) {
-      console.error('Error creating turno:', error);
+      console.error('Error iniciando pago MP:', error);
       setShowConfirmDialog(false);
-      setError(error.message || 'Error al crear el turno. Por favor intenta nuevamente.');
+      setError(error.message || 'Error al iniciar el pago. Por favor intenta nuevamente.');
     } finally {
       setLoading(false);
     }
   };
+
 
   // Manejar salida con confirmación
   const handleExit = (destination: string) => {
@@ -685,6 +670,64 @@ export default function NuevoTurnoPage() {
   const serviciosFiltrados = servicios.filter(s =>
     categoriaSeleccionada ? s.categoria === categoriaSeleccionada : true
   );
+
+  // ── Pantalla de espera mientras se confirma el pago en Mercado Pago ──
+  if (isWaitingPayment) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md shadow-xl border-0 text-center">
+          <CardContent className="pt-12 pb-10 px-8 flex flex-col items-center gap-6">
+            {/* Spinner animado */}
+            <div className="relative">
+              <div className="w-20 h-20 rounded-full border-4 border-indigo-100 border-t-indigo-500 animate-spin" />
+              <Wallet className="absolute inset-0 m-auto w-8 h-8 text-indigo-400" />
+            </div>
+
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                Esperando confirmación de pago...
+              </h2>
+              <p className="text-gray-500 text-sm">
+                Completá el pago en la pestaña de Mercado Pago que se abrió.
+                Esta pantalla se actualizará automáticamente.
+              </p>
+            </div>
+
+            <div className="w-full rounded-lg bg-indigo-50 border border-indigo-200 px-4 py-3 text-sm text-indigo-700 text-left space-y-1">
+              <div className="flex justify-between">
+                <span className="font-medium">Servicio:</span>
+                <span>{servicioSeleccionado?.nombre}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-medium">Profesional:</span>
+                <span>{empleadoSeleccionado?.first_name} {empleadoSeleccionado?.last_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-medium">Fecha:</span>
+                <span>{fechaSeleccionada} · {horarioSeleccionado}hs</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-400">
+              Verificando cada 3 segundos · No cerrés esta pestaña
+            </p>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-gray-400 hover:text-gray-600"
+              onClick={() => {
+                setIsWaitingPayment(false);
+                setPreferenceId('');
+              }}
+            >
+              Cancelar y volver al formulario
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (success) {
     return (
@@ -1428,7 +1471,7 @@ export default function NuevoTurnoPage() {
                 {/* Precio */}
                 <div>
                   <p className="text-xs font-medium text-gray-500 uppercase mb-1">Precio</p>
-                  
+
                   {/* Precio original */}
                   <div className="flex items-baseline gap-1">
                     <span className={`text-3xl font-bold ${usarSaldo && billetera ? 'text-gray-400 line-through' : 'text-primary'}`}>
@@ -1456,7 +1499,7 @@ export default function NuevoTurnoPage() {
                           className="data-[state=checked]:bg-green-600"
                         />
                       </div>
-                      
+
                       {usarSaldo && (
                         <div className="pt-3 border-t border-green-200">
                           <div className="flex justify-between text-sm mb-1">
@@ -1578,7 +1621,7 @@ export default function NuevoTurnoPage() {
                   </p>
                 </div>
               </div>
-              
+
               <div className="flex justify-between items-center pt-3 border-t border-blue-200">
                 <span className="font-medium text-blue-900">Monto de seña:</span>
                 <span className="text-xl font-bold text-blue-900">{formatCurrency(calcularMontoSena())}</span>
@@ -1604,7 +1647,7 @@ export default function NuevoTurnoPage() {
                     className="data-[state=checked]:bg-green-600"
                   />
                 </div>
-                
+
                 {usarSaldoEnSena && (
                   <div className="pt-3 border-t border-green-200 space-y-1">
                     <div className="flex justify-between text-sm">

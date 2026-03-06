@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { Calendar, Loader2, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -32,14 +33,6 @@ export default function ReportesServiciosPage() {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: token ? `Token ${token}` : '',
-    };
-  };
-
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -48,7 +41,7 @@ export default function ReportesServiciosPage() {
       if (fechaHasta) params.append('fecha_hasta', fechaHasta);
 
       const response = await fetch(
-        `http://localhost:8000/api/turnos/reportes/finanzas/?${params.toString()}`,
+        `/api/turnos/reportes/finanzas/?${params.toString()}`,
         { headers: getAuthHeaders() }
       );
 
@@ -250,8 +243,8 @@ export default function ReportesServiciosPage() {
                         const tasaExito =
                           empleado.total_turnos > 0
                             ? ((empleado.turnos_completados / empleado.total_turnos) * 100).toFixed(
-                                1
-                              )
+                              1
+                            )
                             : '0';
                         return (
                           <tr key={empleado.empleado_id} className="border-b hover:bg-gray-50">
@@ -269,11 +262,10 @@ export default function ReportesServiciosPage() {
                             <td className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <TrendingUp
-                                  className={`w-4 h-4 ${
-                                    parseFloat(tasaExito) >= 80
+                                  className={`w-4 h-4 ${parseFloat(tasaExito) >= 80
                                       ? 'text-green-600'
                                       : 'text-orange-600'
-                                  }`}
+                                    }`}
                                 />
                                 <span
                                   className={

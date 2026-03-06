@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -102,7 +102,7 @@ export default function PerfilClientePage() {
     const token = getAuthToken();
     if (!token) throw new Error('No authentication token found');
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const baseUrl = '/api';
     // La URL base ya incluye /api, solo concatenar la URL
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 

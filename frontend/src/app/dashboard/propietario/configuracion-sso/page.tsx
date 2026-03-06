@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -256,7 +256,7 @@ export default function ConfiguracionSSOPage() {
                 <li>Agrega las URLs autorizadas:
                   <ul className="list-disc list-inside ml-4 mt-1">
                     <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">http://localhost:8000</code></li>
-                    <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">http://localhost:8000/api/auth/complete/google-oauth2/</code></li>
+                    <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">/api/auth/complete/google-oauth2/</code></li>
                   </ul>
                 </li>
                 <li>Copia Client ID y Client Secret aquí</li>

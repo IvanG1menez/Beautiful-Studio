@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -132,7 +132,7 @@ export default function UsuariosPage() {
       throw new Error('No authentication token found');
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+    const baseUrl = '/api';
     // La URL base ya incluye /api, no agregar nuevamente
     const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
 

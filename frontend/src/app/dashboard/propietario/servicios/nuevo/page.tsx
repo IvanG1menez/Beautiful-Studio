@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2, Save, Scissors } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -43,14 +44,6 @@ export default function NuevoServicioPage() {
     is_active: true
   });
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
@@ -61,7 +54,7 @@ export default function NuevoServicioPage() {
     const fetchCategorias = async () => {
       setLoadingCategorias(true);
       try {
-        const response = await fetch('http://localhost:8000/api/servicios/categorias/', {
+        const response = await fetch('/api/servicios/categorias/', {
           headers: getAuthHeaders()
         });
 
@@ -141,7 +134,7 @@ export default function NuevoServicioPage() {
         is_active: formData.is_active
       };
 
-      const response = await fetch('http://localhost:8000/api/servicios/', {
+      const response = await fetch('/api/servicios/', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(dataToSend)

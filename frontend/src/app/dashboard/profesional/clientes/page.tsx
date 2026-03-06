@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatDate } from '@/lib/dateUtils';
 import {
   Calendar,
@@ -67,18 +68,10 @@ export default function MisClientesPage() {
     filtrarClientes();
   }, [searchTerm, filtroVIP, clientes]);
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const loadClientes = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/clientes/mis_clientes/?page_size=100', {
+      const response = await fetch('/api/clientes/mis_clientes/?page_size=100', {
         headers: getAuthHeaders()
       });
 

@@ -40,5 +40,6 @@ urlpatterns = [
     path("api/turnos/", include("apps.turnos.urls")),
     path("api/encuestas/", include("apps.encuestas.urls")),
     path("api/", include("apps.emails.urls")),
+    path("api/mercadopago/", include("apps.mercadopago.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, ExternalLink, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -84,14 +85,6 @@ export default function NuevoProfesionalPage() {
     6: { activo: false, rangos: [{ hora_inicio: '09:00', hora_fin: '17:00' }] }
   });
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
@@ -102,7 +95,7 @@ export default function NuevoProfesionalPage() {
     const fetchServicios = async () => {
       setLoadingServicios(true);
       try {
-        const response = await fetch('http://localhost:8000/api/servicios/', {
+        const response = await fetch('/api/servicios/', {
           headers: getAuthHeaders()
         });
 
@@ -243,7 +236,7 @@ export default function NuevoProfesionalPage() {
 
       console.log('Enviando datos del empleado:', dataToSend);
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+      const baseUrl = '/api';
       const response = await fetch(`${baseUrl}/empleados/`, {
         method: 'POST',
         headers: getAuthHeaders(),

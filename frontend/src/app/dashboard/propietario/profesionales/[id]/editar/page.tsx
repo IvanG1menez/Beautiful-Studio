@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, ExternalLink, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
@@ -120,14 +121,6 @@ export default function EditarProfesionalPage() {
     return initial;
   });
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
@@ -138,7 +131,7 @@ export default function EditarProfesionalPage() {
     const fetchServicios = async () => {
       setLoadingServicios(true);
       try {
-        const response = await fetch('http://localhost:8000/api/servicios/', {
+        const response = await fetch('/api/servicios/', {
           headers: getAuthHeaders()
         });
 
@@ -216,7 +209,7 @@ export default function EditarProfesionalPage() {
       setLoadingData(true);
       try {
         // Cargar datos del empleado
-        const response = await fetch(`http://localhost:8000/api/empleados/${empleadoId}/`, {
+        const response = await fetch(`/api/empleados/${empleadoId}/`, {
           headers: getAuthHeaders()
         });
 
@@ -240,7 +233,7 @@ export default function EditarProfesionalPage() {
 
           // Cargar horarios detallados
           const horariosResponse = await fetch(
-            `http://localhost:8000/api/empleados/horarios/?empleado=${empleadoId}&page_size=1000`,
+            `/api/empleados/horarios/?empleado=${empleadoId}&page_size=1000`,
             { headers: getAuthHeaders() }
           );
 
@@ -352,7 +345,7 @@ export default function EditarProfesionalPage() {
         biografia: formData.biografia
       };
 
-      const response = await fetch(`http://localhost:8000/api/empleados/${empleadoId}/`, {
+      const response = await fetch(`/api/empleados/${empleadoId}/`, {
         method: 'PUT',
         headers: getAuthHeaders(),
         body: JSON.stringify(dataToSend)
@@ -391,7 +384,7 @@ export default function EditarProfesionalPage() {
       });
 
       const horariosResponse = await fetch(
-        `http://localhost:8000/api/empleados/${empleadoId}/horarios/bulk/`,
+        `/api/empleados/${empleadoId}/horarios/bulk/`,
         {
           method: 'POST',
           headers: getAuthHeaders(),

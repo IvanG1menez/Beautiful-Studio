@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -71,14 +72,6 @@ export default function EditarServicioPage() {
     frecuencia_recurrencia_dias: '30'
   });
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': token ? `Token ${token}` : ''
-    };
-  };
-
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
@@ -93,8 +86,8 @@ export default function EditarServicioPage() {
 
         // Cargar categorías y servicio en paralelo
         const [categoriasRes, servicioRes] = await Promise.all([
-          fetch('http://localhost:8000/api/servicios/categorias/', { headers }),
-          fetch(`http://localhost:8000/api/servicios/${servicioId}/`, { headers })
+          fetch('/api/servicios/categorias/', { headers }),
+          fetch(`/api/servicios/${servicioId}/`, { headers })
         ]);
 
         if (categoriasRes.ok) {
@@ -256,7 +249,7 @@ export default function EditarServicioPage() {
         frecuencia_recurrencia_dias: parseInt(formData.frecuencia_recurrencia_dias) || 30
       };
 
-      const response = await fetch(`http://localhost:8000/api/servicios/${servicioId}/`, {
+      const response = await fetch(`/api/servicios/${servicioId}/`, {
         method: 'PUT',
         headers: getAuthHeaders(),
         body: JSON.stringify(dataToSend)
