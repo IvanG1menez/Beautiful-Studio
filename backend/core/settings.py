@@ -49,6 +49,10 @@ ALLOWED_HOSTS = config(
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 
+# Confiar en los headers de proxy (ngrok, nginx, etc.) para obtener el host/scheme reales.
+# Sin esto, Django construye URLs con http://localhost:8000 en lugar de la URL pública.
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SAMESITE = "None"
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SAMESITE = "None"
@@ -267,10 +271,12 @@ AUTHENTICATION_BACKENDS = [
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = config("GOOGLE_OAUTH2_CLIENT_ID", default="")
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = config("GOOGLE_OAUTH2_CLIENT_SECRET", default="")
 
-# Redirect URLs
+# Redirect URI: Google llama a este endpoint después de autorizar al usuario.
+# En desarrollo con ngrok, sobreescribir con GOOGLE_OAUTH2_REDIRECT_URI en el .env.
+# El path real de social-auth-app-django es /api/auth/complete/google-oauth2/
 SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = config(
     "GOOGLE_OAUTH2_REDIRECT_URI",
-    default="http://localhost:8000/api/auth/google/callback/",
+    default="http://localhost:8000/api/auth/complete/google-oauth2/",
 )
 
 # Scope de Google OAuth (qué permisos solicitar)

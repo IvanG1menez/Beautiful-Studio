@@ -2,6 +2,7 @@
 Backend personalizado para Google OAuth que obtiene credenciales desde la base de datos
 """
 
+from django.conf import settings
 from social_core.backends.google import GoogleOAuth2
 from apps.authentication.models import ConfiguracionSSO
 
@@ -41,3 +42,15 @@ class CustomGoogleOAuth2(GoogleOAuth2):
                 print(f"⚠️ Error al obtener credenciales de BD: {e}")
 
         return client_id, client_secret
+
+    def get_redirect_uri(self, state=None):
+        """
+        Usa SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI cuando está configurado.
+        Sin este override social-auth construye la URI desde el request de Django,
+        lo que devuelve http://localhost:8000/... en lugar de la URL de ngrok,
+        causando redirect_uri_mismatch en Google.
+        """
+        uri = getattr(settings, "SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI", None)
+        if uri:
+            return uri
+        return super().get_redirect_uri(state)

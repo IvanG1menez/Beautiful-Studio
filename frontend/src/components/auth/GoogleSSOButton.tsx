@@ -18,11 +18,12 @@ export default function GoogleSSOButton() {
     // Obtener configuración de SSO del backend
     const fetchSSOConfig = async () => {
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
-        const response = await fetch(`${API_URL}/configuracion/sso/public/`, {
+        // Usa el proxy de Next.js (/api/* → localhost:8000/api/*)
+        const response = await fetch('/api/configuracion/sso/public/', {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
           },
         });
 
@@ -48,11 +49,10 @@ export default function GoogleSSOButton() {
     setIsAuthenticating(true);
 
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
-
-      // Redirigir al endpoint de OAuth del backend
-      // Social-auth-app-django proporciona la URL /auth/login/google-oauth2/
-      window.location.href = `${API_URL}/auth/login/google-oauth2/`;
+      // Necesita la URL pública (ngrok) porque Google redirige de vuelta a esa URL.
+      // No usar el proxy de Next.js aquí — la redirección debe ser al backend directamente.
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      window.location.href = `${backendUrl}/api/auth/login/google-oauth2/`;
 
     } catch (error) {
       console.error('Error al iniciar autenticación con Google:', error);

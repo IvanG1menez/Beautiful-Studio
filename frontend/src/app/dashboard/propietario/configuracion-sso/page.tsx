@@ -255,8 +255,8 @@ export default function ConfiguracionSSOPage() {
                 <li>Ve a "Credentials" y crea "OAuth 2.0 Client ID"</li>
                 <li>Agrega las URLs autorizadas:
                   <ul className="list-disc list-inside ml-4 mt-1">
-                    <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">http://localhost:8000</code></li>
-                    <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">/api/auth/complete/google-oauth2/</code></li>
+                    <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}</code> <span className="text-gray-400">(JS Origin)</span></li>
+                    <li><code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth/complete/google-oauth2/</code> <span className="text-gray-400">(Redirect URI)</span></li>
                   </ul>
                 </li>
                 <li>Copia Client ID y Client Secret aquí</li>
