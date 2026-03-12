@@ -350,6 +350,17 @@ class WebhookMercadoPagoView(APIView):
           - Si el slot (empleado, fecha_hora) ya está ocupado → reutiliza ese
             Turno y le asocia el PagoMercadoPago sin duplicar el Turno.
         """
+        # La API de MP a veces omite preference_id en el objeto payment.
+        # En ese caso, el webhook merchant_order (que siempre lo tiene) creará el
+        # PagoMercadoPago correctamente. Aquí simplemente no hacemos nada.
+        if not mp_preference_id:
+            logger.warning(
+                "Webhook MP: preference_id vacío para payment_id=%s. "
+                "El webhook merchant_order procesará el pago con el preference_id correcto.",
+                payment_id,
+            )
+            return
+
         cliente_wh = Cliente.objects.get(pk=turno_payload["cliente_id"])
         servicio_wh = Servicio.objects.get(pk=turno_payload["servicio_id"])
         empleado_wh = Empleado.objects.get(pk=turno_payload["empleado_id"])
@@ -386,26 +397,71 @@ class WebhookMercadoPagoView(APIView):
                     turno_wh.pk,
                 )
 
-            # Idempotente sobre preference_id → seguro ante reintentos de MP.
-            pago_wh, pago_creado = PagoMercadoPago.objects.get_or_create(
-                preference_id=mp_preference_id,
-                defaults={
-                    "turno": turno_wh,
-                    "cliente": cliente_wh,
-                    "payment_id": str(payment_id),
-                    "init_point": "",
-                    "monto": monto_cobrado,
-                    "moneda": settings.MP_CURRENCY_ID,
-                    "descripcion": f"Turno #{turno_wh.pk} — {servicio_wh.nombre}",
-                    "estado": "approved",
-                },
-            )
-            if not pago_creado:
+            # Búsqueda en dos pasos para evitar conflicto en la OneToOne turno_id:
+            #   1. Por preference_id  → reintento exacto del mismo webhook.
+            #   2. Por turno          → el turno ya tiene un pago (p.ej. el topic
+            #                           opuesto llegó primero y creó el registro).
+            pago_por_preference = PagoMercadoPago.objects.filter(
+                preference_id=mp_preference_id
+            ).first()
+            if pago_por_preference is not None:
                 logger.info(
                     "Webhook MP: PagoMercadoPago ya registrado preference_id=%s, ignorando.",
                     mp_preference_id,
                 )
                 return
+
+            pago_por_turno = PagoMercadoPago.objects.filter(turno=turno_wh).first()
+            if pago_por_turno is not None:
+                if not pago_por_turno.preference_id:
+                    # El turno tiene un PagoMercadoPago con preference_id vacío
+                    # (creado por un webhook payment cuya respuesta de API no
+                    # incluía preference_id). Actualizamos al ID correcto para
+                    # que el polling pueda resolverse.
+                    logger.info(
+                        "Webhook MP: actualizando preference_id vacío → %s (turno pk=%s).",
+                        mp_preference_id,
+                        turno_wh.pk,
+                    )
+                    pago_por_turno.preference_id = mp_preference_id
+                    pago_por_turno.estado = "approved"
+                    pago_por_turno.payment_id = str(payment_id)
+                    pago_por_turno.save(
+                        update_fields=[
+                            "preference_id",
+                            "estado",
+                            "payment_id",
+                            "actualizado_en",
+                        ]
+                    )
+                    # El signal post_save del Turno ya se disparó cuando se creó
+                    # el turno (on_commit). Como ahora el pago fue actualizado
+                    # DESPUÉS de ese commit, los emails no se enviaron aún.
+                    # Los enviamos explícitamente aquí.
+                    from apps.turnos.signals import _enviar_notificaciones_nuevo_turno
+
+                    _enviar_notificaciones_nuevo_turno(turno_wh.pk)
+                else:
+                    logger.info(
+                        "Webhook MP: PagoMercadoPago pk=%s ya registrado para "
+                        "turno pk=%s (preference_id=%s), ignorando.",
+                        pago_por_turno.pk,
+                        turno_wh.pk,
+                        pago_por_turno.preference_id,
+                    )
+                return
+
+            pago_wh = PagoMercadoPago.objects.create(
+                preference_id=mp_preference_id,
+                turno=turno_wh,
+                cliente=cliente_wh,
+                payment_id=str(payment_id),
+                init_point="",
+                monto=monto_cobrado,
+                moneda=settings.MP_CURRENCY_ID,
+                descripcion=f"Turno #{turno_wh.pk} — {servicio_wh.nombre}",
+                estado="approved",
+            )
 
         # Descontar créditos de billetera fuera del atomic (error no crítico)
         if creditos_wh > 0:

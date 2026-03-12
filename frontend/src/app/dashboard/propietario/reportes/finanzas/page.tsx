@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Label } from '@/components/ui/label';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowDownRight, ArrowUpRight, Calendar, DollarSign, Loader2, TrendingUp, Users } from 'lucide-react';
@@ -136,37 +136,36 @@ export default function ReportesFinanzasPage() {
           <CardDescription>Selecciona el período que deseas analizar</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <Label htmlFor="fecha_desde">Desde</Label>
-              <Input
-                id="fecha_desde"
-                type="date"
-                value={fechaDesde}
-                onChange={(e) => setFechaDesde(e.target.value)}
+          <div className="flex flex-col sm:flex-row gap-4 items-end">
+            <div className="space-y-2">
+              <Label>Período</Label>
+              <DateRangePicker
+                align="start"
+                locale="es-AR"
+                initialDateFrom={fechaDesde || undefined}
+                initialDateTo={fechaHasta || undefined}
+                onUpdate={({ range }) => {
+                  const toStr = (d: Date) => {
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}`;
+                  };
+                  setFechaDesde(toStr(range.from));
+                  if (range.to) setFechaHasta(toStr(range.to));
+                }}
               />
             </div>
-            <div>
-              <Label htmlFor="fecha_hasta">Hasta</Label>
-              <Input
-                id="fecha_hasta"
-                type="date"
-                value={fechaHasta}
-                onChange={(e) => setFechaHasta(e.target.value)}
-              />
-            </div>
-            <div className="flex items-end">
-              <Button onClick={fetchData} disabled={loading} className="w-full">
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Cargando...
-                  </>
-                ) : (
-                  'Actualizar'
-                )}
-              </Button>
-            </div>
+            <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Cargando...
+                </>
+              ) : (
+                'Actualizar'
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>

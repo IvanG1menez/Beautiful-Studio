@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Label } from '@/components/ui/label';
 import api from '@/services/api';
 import { format } from 'date-fns';
@@ -180,37 +180,33 @@ export default function CompletarTurnosMasivo({ onTurnosCompletados }: Completar
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Filtro de rango de fechas */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex flex-col sm:flex-row gap-4 items-end">
             <div className="space-y-2">
-              <Label htmlFor="fecha-desde">Fecha Desde</Label>
-              <Input
-                id="fecha-desde"
-                type="date"
-                value={fechaDesde}
-                onChange={(e) => setFechaDesde(e.target.value)}
+              <Label>Rango de Fechas</Label>
+              <DateRangePicker
+                align="start"
+                locale="es-AR"
+                onUpdate={({ range }) => {
+                  const toStr = (d: Date) => {
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}`;
+                  };
+                  setFechaDesde(toStr(range.from));
+                  if (range.to) setFechaHasta(toStr(range.to));
+                }}
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="fecha-hasta">Fecha Hasta</Label>
-              <Input
-                id="fecha-hasta"
-                type="date"
-                value={fechaHasta}
-                onChange={(e) => setFechaHasta(e.target.value)}
-              />
-            </div>
-
-            <div className="flex items-end">
-              <Button
-                onClick={buscarTurnos}
-                disabled={isLoading || !fechaDesde || !fechaHasta}
-                className="w-full"
-              >
-                <Calendar className="w-4 h-4 mr-2" />
-                {isLoading ? 'Buscando...' : 'Buscar Turnos'}
-              </Button>
-            </div>
+            <Button
+              onClick={buscarTurnos}
+              disabled={isLoading || !fechaDesde || !fechaHasta}
+              className="w-full sm:w-auto"
+            >
+              <Calendar className="w-4 h-4 mr-2" />
+              {isLoading ? 'Buscando...' : 'Buscar Turnos'}
+            </Button>
           </div>
 
           {/* Acciones rápidas */}

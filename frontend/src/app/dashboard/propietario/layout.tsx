@@ -15,6 +15,7 @@ import {
   MessageSquare,
   PieChart,
   Scissors,
+  Settings,
   Target,
   TrendingUp,
   User,
@@ -111,6 +112,12 @@ export default function DashboardPropietarioLayout({
       icon: Target,
       href: '/dashboard/propietario/oportunidades',
       active: pathname?.startsWith('/dashboard/propietario/oportunidades'),
+    },
+    {
+      label: 'Diagnóstico',
+      icon: Settings,
+      href: '/dashboard/propietario/diagnostico',
+      active: pathname?.startsWith('/dashboard/propietario/diagnostico'),
     },
     {
       label: 'Historial',

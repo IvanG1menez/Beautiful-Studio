@@ -3,6 +3,7 @@ Signals para la app de turnos
 Maneja el envío de notificaciones y emails cuando ocurren eventos en los turnos
 """
 
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -14,103 +15,115 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-@receiver(post_save, sender=Turno)
-def manejar_creacion_turno(sender, instance, created, **kwargs):
+def _enviar_notificaciones_nuevo_turno(turno_pk: int) -> None:
     """
-    Signal que se ejecuta cuando se crea un nuevo turno
-    Envía notificaciones y emails al profesional y propietario
+    Envía notificaciones y emails para un turno recién creado.
+    Llamada desde transaction.on_commit para garantizar que el turno
+    (y su PagoMercadoPago asociado, si lo hay) ya estén persistidos antes
+    de enviar cualquier email al cliente/profesional/propietario.
     """
-    if created:
-        try:
-            # Crear notificación para el profesional
-            # Obtener o crear configuración de notificaciones
-            config_profesional, _ = NotificacionConfig.objects.get_or_create(
-                user=instance.empleado.user,
-                defaults={
-                    "notificar_solicitud_turno": True,
-                    "email_solicitud_turno": True,
+    try:
+        instance = Turno.objects.select_related(
+            "cliente__user", "empleado__user", "servicio"
+        ).get(pk=turno_pk)
+    except Turno.DoesNotExist:
+        logger.warning(
+            "Turno pk=%s no encontrado al intentar enviar notificaciones (fue borrado?).",
+            turno_pk,
+        )
+        return
+
+    try:
+        import time
+
+        # Crear notificación para el profesional
+        config_profesional, _ = NotificacionConfig.objects.get_or_create(
+            user=instance.empleado.user,
+            defaults={
+                "notificar_solicitud_turno": True,
+                "email_solicitud_turno": True,
+            },
+        )
+
+        if config_profesional.notificar_solicitud_turno:
+            Notificacion.objects.create(
+                usuario=instance.empleado.user,
+                tipo="solicitud_turno",
+                titulo="Nuevo turno asignado",
+                mensaje=f"Se te ha asignado un nuevo turno con {instance.cliente.nombre_completo} "
+                f"para el servicio {instance.servicio.nombre} "
+                f'el {instance.fecha_hora.strftime("%d/%m/%Y a las %H:%M")}',
+                data={
+                    "turno_id": instance.id,
+                    "cliente": instance.cliente.nombre_completo,
+                    "servicio": instance.servicio.nombre,
+                    "fecha_hora": instance.fecha_hora.isoformat(),
                 },
             )
 
-            if config_profesional.notificar_solicitud_turno:
+            if config_profesional.email_solicitud_turno:
+                logger.info(
+                    f"Enviando email al profesional {instance.empleado.user.email}"
+                )
+                resultado = EmailService.enviar_email_nuevo_turno_profesional(instance)
+                logger.info(f"Resultado envío email profesional: {resultado}")
+                time.sleep(1)
+
+        # Notificar a propietarios
+        from apps.users.models import User
+
+        propietarios = User.objects.filter(role="propietario")
+
+        for propietario in propietarios:
+            config_prop, _ = NotificacionConfig.objects.get_or_create(
+                user=propietario, defaults={"notificar_solicitud_turno": True}
+            )
+
+            if config_prop.notificar_solicitud_turno:
                 Notificacion.objects.create(
-                    usuario=instance.empleado.user,
+                    usuario=propietario,
                     tipo="solicitud_turno",
-                    titulo="Nuevo turno asignado",
-                    mensaje=f"Se te ha asignado un nuevo turno con {instance.cliente.nombre_completo} "
-                    f"para el servicio {instance.servicio.nombre} "
-                    f'el {instance.fecha_hora.strftime("%d/%m/%Y a las %H:%M")}',
+                    titulo="Nuevo turno en el sistema",
+                    mensaje=f"Se asignó un turno a {instance.empleado.user.get_full_name()} "
+                    f"de parte de {instance.cliente.nombre_completo} "
+                    f"para {instance.servicio.nombre} (${instance.servicio.precio})",
                     data={
                         "turno_id": instance.id,
+                        "empleado": instance.empleado.user.get_full_name(),
                         "cliente": instance.cliente.nombre_completo,
                         "servicio": instance.servicio.nombre,
+                        "precio": str(instance.servicio.precio),
                         "fecha_hora": instance.fecha_hora.isoformat(),
                     },
                 )
 
-                # Enviar email al profesional si está configurado
-                if config_profesional.email_solicitud_turno:
-                    logger.info(
-                        f"Enviando email al profesional {instance.empleado.user.email}"
-                    )
-                    resultado = EmailService.enviar_email_nuevo_turno_profesional(
-                        instance
-                    )
-                    logger.info(f"Resultado envío email profesional: {resultado}")
-                    # Delay para evitar límite de Mailtrap
-                    import time
+        EmailService.enviar_email_nuevo_turno_propietario(instance)
+        time.sleep(1)
 
-                    time.sleep(1)
+        logger.info(
+            f"Enviando email de confirmación al cliente {instance.cliente.user.email}"
+        )
+        resultado_cliente = EmailService.enviar_email_nuevo_turno_cliente(instance)
+        logger.info(f"Resultado envío email cliente: {resultado_cliente}")
 
-            # Notificar a propietarios
-            from apps.users.models import User
+        logger.info(f"Notificaciones y emails enviados para nuevo turno {instance.id}")
 
-            propietarios = User.objects.filter(role="propietario")
+    except Exception as e:
+        logger.error(f"Error en signal de creación de turno: {str(e)}")
 
-            for propietario in propietarios:
-                config_prop, _ = NotificacionConfig.objects.get_or_create(
-                    user=propietario, defaults={"notificar_solicitud_turno": True}
-                )
 
-                if config_prop.notificar_solicitud_turno:
-                    Notificacion.objects.create(
-                        usuario=propietario,
-                        tipo="solicitud_turno",
-                        titulo="Nuevo turno en el sistema",
-                        mensaje=f"Se asignó un turno a {instance.empleado.user.get_full_name()} "
-                        f"de parte de {instance.cliente.nombre_completo} "
-                        f"para {instance.servicio.nombre} (${instance.servicio.precio})",
-                        data={
-                            "turno_id": instance.id,
-                            "empleado": instance.empleado.user.get_full_name(),
-                            "cliente": instance.cliente.nombre_completo,
-                            "servicio": instance.servicio.nombre,
-                            "precio": str(instance.servicio.precio),
-                            "fecha_hora": instance.fecha_hora.isoformat(),
-                        },
-                    )
-
-            # Enviar email a propietarios
-            EmailService.enviar_email_nuevo_turno_propietario(instance)
-
-            # Delay para evitar límite de Mailtrap
-            import time
-
-            time.sleep(1)
-
-            # Enviar email de confirmación al cliente
-            logger.info(
-                f"Enviando email de confirmación al cliente {instance.cliente.user.email}"
-            )
-            resultado_cliente = EmailService.enviar_email_nuevo_turno_cliente(instance)
-            logger.info(f"Resultado envío email cliente: {resultado_cliente}")
-
-            logger.info(
-                f"Notificaciones y emails enviados para nuevo turno {instance.id}"
-            )
-
-        except Exception as e:
-            logger.error(f"Error en signal de creación de turno: {str(e)}")
+@receiver(post_save, sender=Turno)
+def manejar_creacion_turno(sender, instance, created, **kwargs):
+    """
+    Signal que se ejecuta cuando se crea un nuevo turno.
+    Delega el envío de notificaciones/emails a transaction.on_commit para que:
+      - Los emails sólo se envíen después de que la transacción completa se
+        confirme (incluye el PagoMercadoPago si es un turno pagado con MP).
+      - Si la transacción hace rollback, no se envía ningún email huérfano.
+    """
+    if created:
+        turno_pk = instance.pk
+        transaction.on_commit(lambda: _enviar_notificaciones_nuevo_turno(turno_pk))
 
 
 # Variable global para trackear cambios antes de guardar

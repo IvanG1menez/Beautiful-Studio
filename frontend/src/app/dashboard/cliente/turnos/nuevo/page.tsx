@@ -118,8 +118,12 @@ export default function NuevoTurnoPage() {
   // Estados para el flujo de pago con Mercado Pago
   const [isWaitingPayment, setIsWaitingPayment] = useState(false);
   const [preferenceId, setPreferenceId] = useState<string>('');
+  const [mpTabClosed, setMpTabClosed] = useState(false);
   // Ref para el intervalo de polling: persiste entre re-renders y evita duplicación
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ref a la ventana de Mercado Pago para detectar si fue cerrada
+  const mpWindowRef = useRef<Window | null>(null);
+  const mpTabCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Estados para búsqueda y paginación de profesionales
   const [searchEmpleado, setSearchEmpleado] = useState('');
@@ -172,12 +176,20 @@ export default function NuevoTurnoPage() {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
+    if (!isWaitingPayment && mpTabCheckRef.current !== null) {
+      clearInterval(mpTabCheckRef.current);
+      mpTabCheckRef.current = null;
+    }
 
     // Cleanup al desmontar o al cambiar las deps
     return () => {
       if (pollingIntervalRef.current !== null) {
         clearInterval(pollingIntervalRef.current);
         pollingIntervalRef.current = null;
+      }
+      if (mpTabCheckRef.current !== null) {
+        clearInterval(mpTabCheckRef.current);
+        mpTabCheckRef.current = null;
       }
     };
   }, [isWaitingPayment, preferenceId]);
@@ -490,9 +502,28 @@ export default function NuevoTurnoPage() {
         }
 
         // Caso normal: abrir Mercado Pago en pestaña nueva y esperar webhook
-        window.open(result.init_point, '_blank');
+        const mpWin = window.open(result.init_point, '_blank');
+        mpWindowRef.current = mpWin;
+        setMpTabClosed(false);
         setPreferenceId(result.preference_id);
         setIsWaitingPayment(true);
+
+        // Detectar si el usuario cierra la pestaña de MP
+        if (mpWin) {
+          mpTabCheckRef.current = setInterval(() => {
+            if (mpWin.closed) {
+              clearInterval(mpTabCheckRef.current!);
+              mpTabCheckRef.current = null;
+              mpWindowRef.current = null;
+              // También detener el polling de pago
+              if (pollingIntervalRef.current !== null) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+              }
+              setMpTabClosed(true);
+            }
+          }, 1000);
+        }
       } else {
         const responseText = await response.text();
         let errorData: any;
@@ -673,56 +704,97 @@ export default function NuevoTurnoPage() {
 
   // ── Pantalla de espera mientras se confirma el pago en Mercado Pago ──
   if (isWaitingPayment) {
+    const handleCancelPayment = () => {
+      // Cerrar la pestaña de MP si sigue abierta
+      if (mpWindowRef.current && !mpWindowRef.current.closed) {
+        mpWindowRef.current.close();
+      }
+      mpWindowRef.current = null;
+      if (mpTabCheckRef.current !== null) {
+        clearInterval(mpTabCheckRef.current);
+        mpTabCheckRef.current = null;
+      }
+      setIsWaitingPayment(false);
+      setMpTabClosed(false);
+      setPreferenceId('');
+    };
+
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center p-4">
         <Card className="w-full max-w-md shadow-xl border-0 text-center">
           <CardContent className="pt-12 pb-10 px-8 flex flex-col items-center gap-6">
-            {/* Spinner animado */}
-            <div className="relative">
-              <div className="w-20 h-20 rounded-full border-4 border-indigo-100 border-t-indigo-500 animate-spin" />
-              <Wallet className="absolute inset-0 m-auto w-8 h-8 text-indigo-400" />
-            </div>
 
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                Esperando confirmación de pago...
-              </h2>
-              <p className="text-gray-500 text-sm">
-                Completá el pago en la pestaña de Mercado Pago que se abrió.
-                Esta pantalla se actualizará automáticamente.
-              </p>
-            </div>
+            {mpTabClosed ? (
+              // ── Pestaña de MP cerrada antes de completar el pago ──
+              <>
+                <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center">
+                  <svg className="w-10 h-10 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M12 3a9 9 0 110 18A9 9 0 0112 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">
+                    Cerraste la ventana de pago
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    El pago no fue completado. El turno <strong>no fue reservado</strong>.
+                    Podés iniciar el proceso nuevamente.
+                  </p>
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleCancelPayment}
+                >
+                  Volver al formulario
+                </Button>
+              </>
+            ) : (
+              // ── Esperando confirmación ──
+              <>
+                <div className="relative">
+                  <div className="w-20 h-20 rounded-full border-4 border-indigo-100 border-t-indigo-500 animate-spin" />
+                  <Wallet className="absolute inset-0 m-auto w-8 h-8 text-indigo-400" />
+                </div>
 
-            <div className="w-full rounded-lg bg-indigo-50 border border-indigo-200 px-4 py-3 text-sm text-indigo-700 text-left space-y-1">
-              <div className="flex justify-between">
-                <span className="font-medium">Servicio:</span>
-                <span>{servicioSeleccionado?.nombre}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-medium">Profesional:</span>
-                <span>{empleadoSeleccionado?.first_name} {empleadoSeleccionado?.last_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="font-medium">Fecha:</span>
-                <span>{fechaSeleccionada} · {horarioSeleccionado}hs</span>
-              </div>
-            </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                    Esperando confirmación de pago...
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    Completá el pago en la pestaña de Mercado Pago que se abrió.
+                    Esta pantalla se actualizará automáticamente.
+                  </p>
+                </div>
 
-            <p className="text-xs text-gray-400">
-              Verificando cada 3 segundos · No cerrés esta pestaña
-            </p>
+                <div className="w-full rounded-lg bg-indigo-50 border border-indigo-200 px-4 py-3 text-sm text-indigo-700 text-left space-y-1">
+                  <div className="flex justify-between">
+                    <span className="font-medium">Servicio:</span>
+                    <span>{servicioSeleccionado?.nombre}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Profesional:</span>
+                    <span>{empleadoSeleccionado?.first_name} {empleadoSeleccionado?.last_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Fecha:</span>
+                    <span>{fechaSeleccionada} · {horarioSeleccionado}hs</span>
+                  </div>
+                </div>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-gray-400 hover:text-gray-600"
-              onClick={() => {
-                setIsWaitingPayment(false);
-                setPreferenceId('');
-              }}
-            >
-              Cancelar y volver al formulario
-            </Button>
+                <p className="text-xs text-gray-400">
+                  Verificando cada 3 segundos · No cerrés esta pestaña
+                </p>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-400 hover:text-gray-600"
+                  onClick={handleCancelPayment}
+                >
+                  Cancelar y volver al formulario
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

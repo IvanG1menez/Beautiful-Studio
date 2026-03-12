@@ -11,7 +11,7 @@ django.setup()
 from django.db import transaction
 from apps.users.models import User
 from apps.empleados.models import Empleado, EmpleadoServicio
-from apps.clientes.models import Cliente, Billetera
+from apps.clientes.models import Cliente
 from apps.servicios.models import Sala, CategoriaServicio, Servicio
 
 
@@ -20,12 +20,15 @@ USUARIOS_BASE = [
     "propietario@beautifulstudio.com",
     "empleado1@beautifulstudio.com",
     "cliente1@beautifulstudio.com",
+    "cliente2@beautifulstudio.com",
+    "cliente3@beautifulstudio.com",
+    "cliente4@beautifulstudio.com",
 ]
 
 
 def crear_usuarios_base():
     """
-    Crea los 3 usuarios base del sistema: propietario, profesional y cliente
+    Crea los usuarios base del sistema: propietario, profesional y 4 clientes
     """
     with transaction.atomic():
         print("🔄 Creando usuarios base del sistema...\n")
@@ -76,14 +79,11 @@ def crear_usuarios_base():
                 "descripcion": "Corte de cabello profesional",
                 "categoria": categoria,
                 "precio": 5000.00,
-                "porcentaje_sena": 25.00,
                 "duracion_minutos": 60,
                 "is_active": True,
             },
         )
-        print(
-            f"  ✓ Servicio: {servicio.nombre} - ${servicio.precio} (Seña: {servicio.porcentaje_sena}%)"
-        )
+        print(f"  ✓ Servicio: {servicio.nombre} - ${servicio.precio}")
 
         # ==================== PROFESIONAL ====================
         print("\n👨‍💼 Creando usuario profesional...")
@@ -136,52 +136,90 @@ def crear_usuarios_base():
         else:
             print(f"  ⚠️  Servicio ya estaba asociado al profesional")
 
-        # ==================== CLIENTE ====================
-        print("\n👥 Creando usuario cliente...")
-        cliente_user, created = User.objects.get_or_create(
-            email="cliente1@beautifulstudio.com",
-            defaults={
+        # ==================== CLIENTES ====================
+        print("\n👥 Creando usuarios clientes...")
+
+        clientes_data = [
+            {
+                "email": "cliente1@beautifulstudio.com",
                 "username": "cliente1",
                 "first_name": "María",
                 "last_name": "González",
-                "role": "cliente",
                 "phone": "+54 11 3456-7890",
-                "is_active": True,
-            },
-        )
-        if created:
-            cliente_user.set_password("cliente123")
-            cliente_user.save()
-            print(f"  ✓ Usuario cliente creado: {cliente_user.email}")
-        else:
-            print(f"  ⚠️  Usuario cliente ya existe: {cliente_user.email}")
-
-        # Crear perfil Cliente
-        cliente, created = Cliente.objects.get_or_create(
-            user=cliente_user,
-            defaults={
                 "fecha_nacimiento": date(1990, 5, 15),
                 "direccion": "Av. Corrientes 1234, CABA",
                 "preferencias": "Prefiere turnos por la mañana",
                 "is_vip": False,
             },
-        )
-        if created:
-            print(f"  ✓ Perfil cliente creado para {cliente.nombre_completo}")
-        else:
-            print(f"  ⚠️  Perfil cliente ya existe para {cliente.nombre_completo}")
+            {
+                "email": "cliente2@beautifulstudio.com",
+                "username": "cliente2",
+                "first_name": "Juan",
+                "last_name": "Pérez",
+                "phone": "+54 11 4567-8901",
+                "fecha_nacimiento": date(1985, 8, 20),
+                "direccion": "Av. Santa Fe 2345, CABA",
+                "preferencias": "Prefiere turnos por la tarde",
+                "is_vip": False,
+            },
+            {
+                "email": "cliente3@beautifulstudio.com",
+                "username": "cliente3",
+                "first_name": "Laura",
+                "last_name": "Martínez",
+                "phone": "+54 11 5678-9012",
+                "fecha_nacimiento": date(1992, 3, 10),
+                "direccion": "Av. Cabildo 3456, CABA",
+                "preferencias": "Flexible con horarios",
+                "is_vip": True,
+            },
+            {
+                "email": "cliente4@beautifulstudio.com",
+                "username": "cliente4",
+                "first_name": "Carlos",
+                "last_name": "Fernández",
+                "phone": "+54 11 6789-0123",
+                "fecha_nacimiento": date(1988, 11, 25),
+                "direccion": "Av. Rivadavia 4567, CABA",
+                "preferencias": "Prefiere fines de semana",
+                "is_vip": False,
+            },
+        ]
 
-        # Crear billetera con saldo inicial
-        billetera, created = Billetera.objects.get_or_create(
-            cliente=cliente, defaults={"saldo": 1000.00}
-        )
-        if created:
-            print(f"  ✓ Billetera creada con saldo inicial de $1000.00")
-        else:
-            # Actualizar saldo a 1000 si ya existe
-            billetera.saldo = 1000.00
-            billetera.save()
-            print(f"  ⚠️  Billetera ya existe - Saldo actualizado a $1000.00")
+        for cliente_data in clientes_data:
+            # Crear usuario
+            cliente_user, created = User.objects.get_or_create(
+                email=cliente_data["email"],
+                defaults={
+                    "username": cliente_data["username"],
+                    "first_name": cliente_data["first_name"],
+                    "last_name": cliente_data["last_name"],
+                    "role": "cliente",
+                    "phone": cliente_data["phone"],
+                    "is_active": True,
+                },
+            )
+            if created:
+                cliente_user.set_password("cliente123")
+                cliente_user.save()
+                print(f"  ✓ Usuario cliente creado: {cliente_user.email}")
+            else:
+                print(f"  ⚠️  Usuario cliente ya existe: {cliente_user.email}")
+
+            # Crear perfil Cliente
+            cliente, created = Cliente.objects.get_or_create(
+                user=cliente_user,
+                defaults={
+                    "fecha_nacimiento": cliente_data["fecha_nacimiento"],
+                    "direccion": cliente_data["direccion"],
+                    "preferencias": cliente_data["preferencias"],
+                    "is_vip": cliente_data["is_vip"],
+                },
+            )
+            if created:
+                print(f"  ✓ Perfil cliente creado para {cliente.nombre_completo}")
+            else:
+                print(f"  ⚠️  Perfil cliente ya existe para {cliente.nombre_completo}")
 
         print("\n" + "=" * 60)
         print("✅ USUARIOS BASE CREADOS EXITOSAMENTE")
@@ -193,9 +231,11 @@ def crear_usuarios_base():
         print("\n🔑 PROFESIONAL:")
         print("   Email: empleado1@beautifulstudio.com")
         print("   Contraseña: empleado123")
-        print("\n🔑 CLIENTE:")
-        print("   Email: cliente1@beautifulstudio.com")
-        print("   Contraseña: cliente123")
+        print("\n🔑 CLIENTES (todos con contraseña: cliente123):")
+        print("   • cliente1@beautifulstudio.com - María González")
+        print("   • cliente2@beautifulstudio.com - Juan Pérez")
+        print("   • cliente3@beautifulstudio.com - Laura Martínez (VIP)")
+        print("   • cliente4@beautifulstudio.com - Carlos Fernández")
         print("\n" + "=" * 60)
 
 

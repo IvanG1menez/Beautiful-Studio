@@ -330,13 +330,13 @@ JET_THEMES = [
     {"theme": "light-gray", "color": "#222", "title": "Gris Oscuro"},
 ]
 
-# Looking to send emails in production? Check out our Email API/SMTP product!
+# settings.py modificado para Mailpit (Local)
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = config("EMAIL_HOST", default="sandbox.smtp.mailtrap.io")
-EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="3c21f5f8f8562d")
-EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="5cbeba3f934565")
-EMAIL_PORT = config("EMAIL_PORT", default=2525, cast=int)
-EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
+EMAIL_HOST = config("EMAIL_HOST", default="127.0.0.1")
+EMAIL_PORT = config("EMAIL_PORT", default=1025, cast=int)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=False, cast=bool)
 EMAIL_USE_SSL = config("EMAIL_USE_SSL", default=False, cast=bool)
 DEFAULT_FROM_EMAIL = config(
     "DEFAULT_FROM_EMAIL", default="Beautiful Studio <noreply@beautifulstudio.com>"

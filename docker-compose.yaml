@@ -39,6 +39,17 @@ services:
     depends_on:
       - postgres
 
+  # Servicio de envio de mail (opcional, para notificaciones)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: beautiful_studio_mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Interfaz web de Mailpit
+    networks:
+      - beautiful_studio_network
+
 volumes:
   postgres_data:
     driver: local

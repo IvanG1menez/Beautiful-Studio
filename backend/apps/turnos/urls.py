@@ -6,6 +6,7 @@ from . import views
 from . import views_historial
 from . import views_reportes
 from . import views_oportunidades
+from . import views_diagnostico
 
 router = DefaultRouter()
 router.register(r"", views.TurnoViewSet, basename="turno")
@@ -51,5 +52,16 @@ urlpatterns = [
         "oportunidades/<int:cliente_id>/invitar/",
         views_oportunidades.enviar_invitacion_reincorporacion,
         name="invitar-reincorporacion",
+    ),
+    # Herramientas de Diagnóstico
+    path(
+        "diagnostico/optimizacion-agenda/",
+        views_diagnostico.diagnostico_optimizacion_agenda,
+        name="diagnostico-optimizacion",
+    ),
+    path(
+        "diagnostico/fidelizacion-clientes/",
+        views_diagnostico.diagnostico_fidelizacion_clientes,
+        name="diagnostico-fidelizacion",
     ),
 ]

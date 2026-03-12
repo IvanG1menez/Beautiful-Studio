@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { formatTime } from '@/lib/dateUtils';
 import { Turno } from '@/types';
-import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, User, X } from 'lucide-react';
+import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
@@ -37,7 +37,7 @@ const ESTADO_LABELS: { [key: string]: string } = {
   en_proceso: 'En Proceso',
   completado: 'Completado',
   cancelado: 'Cancelado',
-  no_asistio: 'No AsistiÃ³',
+  no_asistio: 'No Asistio',
 };
 
 export default function AgendaEmpleadoPage() {
@@ -251,7 +251,7 @@ export default function AgendaEmpleadoPage() {
 
     return {
       valido: true,
-      mensaje: `⏰ Aún no es la hora del turno (${horarioTurno}). Faltan ${minutosRestantes} minutos. ¿Estás seguro de querer finalizarlo ahora?`,
+      mensaje: `Aun no es la hora del turno (${horarioTurno}). Faltan ${minutosRestantes} minutos. ¿Deseas finalizarlo ahora?`,
       esAdvertencia: true
     };
   };
@@ -366,16 +366,85 @@ export default function AgendaEmpleadoPage() {
     return `${dias[date.getDay()]}, ${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`;
   };
 
+  const getTurnoDuracion = (turno: Turno): number => {
+    const raw = (turno as any).servicio_duracion || turno.servicio?.duracion_minutos || 0;
+    if (typeof raw === 'string') {
+      const match = raw.match(/\d+/);
+      return match ? Number(match[0]) : 0;
+    }
+    return Number(raw) || 0;
+  };
+
+  const getTurnoInicio = (turno: Turno): Date => new Date(turno.fecha_hora);
+
+  const getTurnoFin = (turno: Turno): Date => {
+    const inicio = getTurnoInicio(turno);
+    const duracion = getTurnoDuracion(turno);
+    return new Date(inicio.getTime() + duracion * 60000);
+  };
+
+  const formatGap = (minutes: number): string => {
+    if (minutes <= 0) return '0 min';
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours > 0) {
+      return `${hours} h ${mins} min`;
+    }
+    return `${mins} min`;
+  };
+
+  const turnosOrdenados = [...turnosFiltrados].sort(
+    (a, b) => getTurnoInicio(a).getTime() - getTurnoInicio(b).getTime()
+  );
+
+  const proximosTurnos = turnosOrdenados.filter((turno) => {
+    const estado = turno.estado.toLowerCase();
+    return !['cancelado', 'no_asistio', 'completado'].includes(estado);
+  });
+
+  const proximoTurnoId = proximosTurnos.find((turno) => getTurnoInicio(turno) > new Date())?.id;
+
+  const bloquesAgenda = (() => {
+    if (turnosOrdenados.length === 0) return [] as Array<{ tipo: 'ocupado' | 'libre'; inicio: Date; fin: Date; turno?: Turno; gapMin?: number }>;
+    const bloques: Array<{ tipo: 'ocupado' | 'libre'; inicio: Date; fin: Date; turno?: Turno; gapMin?: number }> = [];
+    for (let i = 0; i < turnosOrdenados.length; i++) {
+      const turno = turnosOrdenados[i];
+      const inicio = getTurnoInicio(turno);
+      const fin = getTurnoFin(turno);
+      bloques.push({ tipo: 'ocupado', inicio, fin, turno });
+      const siguiente = turnosOrdenados[i + 1];
+      if (siguiente) {
+        const siguienteInicio = getTurnoInicio(siguiente);
+        const gapMin = Math.max(0, Math.round((siguienteInicio.getTime() - fin.getTime()) / 60000));
+        if (gapMin > 0) {
+          bloques.push({ tipo: 'libre', inicio: fin, fin: siguienteInicio, gapMin });
+        }
+      }
+    }
+    return bloques;
+  })();
+
   // Formatear hora
   // Formatear hora (convertir de UTC a hora local)
   return (
     <div className="container mx-auto p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Mi Agenda</h1>
-        <p className="text-gray-600 mt-1">
-          Gestiona tus turnos y citas del día
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Mi Agenda</h1>
+            <p className="text-gray-600 mt-1">
+              Gestiona tus turnos y citas del dia
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => window.print()}
+          >
+            <Printer className="w-4 h-4 mr-2" />
+            Imprimir agenda
+          </Button>
+        </div>
       </div>
 
       {/* Selector de fecha */}
@@ -493,11 +562,62 @@ export default function AgendaEmpleadoPage() {
               </Button>
             </div>
           ) : turnosFiltrados.length > 0 ? (
-            <div className="space-y-4">
-              {turnosFiltrados.map((turno) => (
+            <div className="space-y-6">
+              {/* Bloques de tiempo */}
+              <div className="rounded-lg border bg-white">
+                <div className="border-b px-4 py-3">
+                  <h3 className="text-sm font-semibold text-gray-900">Bloques del dia</h3>
+                  <p className="text-xs text-gray-500">Vista rapida de espacios ocupados y libres</p>
+                </div>
+                <div className="divide-y">
+                  {bloquesAgenda.map((bloque, index) => {
+                    if (bloque.tipo === 'ocupado' && bloque.turno) {
+                      return (
+                        <div key={`bloque-${index}`} className="flex items-center justify-between px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="h-2 w-2 rounded-full bg-blue-600" />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">
+                                {formatTime(bloque.inicio.toISOString())} - {formatTime(bloque.fin.toISOString())}
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                {(bloque.turno as any).servicio_nombre || bloque.turno.servicio?.nombre || 'Servicio'}
+                              </p>
+                            </div>
+                          </div>
+                          <Badge className={ESTADO_COLORS[bloque.turno.estado]}>
+                            {ESTADO_LABELS[bloque.turno.estado]}
+                          </Badge>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={`bloque-${index}`} className="flex items-center justify-between px-4 py-3 bg-gray-50">
+                        <div className="flex items-center gap-3">
+                          <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">
+                              Libre: {formatTime(bloque.inicio.toISOString())} - {formatTime(bloque.fin.toISOString())}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              Intervalo disponible: {formatGap(bloque.gapMin || 0)}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-emerald-700 border-emerald-200">
+                          Disponible
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {turnosOrdenados.map((turno, index) => (
                 <div
                   key={turno.id}
-                  className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                  className={`border rounded-lg p-4 hover:bg-gray-50 transition-colors ${turno.id === proximoTurnoId ? 'border-blue-400 bg-blue-50/40' : ''}`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -507,6 +627,15 @@ export default function AgendaEmpleadoPage() {
                         <Badge className={ESTADO_COLORS[turno.estado]}>
                           {ESTADO_LABELS[turno.estado]}
                         </Badge>
+                        <Badge variant="outline" className="text-gray-700">
+                          {getTurnoDuracion(turno)} min
+                        </Badge>
+                        {turno.id === proximoTurnoId && (
+                          <span className="flex items-center text-xs text-blue-700 font-semibold">
+                            <Sparkles className="w-3 h-3 mr-1" />
+                            Proxima cita
+                          </span>
+                        )}
                       </div>
 
                       <div className="ml-8 space-y-2">
@@ -559,19 +688,19 @@ export default function AgendaEmpleadoPage() {
                           <div className="flex items-start gap-2">
                             <span className={`font-semibold ${turno.notas_cliente ? 'text-blue-900' : 'text-gray-600'
                               }`}>
-                              💬 Nota del cliente:
+                              Nota del cliente:
                             </span>
                           </div>
                           {turno.notas_cliente ? (
                             <p className="mt-1 text-gray-800 whitespace-pre-wrap">{turno.notas_cliente}</p>
                           ) : (
-                            <p className="mt-1 text-gray-500 italic">No se encontró nota adicional</p>
+                            <p className="mt-1 text-gray-500 italic">Sin notas registradas</p>
                           )}
                         </div>
 
                         {turno.notas_empleado && (
                           <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 p-3 rounded-lg">
-                            <span className="font-semibold text-purple-900">📝 Mis notas:</span>
+                            <span className="font-semibold text-purple-900">Notas internas:</span>
                             <p className="mt-1 whitespace-pre-wrap">{turno.notas_empleado}</p>
                           </div>
                         )}
@@ -666,7 +795,18 @@ export default function AgendaEmpleadoPage() {
                       )}
                     </div>
                   </div>
-                </div>
+                {index < turnosOrdenados.length - 1 && (() => {
+                  const finActual = getTurnoFin(turno);
+                  const inicioSiguiente = getTurnoInicio(turnosOrdenados[index + 1]);
+                  const gapMin = Math.round((inicioSiguiente.getTime() - finActual.getTime()) / 60000);
+                  if (gapMin <= 0) return null;
+                  return (
+                    <div className="mt-4 ml-8 text-xs text-emerald-700">
+                      Intervalo libre hasta el siguiente turno: {formatGap(gapMin)}
+                    </div>
+                  );
+                })()}
+              </div>
               ))}
             </div>
           ) : (
@@ -712,7 +852,7 @@ export default function AgendaEmpleadoPage() {
                     <>
                       <SelectItem value="en_proceso">En Proceso</SelectItem>
                       <SelectItem value="cancelado">Cancelado</SelectItem>
-                      <SelectItem value="no_asistio">No AsistiÃ³</SelectItem>
+                      <SelectItem value="no_asistio">No Asistio</SelectItem>
                     </>
                   )}
                   {turnoActual?.estado === 'en_proceso' && (

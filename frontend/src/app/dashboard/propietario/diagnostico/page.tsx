@@ -1,0 +1,451 @@
+'use client';
+
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { AlertCircle, CheckCircle2, Info, Loader2, Play, XCircle } from 'lucide-react';
+import { useState } from 'react';
+
+interface LogEntry {
+  paso: number;
+  accion: string;
+  resultado: 'exitoso' | 'no_aplica' | 'error';
+  detalle: string;
+}
+
+interface ResultadoOptimizacion {
+  turno_id: number;
+  turno_info: {
+    servicio: string;
+    cliente: string;
+    empleado: string;
+    fecha_hora: string;
+    precio: number;
+  };
+  logs: LogEntry[];
+  credito_aplicado: boolean;
+  monto_credito: number;
+  proceso_2?: {
+    status: string;
+    turno_candidato_id?: number;
+    cliente_contactado?: string;
+    motivo?: string;
+  };
+}
+
+interface ClienteCandidato {
+  cliente_id: number;
+  nombre: string;
+  email: string;
+  dias_sin_turno: number;
+  umbral_usado: number;
+  servicio_propuesto?: {
+    id: number;
+    nombre: string;
+    precio_original: number;
+    precio_con_descuento: number;
+  };
+  email_enviado: boolean;
+  email_status: 'exitoso' | 'error' | 'simulado';
+  email_error?: string;
+}
+
+interface ResultadoFidelizacion {
+  mensaje: string;
+  configuracion: {
+    dias_inactividad_filtro: number | null;
+    usa_filtro_manual: boolean;
+    margen_global: number;
+    descuento_fidelizacion_pct: number;
+    enviar_emails: boolean;
+  };
+  resumen: {
+    total_candidatos: number;
+    emails_enviados: number;
+    emails_fallidos: number;
+    emails_simulados: number;
+  };
+  resultados: ClienteCandidato[];
+}
+
+export default function DiagnosticoPage() {
+  const [loadingOptimizacion, setLoadingOptimizacion] = useState(false);
+  const [loadingFidelizacion, setLoadingFidelizacion] = useState(false);
+
+  // Estado para Optimización
+  const [turnoId, setTurnoId] = useState('');
+  const [resultadoOptimizacion, setResultadoOptimizacion] = useState<ResultadoOptimizacion | null>(null);
+  const [errorOptimizacion, setErrorOptimizacion] = useState<string>('');
+
+  // Estado para Fidelización
+  const [diasInactividad, setDiasInactividad] = useState('');
+  const [enviarEmails, setEnviarEmails] = useState(false);
+  const [resultadoFidelizacion, setResultadoFidelizacion] = useState<ResultadoFidelizacion | null>(null);
+  const [errorFidelizacion, setErrorFidelizacion] = useState<string>('');
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('auth_token');
+    return {
+      'Content-Type': 'application/json',
+      Authorization: token ? `Token ${token}` : '',
+    };
+  };
+
+  const handleOptimizacion = async () => {
+    if (!turnoId) {
+      setErrorOptimizacion('Por favor ingresa un ID de turno');
+      return;
+    }
+
+    setLoadingOptimizacion(true);
+    setErrorOptimizacion('');
+    setResultadoOptimizacion(null);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/turnos/diagnostico/optimizacion-agenda/', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ turno_id: parseInt(turnoId) }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setResultadoOptimizacion(data);
+      } else {
+        setErrorOptimizacion(data.error || 'Error al ejecutar optimización');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorOptimizacion('Error de conexión con el servidor');
+    } finally {
+      setLoadingOptimizacion(false);
+    }
+  };
+
+  const handleFidelizacion = async () => {
+    setLoadingFidelizacion(true);
+    setErrorFidelizacion('');
+    setResultadoFidelizacion(null);
+
+    try {
+      const body: any = {
+        enviar_emails: enviarEmails,
+      };
+
+      if (diasInactividad) {
+        body.dias_inactividad = parseInt(diasInactividad);
+      }
+
+      const response = await fetch('http://localhost:8000/api/turnos/diagnostico/fidelizacion-clientes/', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setResultadoFidelizacion(data);
+      } else {
+        setErrorFidelizacion(data.error || 'Error al ejecutar fidelización');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorFidelizacion('Error de conexión con el servidor');
+    } finally {
+      setLoadingFidelizacion(false);
+    }
+  };
+
+  const getResultadoIcon = (resultado: string) => {
+    switch (resultado) {
+      case 'exitoso':
+        return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+      case 'no_aplica':
+        return <Info className="h-5 w-5 text-blue-600" />;
+      case 'error':
+        return <XCircle className="h-5 w-5 text-red-600" />;
+      default:
+        return <Info className="h-5 w-5 text-gray-600" />;
+    }
+  };
+
+  return (
+    <div className="container mx-auto py-6 max-w-7xl">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Herramientas de Diagnóstico</h1>
+        <p className="text-muted-foreground">
+          Ejecuta manualmente los procesos automáticos para testing y diagnóstico
+        </p>
+      </div>
+
+      <Alert className="mb-6">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Importante</AlertTitle>
+        <AlertDescription>
+          Estas herramientas son solo para testing y diagnóstico. Los cambios que realices aquí son reales
+          y afectarán la base de datos (cancelaciones, créditos, emails enviados).
+        </AlertDescription>
+      </Alert>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* OPTIMIZACIÓN DE AGENDA */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Proceso 2: Optimización de Agenda</CardTitle>
+              <CardDescription>
+                Simula la cancelación de un turno y el proceso de rellenar el hueco
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="turno_id">ID del Turno a Cancelar</Label>
+                <Input
+                  id="turno_id"
+                  type="number"
+                  placeholder="Ej: 123"
+                  value={turnoId}
+                  onChange={(e) => setTurnoId(e.target.value)}
+                  disabled={loadingOptimizacion}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Este turno será cancelado y se intentará rellenar el hueco con otro cliente
+                </p>
+              </div>
+
+              <Button
+                onClick={handleOptimizacion}
+                disabled={loadingOptimizacion || !turnoId}
+                className="w-full"
+              >
+                {loadingOptimizacion ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Ejecutando...
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Gatillar Optimización de Agenda
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Resultados Optimización */}
+          {errorOptimizacion && (
+            <Alert variant="destructive">
+              <XCircle className="h-4 w-4" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{errorOptimizacion}</AlertDescription>
+            </Alert>
+          )}
+
+          {resultadoOptimizacion && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Resultados - Turno #{resultadoOptimizacion.turno_id}</CardTitle>
+                <CardDescription>
+                  {resultadoOptimizacion.turno_info.servicio} - {resultadoOptimizacion.turno_info.cliente}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Logs */}
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-sm">Logs de Ejecución</h3>
+                  {resultadoOptimizacion.logs.map((log, index) => (
+                    <div key={index} className="flex items-start gap-3 p-3 rounded-lg bg-muted">
+                      {getResultadoIcon(log.resultado)}
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">
+                          Paso {log.paso}: {log.accion}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{log.detalle}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Resumen */}
+                <div className="border-t pt-4 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Crédito aplicado:</span>
+                    <span className="font-medium">
+                      {resultadoOptimizacion.credito_aplicado ? 'Sí' : 'No'}
+                    </span>
+                  </div>
+                  {resultadoOptimizacion.credito_aplicado && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Monto acreditado:</span>
+                      <span className="font-medium">${resultadoOptimizacion.monto_credito}</span>
+                    </div>
+                  )}
+                  {resultadoOptimizacion.proceso_2 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Estado Proceso 2:</span>
+                      <span className="font-medium">
+                        {resultadoOptimizacion.proceso_2.status === 'propuesta_enviada'
+                          ? `Propuesta enviada a ${resultadoOptimizacion.proceso_2.cliente_contactado}`
+                          : resultadoOptimizacion.proceso_2.motivo}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* FIDELIZACIÓN DE CLIENTES */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Proceso 1: Fidelización de Clientes</CardTitle>
+              <CardDescription>
+                Identifica clientes inactivos y envía ofertas de regreso
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="dias_inactividad">Días de Inactividad (opcional)</Label>
+                <Input
+                  id="dias_inactividad"
+                  type="number"
+                  placeholder="Ej: 60"
+                  value={diasInactividad}
+                  onChange={(e) => setDiasInactividad(e.target.value)}
+                  disabled={loadingFidelizacion}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Deja vacío para usar la lógica automática (servicio → global)
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label htmlFor="enviar_emails">Enviar emails reales</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Si está desactivado, solo simula el envío
+                  </p>
+                </div>
+                <Switch
+                  id="enviar_emails"
+                  checked={enviarEmails}
+                  onCheckedChange={setEnviarEmails}
+                  disabled={loadingFidelizacion}
+                />
+              </div>
+
+              <Button
+                onClick={handleFidelizacion}
+                disabled={loadingFidelizacion}
+                className="w-full"
+              >
+                {loadingFidelizacion ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Ejecutando...
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Gatillar Fidelización de Clientes
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Resultados Fidelización */}
+          {errorFidelizacion && (
+            <Alert variant="destructive">
+              <XCircle className="h-4 w-4" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{errorFidelizacion}</AlertDescription>
+            </Alert>
+          )}
+
+          {resultadoFidelizacion && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Resultados de Fidelización</CardTitle>
+                <CardDescription>{resultadoFidelizacion.mensaje}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Resumen */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+                    <p className="text-2xl font-bold text-blue-700">
+                      {resultadoFidelizacion.resumen.total_candidatos}
+                    </p>
+                    <p className="text-sm text-blue-600">Candidatos identificados</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-green-50 border border-green-200">
+                    <p className="text-2xl font-bold text-green-700">
+                      {resultadoFidelizacion.resumen.emails_enviados}
+                    </p>
+                    <p className="text-sm text-green-600">Emails enviados</p>
+                  </div>
+                </div>
+
+                {resultadoFidelizacion.resumen.emails_simulados > 0 && (
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertTitle>Modo Simulación</AlertTitle>
+                    <AlertDescription>
+                      Se simuló el envío de {resultadoFidelizacion.resumen.emails_simulados} emails.
+                      Activa "Enviar emails reales" para enviar los emails.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Lista de Candidatos */}
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-sm">Clientes Candidatos</h3>
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {resultadoFidelizacion.resultados.map((cliente, index) => (
+                      <div key={index} className="p-3 rounded-lg border bg-card">
+                        <div className="flex items-start justify-between">
+                          <div className="space-y-1">
+                            <p className="font-medium">{cliente.nombre}</p>
+                            <p className="text-sm text-muted-foreground">{cliente.email}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {cliente.dias_sin_turno} días sin turno (umbral: {cliente.umbral_usado} días)
+                            </p>
+                            {cliente.servicio_propuesto && (
+                              <p className="text-xs text-blue-600">
+                                {cliente.servicio_propuesto.nombre} - $
+                                {cliente.servicio_propuesto.precio_con_descuento.toFixed(2)} (desc.)
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {cliente.email_status === 'exitoso' && (
+                              <CheckCircle2 className="h-5 w-5 text-green-600" />
+                            )}
+                            {cliente.email_status === 'simulado' && (
+                              <Info className="h-5 w-5 text-blue-600" />
+                            )}
+                            {cliente.email_status === 'error' && (
+                              <XCircle className="h-5 w-5 text-red-600" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

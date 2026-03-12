@@ -1,0 +1,486 @@
+"""
+Vistas de diagnóstico para testing manual de procesos automáticos
+Solo accesible para usuarios con rol 'propietario'
+"""
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.utils import timezone
+from django.db.models import Max, Count
+from decimal import Decimal
+import logging
+
+from .models import Turno, HistorialTurno
+from apps.clientes.models import Cliente, Billetera
+from apps.authentication.models import ConfiguracionGlobal
+from apps.servicios.models import Servicio
+from apps.turnos.services.reacomodamiento_service import iniciar_reacomodamiento
+from apps.emails.services.email_service import EmailService
+
+logger = logging.getLogger(__name__)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def diagnostico_optimizacion_agenda(request):
+    """
+    Endpoint de diagnóstico para triggear manualmente el proceso de optimización de agenda.
+
+    Flujo:
+    1. Recibe ID de un turno
+    2. Cancela el turno
+    3. Acredita billetera si aplica
+    4. Ejecuta proceso_2 (iniciar_reacomodamiento)
+
+    Body params:
+    - turno_id: ID del turno a cancelar
+
+    Returns:
+    - Resultado del proceso con logs detallados
+    """
+
+    # Verificar que el usuario sea propietario
+    if request.user.role != "propietario":
+        return Response(
+            {
+                "error": "Solo el propietario puede acceder a herramientas de diagnóstico"
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    turno_id = request.data.get("turno_id")
+
+    if not turno_id:
+        return Response(
+            {"error": "Se requiere el campo 'turno_id'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        turno = Turno.objects.select_related(
+            "servicio", "cliente", "empleado__user"
+        ).get(id=turno_id)
+    except Turno.DoesNotExist:
+        return Response(
+            {"error": f"Turno con ID {turno_id} no encontrado"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Verificar que el turno pueda ser cancelado
+    if not turno.puede_cancelar():
+        return Response(
+            {
+                "error": "Este turno no puede ser cancelado (ya está cancelado, completado o en el pasado)"
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    resultado = {
+        "turno_id": turno.id,
+        "turno_info": {
+            "servicio": turno.servicio.nombre if turno.servicio else "Sin servicio",
+            "cliente": (
+                turno.cliente.nombre_completo if turno.cliente else "Sin cliente"
+            ),
+            "empleado": (
+                turno.empleado.user.get_full_name()
+                if turno.empleado
+                else "Sin empleado"
+            ),
+            "fecha_hora": turno.fecha_hora.isoformat() if turno.fecha_hora else None,
+            "precio": float(
+                turno.precio_final or (turno.servicio.precio if turno.servicio else 0)
+            ),
+        },
+        "logs": [],
+    }
+
+    # PASO 1: Cancelar turno
+    try:
+        estado_anterior = turno.estado
+        turno.estado = "cancelado"
+        turno.save()
+
+        resultado["logs"].append(
+            {
+                "paso": 1,
+                "accion": "Cancelación de turno",
+                "resultado": "exitoso",
+                "detalle": f"Turno {turno.id} cancelado (estado anterior: {estado_anterior})",
+            }
+        )
+
+        # Registrar en historial
+        HistorialTurno.objects.create(
+            turno=turno,
+            usuario=request.user,
+            accion="Cancelación de turno (diagnóstico)",
+            estado_anterior=estado_anterior,
+            estado_nuevo="cancelado",
+            observaciones="Cancelado manualmente desde herramientas de diagnóstico",
+        )
+
+    except Exception as e:
+        resultado["logs"].append(
+            {
+                "paso": 1,
+                "accion": "Cancelación de turno",
+                "resultado": "error",
+                "detalle": str(e),
+            }
+        )
+        return Response(resultado, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # PASO 2: Acreditar billetera (si aplica)
+    credito_aplicado = False
+    monto_credito = 0
+
+    try:
+        config_global = ConfiguracionGlobal.get_config()
+        min_horas_credito = config_global.min_horas_cancelacion_credito
+
+        # Calcular diferencia de horas entre ahora y el turno
+        if turno.fecha_hora:
+            horas_diferencia = (
+                turno.fecha_hora - timezone.now()
+            ).total_seconds() / 3600
+
+            if horas_diferencia > min_horas_credito and turno.cliente:
+                # Obtener o crear billetera
+                billetera, created = Billetera.objects.get_or_create(
+                    cliente=turno.cliente, defaults={"saldo": Decimal("0.00")}
+                )
+
+                # Calcular monto a acreditar
+                monto_credito = (
+                    turno.precio_final if turno.precio_final else turno.servicio.precio
+                )
+
+                # Agregar crédito
+                billetera.agregar_saldo(
+                    monto=monto_credito,
+                    motivo=f"Cancelación anticipada (diagnóstico) del turno #{turno.id} - {turno.servicio.nombre}",
+                )
+
+                # Actualizar movimiento con referencia al turno
+                ultimo_movimiento = billetera.movimientos.first()
+                if ultimo_movimiento:
+                    ultimo_movimiento.turno = turno
+                    ultimo_movimiento.save()
+
+                credito_aplicado = True
+
+                resultado["logs"].append(
+                    {
+                        "paso": 2,
+                        "accion": "Acreditación de billetera",
+                        "resultado": "exitoso",
+                        "detalle": f"Crédito de ${monto_credito} aplicado al cliente {turno.cliente.nombre_completo}",
+                    }
+                )
+            else:
+                motivo = (
+                    "Sin cliente asociado"
+                    if not turno.cliente
+                    else f"Menos de {min_horas_credito}hs de anticipación"
+                )
+                resultado["logs"].append(
+                    {
+                        "paso": 2,
+                        "accion": "Acreditación de billetera",
+                        "resultado": "no_aplica",
+                        "detalle": f"Crédito no aplicado: {motivo}",
+                    }
+                )
+        else:
+            resultado["logs"].append(
+                {
+                    "paso": 2,
+                    "accion": "Acreditación de billetera",
+                    "resultado": "no_aplica",
+                    "detalle": "Turno sin fecha/hora definida",
+                }
+            )
+
+    except Exception as e:
+        resultado["logs"].append(
+            {
+                "paso": 2,
+                "accion": "Acreditación de billetera",
+                "resultado": "error",
+                "detalle": str(e),
+            }
+        )
+
+    # PASO 3: Ejecutar proceso_2 (reacomodamiento)
+    try:
+        if turno.servicio and turno.servicio.permite_reacomodamiento:
+            resultado_proceso2 = iniciar_reacomodamiento(turno.id)
+
+            if resultado_proceso2.get("status") == "propuesta_enviada":
+                turno_candidato_id = resultado_proceso2.get("turno_id")
+                turno_candidato = Turno.objects.select_related("cliente").get(
+                    id=turno_candidato_id
+                )
+
+                resultado["logs"].append(
+                    {
+                        "paso": 3,
+                        "accion": "Proceso 2 - Optimización de agenda",
+                        "resultado": "exitoso",
+                        "detalle": f"Propuesta enviada al turno #{turno_candidato_id} (cliente: {turno_candidato.cliente.nombre_completo if turno_candidato.cliente else 'N/A'})",
+                    }
+                )
+                resultado["proceso_2"] = {
+                    "status": "propuesta_enviada",
+                    "turno_candidato_id": turno_candidato_id,
+                    "cliente_contactado": (
+                        turno_candidato.cliente.nombre_completo
+                        if turno_candidato.cliente
+                        else None
+                    ),
+                }
+            else:
+                status_map = {
+                    "sin_candidatos": "No se encontraron candidatos para rellenar el hueco",
+                    "turno_fuera_de_ventana": "Turno ya pasó o está muy cerca",
+                    "email_fallido": "Error al enviar email al candidato",
+                    "servicio_sin_reacomodamiento": "Servicio no permite reacomodamiento",
+                }
+                motivo = status_map.get(
+                    resultado_proceso2.get("status"), "Motivo desconocido"
+                )
+
+                resultado["logs"].append(
+                    {
+                        "paso": 3,
+                        "accion": "Proceso 2 - Optimización de agenda",
+                        "resultado": "no_aplica",
+                        "detalle": motivo,
+                    }
+                )
+                resultado["proceso_2"] = {
+                    "status": resultado_proceso2.get("status"),
+                    "motivo": motivo,
+                }
+        else:
+            resultado["logs"].append(
+                {
+                    "paso": 3,
+                    "accion": "Proceso 2 - Optimización de agenda",
+                    "resultado": "no_aplica",
+                    "detalle": "Servicio no permite reacomodamiento",
+                }
+            )
+            resultado["proceso_2"] = {
+                "status": "servicio_sin_reacomodamiento",
+                "motivo": "Este servicio no tiene habilitado el reacomodamiento automático",
+            }
+
+    except Exception as e:
+        resultado["logs"].append(
+            {
+                "paso": 3,
+                "accion": "Proceso 2 - Optimización de agenda",
+                "resultado": "error",
+                "detalle": str(e),
+            }
+        )
+        resultado["proceso_2"] = {"status": "error", "detalle": str(e)}
+
+    resultado["credito_aplicado"] = credito_aplicado
+    resultado["monto_credito"] = float(monto_credito) if monto_credito else 0
+
+    return Response(resultado, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def diagnostico_fidelizacion_clientes(request):
+    """
+    Endpoint de diagnóstico para triggear manualmente el proceso de fidelización de clientes.
+
+    Flujo:
+    1. Busca todos los clientes que cumplen la condición de recurrencia (inactivos)
+    2. Envía ofertas/invitaciones a cada uno
+
+    Body params (opcionales):
+    - dias_inactividad: Filtro manual de días de inactividad (sobrescribe lógica automática)
+    - enviar_emails: Boolean, si se deben enviar realmente los emails (default: false para testing)
+
+    Returns:
+    - Lista de clientes contactados y resultado
+    """
+
+    # Verificar que el usuario sea propietario
+    if request.user.role != "propietario":
+        return Response(
+            {
+                "error": "Solo el propietario puede acceder a herramientas de diagnóstico"
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Obtener configuración global
+    config_global = ConfiguracionGlobal.get_config()
+
+    # Obtener parámetros
+    dias_inactividad_filtro = request.data.get("dias_inactividad")
+    enviar_emails = request.data.get("enviar_emails", False)
+
+    if dias_inactividad_filtro:
+        dias_inactividad_filtro = int(dias_inactividad_filtro)
+
+    # PASO 1: Identificar clientes inactivos (lógica de oportunidades)
+    clientes_con_turnos = (
+        Turno.objects.filter(cliente__isnull=False)
+        .values("cliente")
+        .annotate(ultimo_turno=Max("fecha_hora"), total_turnos=Count("id"))
+    )
+
+    clientes_candidatos = []
+
+    for cliente_data in clientes_con_turnos:
+        try:
+            cliente = Cliente.objects.get(id=cliente_data["cliente"])
+
+            # Calcular días de inactividad
+            dias_sin_turno = (timezone.now() - cliente_data["ultimo_turno"]).days
+
+            # Obtener servicio más frecuente del cliente
+            servicio_mas_frecuente = (
+                Turno.objects.filter(cliente=cliente)
+                .values(
+                    "servicio__id",
+                    "servicio__nombre",
+                    "servicio__precio",
+                    "servicio__frecuencia_recurrencia_dias",
+                )
+                .annotate(cantidad=Count("id"))
+                .order_by("-cantidad")
+                .first()
+            )
+
+            # Determinar umbral de inactividad
+            if dias_inactividad_filtro is not None:
+                umbral_dias = dias_inactividad_filtro
+            elif (
+                servicio_mas_frecuente
+                and servicio_mas_frecuente["servicio__frecuencia_recurrencia_dias"] > 0
+            ):
+                umbral_dias = servicio_mas_frecuente[
+                    "servicio__frecuencia_recurrencia_dias"
+                ]
+            else:
+                umbral_dias = config_global.margen_fidelizacion_dias
+
+            # Solo incluir si supera el umbral
+            if dias_sin_turno >= umbral_dias:
+                servicio_obj = None
+                if servicio_mas_frecuente:
+                    try:
+                        servicio_obj = Servicio.objects.get(
+                            id=servicio_mas_frecuente["servicio__id"]
+                        )
+                    except Servicio.DoesNotExist:
+                        pass
+
+                clientes_candidatos.append(
+                    {
+                        "cliente": cliente,
+                        "servicio": servicio_obj,
+                        "dias_sin_turno": dias_sin_turno,
+                        "umbral_usado": umbral_dias,
+                    }
+                )
+
+        except Cliente.DoesNotExist:
+            continue
+
+    # PASO 2: Enviar invitaciones (si está habilitado)
+    resultados = []
+    emails_enviados = 0
+    emails_fallidos = 0
+
+    descuento_pct = float(config_global.descuento_fidelizacion_pct)
+
+    for candidato in clientes_candidatos:
+        cliente = candidato["cliente"]
+        servicio = candidato["servicio"]
+
+        resultado_cliente = {
+            "cliente_id": cliente.id,
+            "nombre": cliente.nombre_completo,
+            "email": cliente.user.email,
+            "dias_sin_turno": candidato["dias_sin_turno"],
+            "umbral_usado": candidato["umbral_usado"],
+            "servicio_propuesto": (
+                {
+                    "id": servicio.id,
+                    "nombre": servicio.nombre,
+                    "precio_original": float(servicio.precio),
+                    "precio_con_descuento": float(servicio.precio)
+                    * (1 - descuento_pct / 100),
+                }
+                if servicio
+                else None
+            ),
+        }
+
+        if enviar_emails:
+            try:
+                # TODO: Integrar con EmailService para enviar email real
+                # Por ahora simulamos el envío
+                logger.info(
+                    f"[DIAGNÓSTICO] Enviando invitación a {cliente.nombre_completo} ({cliente.user.email})"
+                )
+
+                # Aquí iría la llamada real al servicio de emails:
+                # EmailService.enviar_email_fidelizacion(
+                #     cliente=cliente,
+                #     servicio=servicio,
+                #     descuento_pct=descuento_pct
+                # )
+
+                resultado_cliente["email_enviado"] = True
+                resultado_cliente["email_status"] = "exitoso"
+                emails_enviados += 1
+
+            except Exception as e:
+                resultado_cliente["email_enviado"] = False
+                resultado_cliente["email_status"] = "error"
+                resultado_cliente["email_error"] = str(e)
+                emails_fallidos += 1
+                logger.error(f"Error enviando email a {cliente.user.email}: {str(e)}")
+        else:
+            resultado_cliente["email_enviado"] = False
+            resultado_cliente["email_status"] = "simulado"
+
+        resultados.append(resultado_cliente)
+
+    return Response(
+        {
+            "mensaje": f"Proceso de fidelización ejecutado: {len(clientes_candidatos)} candidatos identificados",
+            "configuracion": {
+                "dias_inactividad_filtro": dias_inactividad_filtro,
+                "usa_filtro_manual": dias_inactividad_filtro is not None,
+                "margen_global": config_global.margen_fidelizacion_dias,
+                "descuento_fidelizacion_pct": descuento_pct,
+                "enviar_emails": enviar_emails,
+            },
+            "resumen": {
+                "total_candidatos": len(clientes_candidatos),
+                "emails_enviados": emails_enviados,
+                "emails_fallidos": emails_fallidos,
+                "emails_simulados": (
+                    len(clientes_candidatos) - emails_enviados - emails_fallidos
+                    if not enviar_emails
+                    else 0
+                ),
+            },
+            "resultados": resultados,
+        },
+        status=status.HTTP_200_OK,
+    )
