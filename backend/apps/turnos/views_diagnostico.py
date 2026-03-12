@@ -12,11 +12,12 @@ from django.db.models import Max, Count
 from decimal import Decimal
 import logging
 
-from .models import Turno, HistorialTurno
+from .models import Turno, HistorialTurno, LogReasignacion
 from apps.clientes.models import Cliente, Billetera
 from apps.authentication.models import ConfiguracionGlobal
 from apps.servicios.models import Servicio
 from apps.turnos.services.reacomodamiento_service import iniciar_reacomodamiento
+from apps.turnos.services.reasignacion_service import expirar_oferta_reasignacion
 from apps.emails.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
@@ -484,3 +485,181 @@ def diagnostico_fidelizacion_clientes(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def diagnostico_simular_no_respuesta(request):
+    """
+    Endpoint de diagnóstico para simular que un cliente NO respondió a una oferta de reacomodamiento.
+    Fuerza la expiración inmediata de la oferta y pasa al siguiente candidato.
+
+    Body params:
+    - turno_id: ID del turno que tiene una oferta pendiente
+
+    Returns:
+    - Resultado del proceso con logs detallados
+    """
+
+    # Verificar que el usuario sea propietario
+    if request.user.role != "propietario":
+        return Response(
+            {
+                "error": "Solo el propietario puede acceder a herramientas de diagnóstico"
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    turno_id = request.data.get("turno_id")
+
+    if not turno_id:
+        return Response(
+            {"error": "Se requiere el campo 'turno_id'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        turno = Turno.objects.select_related("cliente", "servicio").get(id=turno_id)
+    except Turno.DoesNotExist:
+        return Response(
+            {"error": f"Turno con ID {turno_id} no encontrado"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Buscar el log de reasignación asociado a este turno
+    try:
+        log_reasignacion = (
+            LogReasignacion.objects.filter(
+                turno_ofrecido_id=turno.id,
+                estado_final__isnull=True,  # Solo ofertas pendientes
+            )
+            .select_related(
+                "turno_cancelado",
+                "turno_cancelado__servicio",
+                "turno_cancelado__empleado__user",
+            )
+            .latest("fecha_envio")
+        )
+    except LogReasignacion.DoesNotExist:
+        return Response(
+            {"error": f"No se encontró una oferta pendiente para el turno {turno_id}"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    resultado = {
+        "turno_id": turno.id,
+        "turno_info": {
+            "cliente": (
+                turno.cliente.nombre_completo if turno.cliente else "Sin cliente"
+            ),
+            "servicio": turno.servicio.nombre if turno.servicio else "Sin servicio",
+            "fecha_hora": turno.fecha_hora.isoformat() if turno.fecha_hora else None,
+            "estado_original": turno.estado,
+        },
+        "log_id": log_reasignacion.id,
+        "logs": [],
+    }
+
+    # PASO 1: Forzar expiración de la oferta
+    try:
+        # Actualizar el expires_at a ahora para forzar la expiración
+        log_reasignacion.expires_at = timezone.now() - timezone.timedelta(seconds=1)
+        log_reasignacion.save(update_fields=["expires_at"])
+
+        resultado["logs"].append(
+            {
+                "paso": 1,
+                "accion": "Forzar expiración de oferta",
+                "resultado": "exitoso",
+                "detalle": f"Oferta del turno #{turno.id} forzada a expirar",
+            }
+        )
+
+    except Exception as e:
+        resultado["logs"].append(
+            {
+                "paso": 1,
+                "accion": "Forzar expiración de oferta",
+                "resultado": "error",
+                "detalle": str(e),
+            }
+        )
+        return Response(resultado, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # PASO 2: Ejecutar la lógica de expiración
+    try:
+        resultado_expiracion = expirar_oferta_reasignacion(log_reasignacion.id)
+
+        if resultado_expiracion.get("status") == "expirada":
+            resultado["logs"].append(
+                {
+                    "paso": 2,
+                    "accion": "Ejecutar lógica de expiración",
+                    "resultado": "exitoso",
+                    "detalle": f"Oferta expirada exitosamente. Estado del turno: expirada",
+                }
+            )
+
+            # PASO 3: Buscar si se envió oferta al siguiente candidato
+            siguiente_log = (
+                LogReasignacion.objects.filter(
+                    turno_cancelado_id=log_reasignacion.turno_cancelado_id,
+                    estado_final__isnull=True,
+                    fecha_envio__gt=log_reasignacion.fecha_envio,
+                )
+                .select_related("turno_ofrecido__cliente")
+                .first()
+            )
+
+            if siguiente_log:
+                resultado["logs"].append(
+                    {
+                        "paso": 3,
+                        "accion": "Buscar siguiente candidato",
+                        "resultado": "exitoso",
+                        "detalle": f'Oferta enviada al turno #{siguiente_log.turno_ofrecido_id} (cliente: {siguiente_log.turno_ofrecido.cliente.nombre_completo if siguiente_log.turno_ofrecido.cliente else "N/A"})',
+                    }
+                )
+                resultado["siguiente_candidato"] = {
+                    "turno_id": siguiente_log.turno_ofrecido_id,
+                    "cliente": (
+                        siguiente_log.turno_ofrecido.cliente.nombre_completo
+                        if siguiente_log.turno_ofrecido.cliente
+                        else None
+                    ),
+                    "log_id": siguiente_log.id,
+                }
+            else:
+                resultado["logs"].append(
+                    {
+                        "paso": 3,
+                        "accion": "Buscar siguiente candidato",
+                        "resultado": "no_aplica",
+                        "detalle": "No se encontraron más candidatos para esta cancelación",
+                    }
+                )
+                resultado["siguiente_candidato"] = None
+
+        else:
+            resultado["logs"].append(
+                {
+                    "paso": 2,
+                    "accion": "Ejecutar lógica de expiración",
+                    "resultado": "no_aplica",
+                    "detalle": f'Estado de expiración: {resultado_expiracion.get("status")}',
+                }
+            )
+
+    except Exception as e:
+        resultado["logs"].append(
+            {
+                "paso": 2,
+                "accion": "Ejecutar lógica de expiración",
+                "resultado": "error",
+                "detalle": str(e),
+            }
+        )
+        logger.error(f"Error en expiración de oferta: {str(e)}")
+        return Response(resultado, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response(resultado, status=status.HTTP_200_OK)

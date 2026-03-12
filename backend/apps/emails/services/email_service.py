@@ -880,16 +880,15 @@ class EmailService:
                 return False
 
             base_url = (
-                settings.BACKEND_URL
-                if hasattr(settings, "BACKEND_URL")
-                else (
-                    settings.FRONTEND_URL
-                    if hasattr(settings, "FRONTEND_URL")
-                    else "http://localhost:3000"
-                )
+                settings.FRONTEND_URL
+                if hasattr(settings, "FRONTEND_URL")
+                else "http://localhost:3000"
             )
-            aceptar_url = f"{base_url}/api/turnos/reasignacion/{log_reasignacion.token}/?accion=aceptar"
-            rechazar_url = f"{base_url}/api/turnos/reasignacion/{log_reasignacion.token}/?accion=rechazar"
+
+            # Link a la página de confirmación del frontend
+            confirmar_url = (
+                f"{base_url}/reacomodamiento/confirmar?token={log_reasignacion.token}"
+            )
 
             contenido = f"""
                 <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
@@ -899,12 +898,16 @@ class EmailService:
 
                 <div class="info-box">
                     <div class="info-row">
-                        <span class="info-label">Servicio:</span>
-                        <span class="info-value">{turno_cancelado.servicio.nombre}</span>
+                        <span class="info-label">Tu turno actual:</span>
+                        <span class="info-value">{turno_ofrecido.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Nuevo horario:</span>
-                        <span class="info-value">{turno_cancelado.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
+                        <span class="info-label">Nuevo turno disponible:</span>
+                        <span class="info-value"><strong>{turno_cancelado.fecha_hora.strftime('%d/%m/%Y %H:%M')}</strong></span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{turno_cancelado.servicio.nombre}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Profesional:</span>
@@ -915,28 +918,31 @@ class EmailService:
                         <span class="info-value">${turno_cancelado.servicio.precio}</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Descuento:</span>
-                        <span class="info-value">${monto_descuento}</span>
+                        <span class="info-label">Descuento especial:</span>
+                        <span class="info-value" style="color: #48bb78;">-${monto_descuento}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Seña acreditada:</span>
-                        <span class="info-value">${senia_pagada}</span>
+                        <span class="info-value">-${senia_pagada}</span>
                     </div>
-                    <div class="info-row">
-                        <span class="info-label">Monto final a pagar:</span>
-                        <span class="info-value">${monto_final}</span>
+                    <div class="info-row" style="border-top: 2px solid #667eea; padding-top: 10px; margin-top: 10px;">
+                        <span class="info-label"><strong>Monto final a pagar:</strong></span>
+                        <span class="info-value" style="font-size: 1.2em; color: #667eea;"><strong>${monto_final}</strong></span>
                     </div>
                 </div>
 
                 <div class="alert alert-warning">
-                    <strong>Importante:</strong> Este enlace expira el {log_reasignacion.expires_at.strftime('%d/%m/%Y %H:%M')}.
+                    <strong>⏰ Importante:</strong> Esta oferta expira el {log_reasignacion.expires_at.strftime('%d/%m/%Y %H:%M')}.
                 </div>
 
-                <p>Si deseas aceptar el adelanto, confirma con el siguiente botón:</p>
-                <a href="{aceptar_url}" class="button">Aceptar oferta</a>
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="{confirmar_url}" class="button" style="font-size: 1.1em; padding: 15px 40px;">Ver detalles y confirmar</a>
+                </p>
 
-                <p>Si prefieres mantener tu turno original, puedes rechazar la oferta:</p>
-                <a href="{rechazar_url}" class="button" style="background: #6c757d;">Rechazar oferta</a>
+                <p style="color: #718096; font-size: 0.9em; text-align: center;">
+                    Si no deseas adelantar tu turno, simplemente ignora este email.<br>
+                    Tu turno original se mantendrá sin cambios.
+                </p>
             """
 
             html_message = EmailService._get_base_template().format(

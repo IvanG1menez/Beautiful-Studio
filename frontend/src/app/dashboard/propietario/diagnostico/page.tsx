@@ -36,6 +36,17 @@ interface ResultadoOptimizacion {
   };
 }
 
+interface ResultadoSimulacion {
+  turno_id: number;
+  log_id: number;
+  logs: LogEntry[];
+  siguiente_candidato?: {
+    turno_id: number;
+    cliente: string;
+    log_id: number;
+  } | null;
+}
+
 interface ClienteCandidato {
   cliente_id: number;
   nombre: string;
@@ -74,11 +85,16 @@ interface ResultadoFidelizacion {
 export default function DiagnosticoPage() {
   const [loadingOptimizacion, setLoadingOptimizacion] = useState(false);
   const [loadingFidelizacion, setLoadingFidelizacion] = useState(false);
+  const [loadingSimulacion, setLoadingSimulacion] = useState(false);
 
   // Estado para Optimización
   const [turnoId, setTurnoId] = useState('');
   const [resultadoOptimizacion, setResultadoOptimizacion] = useState<ResultadoOptimizacion | null>(null);
   const [errorOptimizacion, setErrorOptimizacion] = useState<string>('');
+
+  // Estado para Simulación de No Respuesta
+  const [resultadoSimulacion, setResultadoSimulacion] = useState<ResultadoSimulacion | null>(null);
+  const [errorSimulacion, setErrorSimulacion] = useState<string>('');
 
   // Estado para Fidelización
   const [diasInactividad, setDiasInactividad] = useState('');
@@ -103,6 +119,8 @@ export default function DiagnosticoPage() {
     setLoadingOptimizacion(true);
     setErrorOptimizacion('');
     setResultadoOptimizacion(null);
+    setResultadoSimulacion(null); // Limpiar simulación anterior
+    setErrorSimulacion('');
 
     try {
       const response = await fetch('http://localhost:8000/api/turnos/diagnostico/optimizacion-agenda/', {
@@ -123,6 +141,38 @@ export default function DiagnosticoPage() {
       setErrorOptimizacion('Error de conexión con el servidor');
     } finally {
       setLoadingOptimizacion(false);
+    }
+  };
+
+  const handleSimularNoRespuesta = async () => {
+    if (!resultadoOptimizacion?.proceso_2?.turno_candidato_id) {
+      setErrorSimulacion('No hay turno candidato para simular');
+      return;
+    }
+
+    setLoadingSimulacion(true);
+    setErrorSimulacion('');
+    setResultadoSimulacion(null);
+
+    try {
+      const response = await fetch('http://localhost:8000/api/turnos/diagnostico/simular-no-respuesta/', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ turno_id: resultadoOptimizacion.proceso_2.turno_candidato_id }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setResultadoSimulacion(data);
+      } else {
+        setErrorSimulacion(data.error || 'Error al simular no respuesta');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorSimulacion('Error de conexión con el servidor');
+    } finally {
+      setLoadingSimulacion(false);
     }
   };
 
@@ -235,8 +285,106 @@ export default function DiagnosticoPage() {
                   </>
                 )}
               </Button>
+
+              {/* Botón de Simular No Respuesta - Solo aparece después de ejecutar optimización */}
+              {resultadoOptimizacion?.proceso_2?.status === 'propuesta_enviada' && (
+                <div className="border-t pt-4 space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                    <Info className="h-4 w-4" />
+                    <span>
+                      Oferta enviada a {resultadoOptimizacion.proceso_2.cliente_contactado}. Puedes simular
+                      que no responde para pasar al siguiente candidato.
+                    </span>
+                  </div>
+                  <Button
+                    onClick={handleSimularNoRespuesta}
+                    disabled={loadingSimulacion}
+                    variant="outline"
+                    className="w-full border-orange-500 text-orange-600 hover:bg-orange-50"
+                  >
+                    {loadingSimulacion ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Simulando...
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="mr-2 h-4 w-4" />
+                        Simular No Respuesta (Skip 15 min)
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          {/* Error Simulación */}
+          {errorSimulacion && (
+            <Alert variant="destructive">
+              <XCircle className="h-4 w-4" />
+              <AlertTitle>Error en Simulación</AlertTitle>
+              <AlertDescription>{errorSimulacion}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* Resultados Simulación */}
+          {resultadoSimulacion && (
+            <Card className="border-orange-200">
+              <CardHeader>
+                <CardTitle className="text-orange-700">Simulación de No Respuesta</CardTitle>
+                <CardDescription>
+                  Oferta expirada y proceso automático ejecutado
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Logs de Simulación */}
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-sm">Logs de Ejecución</h3>
+                  {resultadoSimulacion.logs.map((log, index) => (
+                    <div key={index} className="flex items-start gap-3 p-3 rounded-lg bg-orange-50">
+                      {getResultadoIcon(log.resultado)}
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">
+                          Paso {log.paso}: {log.accion}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{log.detalle}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Siguiente Candidato */}
+                {resultadoSimulacion.siguiente_candidato ? (
+                  <Alert className="bg-green-50 border-green-200">
+                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                    <AlertTitle className="text-green-700">Siguiente candidato contactado</AlertTitle>
+                    <AlertDescription className="text-green-600">
+                      <div className="space-y-1 mt-2">
+                        <p>
+                          <strong>Cliente:</strong> {resultadoSimulacion.siguiente_candidato.cliente}
+                        </p>
+                        <p>
+                          <strong>Turno ID:</strong> {resultadoSimulacion.siguiente_candidato.turno_id}
+                        </p>
+                        <p className="text-xs mt-2 italic">
+                          ✉️ Email automático enviado con oferta de reagendamiento
+                        </p>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertTitle>Sin más candidatos</AlertTitle>
+                    <AlertDescription>
+                      No hay más clientes en la fila para ofrecerles este turno
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Resultados Optimización */}
           {errorOptimizacion && (

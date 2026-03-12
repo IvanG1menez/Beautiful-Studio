@@ -296,21 +296,34 @@ def manejar_cancelacion_turno(turno):
         if config_profesional.email_cancelacion_turno:
             EmailService.enviar_email_cancelacion_turno(turno, cancelado_por="cliente")
 
-        # Iniciar flujo de reasignación/reacomodamiento automático si aplica
+        # Iniciar flujo de reasignación automático si aplica
         try:
             if turno.fecha_hora and turno.fecha_hora > timezone.now():
-                if turno.servicio and turno.servicio.permite_reacomodamiento:
-                    from apps.turnos.tasks import iniciar_reacomodamiento_proceso_2
+                # Usar el nuevo sistema de reasignación con token para todos los servicios
+                try:
+                    from apps.turnos.tasks import (
+                        iniciar_reasignacion_turno as iniciar_reasignacion_task,
+                    )
 
-                    iniciar_reacomodamiento_proceso_2.delay(turno.id)
-                else:
-                    from apps.turnos.tasks import iniciar_reasignacion_turno
+                    iniciar_reasignacion_task.delay(turno.id)
+                    logger.info(f"Task de reasignación encolado para turno {turno.id}")
+                except Exception as celery_error:
+                    # Si Celery no está disponible, ejecutar directamente
+                    logger.warning(
+                        f"Celery no disponible para turno {turno.id}, "
+                        f"ejecutando reasignación directamente: {celery_error}"
+                    )
+                    from apps.turnos.services.reasignacion_service import (
+                        iniciar_reasignacion_turno,
+                    )
 
-                    iniciar_reasignacion_turno.delay(turno.id)
+                    resultado = iniciar_reasignacion_turno(turno.id)
+                    logger.info(
+                        f"Reasignación directa ejecutada para turno {turno.id}: {resultado}"
+                    )
         except Exception as e:
             logger.error(
-                "Error iniciando reasignación/reacomodamiento automático "
-                f"para turno {turno.id}: {str(e)}"
+                f"Error iniciando reasignación automática para turno {turno.id}: {str(e)}"
             )
 
         logger.info(f"Notificaciones de cancelación enviadas para turno {turno.id}")

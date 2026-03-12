@@ -16,7 +16,10 @@ from .serializers import (
     HistorialTurnoSerializer,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
-from apps.turnos.services.reasignacion_service import responder_oferta_reasignacion
+from apps.turnos.services.reasignacion_service import (
+    responder_oferta_reasignacion,
+    obtener_detalles_oferta_reasignacion,
+)
 
 
 class TurnoViewSet(viewsets.ModelViewSet):
@@ -1034,7 +1037,27 @@ def historial_turno(request, turno_id):
 @api_view(["GET", "POST"])
 @permission_classes([AllowAny])
 def responder_reasignacion(request, token):
-    """Aceptar o rechazar una oferta de reasignación con token único."""
+    """
+    GET: Obtiene los detalles de una oferta de reasignación
+    POST: Acepta o rechaza una oferta de reasignación
+    """
+
+    # GET: Obtener detalles de la oferta
+    if request.method == "GET":
+        resultado = obtener_detalles_oferta_reasignacion(str(token))
+
+        if resultado.get("status") == "activa":
+            return Response(resultado, status=status.HTTP_200_OK)
+
+        if resultado.get("status") in ["ya_resuelta", "expirada"]:
+            return Response(resultado, status=status.HTTP_410_GONE)
+
+        if resultado.get("status") == "token_invalido":
+            return Response(resultado, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(resultado, status=status.HTTP_400_BAD_REQUEST)
+
+    # POST: Procesar acción (aceptar/rechazar)
     accion = request.data.get("accion") or request.query_params.get("accion")
 
     if accion not in ["aceptar", "rechazar"]:

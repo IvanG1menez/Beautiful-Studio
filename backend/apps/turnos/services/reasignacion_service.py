@@ -20,12 +20,14 @@ ESTADOS_ACTIVOS = ["pendiente", "confirmado", "en_proceso", "oferta_enviada"]
 
 
 def _save_turno_with_history(turno: Turno, reason: str, update_fields=None) -> None:
+    """Guarda el turno y registra el motivo del cambio en el historial"""
     turno._history_user = get_system_history_user()
-    update_change_reason(turno, reason)
     if update_fields:
         turno.save(update_fields=update_fields)
     else:
         turno.save()
+    # Actualizar el reason DESPUÉS de guardar (cuando ya existe el registro de historial)
+    update_change_reason(turno, reason)
 
 
 def _slot_libre(turno_cancelado: Turno) -> bool:
@@ -103,7 +105,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
     _save_turno_with_history(
         candidato,
         "Oferta enviada por reasignacion",
-        update_fields=["estado", "updated_at"],
+        update_fields=["estado"],
     )
 
     enviado = EmailService.enviar_email_oferta_reasignacion(
@@ -123,17 +125,25 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
         _save_turno_with_history(
             candidato,
             "Reversion de oferta enviada",
-            update_fields=["estado", "updated_at"],
+            update_fields=["estado"],
         )
         log_reasignacion.estado_final = "rechazada"
         log_reasignacion.save(update_fields=["estado_final"])
         return {"status": "email_fallido"}
 
-    from apps.turnos.tasks import expirar_oferta_reasignacion
+    # Encolar tarea de expiración automática (si Celery está disponible)
+    try:
+        from apps.turnos.tasks import expirar_oferta_reasignacion
 
-    expirar_oferta_reasignacion.apply_async(
-        args=[log_reasignacion.id], countdown=15 * 60
-    )
+        expirar_oferta_reasignacion.apply_async(
+            args=[log_reasignacion.id], countdown=15 * 60
+        )
+        logger.info(f"Tarea de expiración encolada para log {log_reasignacion.id}")
+    except Exception as e:
+        logger.warning(
+            f"No se pudo encolar tarea de expiración (Celery no disponible): {e}"
+        )
+        logger.info("La oferta seguirá válida pero no expirará automáticamente")
 
     return {"status": "oferta_enviada", "log_id": log_reasignacion.id}
 
@@ -168,7 +178,7 @@ def expirar_oferta_reasignacion(log_id: int) -> dict:
         _save_turno_with_history(
             turno_ofrecido,
             "Oferta expirada por reasignacion",
-            update_fields=["estado", "updated_at"],
+            update_fields=["estado"],
         )
 
     iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
@@ -215,7 +225,7 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
             _save_turno_with_history(
                 turno_ofrecido,
                 "Oferta rechazada por cliente",
-                update_fields=["estado", "updated_at"],
+                update_fields=["estado"],
             )
 
         iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
@@ -234,10 +244,10 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         return {"status": "hueco_no_disponible"}
 
     with transaction.atomic():
-        log_reasignacion = (
-            LogReasignacion.objects.select_for_update()
-            .select_related("turno_cancelado", "turno_ofrecido")
-            .get(pk=log_reasignacion.pk)
+        # Bloquear solo el LogReasignacion para evitar race conditions
+        # (PostgreSQL no permite FOR UPDATE en nullable side of outer join)
+        log_reasignacion = LogReasignacion.objects.select_for_update(of=("self",)).get(
+            pk=log_reasignacion.pk
         )
 
         if log_reasignacion.estado_final:
@@ -246,10 +256,10 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
                 "estado": log_reasignacion.estado_final,
             }
 
-        if not _slot_libre(log_reasignacion.turno_cancelado):
+        if not _slot_libre(turno_cancelado):
             return {"status": "hueco_no_disponible"}
 
-        if log_reasignacion.turno_ofrecido.estado != "oferta_enviada":
+        if turno_ofrecido.estado != "oferta_enviada":
             return {"status": "turno_ofrecido_no_disponible"}
 
         descuento = Decimal(log_reasignacion.monto_descuento or 0)
@@ -271,7 +281,6 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
                 "precio_final",
                 "senia_pagada",
                 "notas_cliente",
-                "updated_at",
             ],
         )
 
@@ -279,10 +288,85 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         _save_turno_with_history(
             turno_ofrecido,
             "Oferta aceptada, turno ofrecido cancelado",
-            update_fields=["estado", "updated_at"],
+            update_fields=["estado"],
         )
 
         log_reasignacion.estado_final = "aceptada"
         log_reasignacion.save(update_fields=["estado_final"])
 
     return {"status": "aceptada", "turno_id": turno_cancelado.pk}
+
+
+def obtener_detalles_oferta_reasignacion(token: str) -> dict:
+    """
+    Obtiene los detalles de una oferta de reasignación para mostrar al cliente antes de aceptar/rechazar.
+    """
+    try:
+        log_reasignacion = LogReasignacion.objects.select_related(
+            "turno_cancelado",
+            "turno_cancelado__servicio",
+            "turno_cancelado__empleado__user",
+            "turno_ofrecido",
+            "turno_ofrecido__servicio",
+            "turno_ofrecido__empleado__user",
+            "cliente_notificado__user",
+        ).get(token=token)
+    except LogReasignacion.DoesNotExist:
+        return {"status": "token_invalido", "error": "Token no válido o expirado"}
+
+    # Verificar si ya fue resuelta
+    if log_reasignacion.estado_final:
+        return {
+            "status": "ya_resuelta",
+            "estado": log_reasignacion.estado_final,
+            "mensaje": f"Esta oferta ya fue {log_reasignacion.estado_final}",
+        }
+
+    # Verificar si expiró
+    if log_reasignacion.expires_at <= timezone.now():
+        return {
+            "status": "expirada",
+            "mensaje": "Esta oferta ha expirado",
+        }
+
+    turno_cancelado = log_reasignacion.turno_cancelado
+    turno_ofrecido = log_reasignacion.turno_ofrecido
+
+    # Calcular montos
+    descuento = Decimal(log_reasignacion.monto_descuento or 0)
+    senia_pagada = Decimal(turno_ofrecido.senia_pagada or 0)
+    precio_total = Decimal(turno_cancelado.servicio.precio)
+    monto_final = _calcular_monto_final(precio_total, descuento, senia_pagada)
+
+    return {
+        "status": "activa",
+        "token": str(log_reasignacion.token),
+        "expires_at": log_reasignacion.expires_at.isoformat(),
+        "cliente": {
+            "nombre": log_reasignacion.cliente_notificado.nombre_completo,
+            "email": log_reasignacion.cliente_notificado.user.email,
+        },
+        "turno_original": {
+            "id": turno_ofrecido.id,
+            "servicio": turno_ofrecido.servicio.nombre,
+            "fecha_hora": turno_ofrecido.fecha_hora.isoformat(),
+            "empleado": turno_ofrecido.empleado.nombre_completo,
+            "precio": str(turno_ofrecido.servicio.precio),
+            "senia_pagada": str(senia_pagada),
+        },
+        "turno_nuevo": {
+            "id": turno_cancelado.id,
+            "servicio": turno_cancelado.servicio.nombre,
+            "fecha_hora": turno_cancelado.fecha_hora.isoformat(),
+            "empleado": turno_cancelado.empleado.nombre_completo,
+            "precio_total": str(precio_total),
+            "descuento": str(descuento),
+            "monto_final": str(monto_final),
+        },
+        "ahorro": {
+            "dias_adelantados": (
+                turno_ofrecido.fecha_hora - turno_cancelado.fecha_hora
+            ).days,
+            "descuento_aplicado": str(descuento),
+        },
+    }

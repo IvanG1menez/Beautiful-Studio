@@ -288,8 +288,8 @@ export default function CompletarTurnosMasivo({ onTurnosCompletados }: Completar
 
                     <div>
                       <span className={`inline-flex px-2 py-1 text-xs rounded-full ${turno.estado === 'confirmado' ? 'bg-green-100 text-green-800' :
-                          turno.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800' :
-                            'bg-gray-100 text-gray-800'
+                        turno.estado === 'en_proceso' ? 'bg-blue-100 text-blue-800' :
+                          'bg-gray-100 text-gray-800'
                         }`}>
                         {turno.estado_display}
                       </span>

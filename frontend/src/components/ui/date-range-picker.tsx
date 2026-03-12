@@ -8,9 +8,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { es } from "date-fns/locale";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import * as React from "react";
-import { es } from "date-fns/locale";
 import { DateInput } from "./date-input";
 
 export interface DateRange {

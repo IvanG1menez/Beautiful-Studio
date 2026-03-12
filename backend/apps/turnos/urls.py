@@ -64,4 +64,9 @@ urlpatterns = [
         views_diagnostico.diagnostico_fidelizacion_clientes,
         name="diagnostico-fidelizacion",
     ),
+    path(
+        "diagnostico/simular-no-respuesta/",
+        views_diagnostico.diagnostico_simular_no_respuesta,
+        name="diagnostico-simular-no-respuesta",
+    ),
 ]
