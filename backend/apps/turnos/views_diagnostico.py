@@ -17,6 +17,7 @@ from apps.clientes.models import Cliente, Billetera
 from apps.authentication.models import ConfiguracionGlobal
 from apps.servicios.models import Servicio
 from apps.turnos.services.reacomodamiento_service import iniciar_reacomodamiento
+
 from apps.turnos.services.reasignacion_service import expirar_oferta_reasignacion
 from apps.emails.services.email_service import EmailService
 
@@ -154,10 +155,8 @@ def diagnostico_optimizacion_agenda(request):
                     cliente=turno.cliente, defaults={"saldo": Decimal("0.00")}
                 )
 
-                # Calcular monto a acreditar
-                monto_credito = (
-                    turno.precio_final if turno.precio_final else turno.servicio.precio
-                )
+                # Calcular monto a acreditar: solo la seña pagada
+                monto_credito = turno.senia_pagada or Decimal("0.00")
 
                 # Agregar crédito
                 billetera.agregar_saldo(

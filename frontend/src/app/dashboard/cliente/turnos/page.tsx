@@ -30,6 +30,7 @@ interface Turno {
   estado_display: string;
   precio_final: string;
   puede_cancelar: boolean;
+  tiene_pago_mp?: boolean;
   notas_cliente?: string;
   notas_empleado?: string;
   created_at: string;
@@ -63,6 +64,10 @@ export default function TurnosClientePage() {
     description: '',
     type: 'success' as 'success' | 'error'
   });
+
+  // Estado para comprobante de pago
+  const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
+  const [comprobanteData, setComprobanteData] = useState<any | null>(null);
 
   // Cargar turnos
   const fetchTurnos = async () => {
@@ -116,6 +121,28 @@ export default function TurnosClientePage() {
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
+  };
+
+  // Ver comprobante
+  const handleVerComprobante = async (turnoId: number) => {
+    try {
+      const response = await fetch(`/api/mercadopago/comprobante/${turnoId}/`, {
+        headers: getAuthHeaders()
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setComprobanteData(data);
+        setComprobanteDialogOpen(true);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        const msg = errorData.detail || 'No se pudo obtener el comprobante de pago';
+        showNotification('Error al cargar comprobante', msg, 'error');
+      }
+    } catch (error) {
+      console.error('Error comprobante:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor', 'error');
+    }
   };
 
   // Cancelar turno
@@ -572,6 +599,17 @@ export default function TurnosClientePage() {
 
                   {/* Botones de acción */}
                   <div className="flex gap-2 mt-4 md:mt-0 md:ml-4 md:flex-col md:justify-start">
+                    {turno.tiene_pago_mp && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleVerComprobante(turno.id)}
+                        className="whitespace-nowrap"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-1 text-green-600" />
+                        Ver comprobante
+                      </Button>
+                    )}
                     {turno.puede_cancelar && (
                       <Button
                         variant="destructive"
@@ -622,6 +660,77 @@ export default function TurnosClientePage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Modal de comprobante de pago */}
+      <AlertDialog open={comprobanteDialogOpen} onOpenChange={setComprobanteDialogOpen}>
+        <AlertDialogContent className="max-w-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Comprobante de pago</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-gray-800">
+                {comprobanteData ? (
+                  <>
+                    <div>
+                      <p className="font-semibold">{comprobanteData.empresa?.nombre_empresa}</p>
+                      {comprobanteData.empresa?.razon_social && (
+                        <p>Razón social: {comprobanteData.empresa.razon_social}</p>
+                      )}
+                      {comprobanteData.empresa?.cuit && (
+                        <p>CUIT: {comprobanteData.empresa.cuit}</p>
+                      )}
+                      {comprobanteData.empresa?.fecha_fundacion && (
+                        <p>Fecha de inicio: {formatDate(comprobanteData.empresa.fecha_fundacion)}</p>
+                      )}
+                    </div>
+
+                    <div className="border-t pt-2">
+                      <p>
+                        Cliente: <span className="font-medium">{comprobanteData.turno?.cliente_nombre}</span>
+                      </p>
+                      {comprobanteData.turno?.cliente_email && (
+                        <p>Email: {comprobanteData.turno.cliente_email}</p>
+                      )}
+                      <p>Profesional: {comprobanteData.turno?.profesional_nombre}</p>
+                      <p>Servicio: {comprobanteData.turno?.servicio_nombre}</p>
+                      {comprobanteData.turno?.fecha_hora && (
+                        <p>
+                          Fecha y hora: {formatDateTimeReadable(comprobanteData.turno.fecha_hora)}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="border-t pt-2">
+                      <p>
+                        Monto cobrado:{' '}
+                        <span className="font-semibold">
+                          ${comprobanteData.pago?.monto}
+                        </span>{' '}
+                        {comprobanteData.pago?.moneda}
+                      </p>
+                      {comprobanteData.turno?.senia_pagada && (
+                        <p>Seña pagada: ${comprobanteData.turno.senia_pagada}</p>
+                      )}
+                      {comprobanteData.turno?.precio_final && (
+                        <p>Precio final turno: ${comprobanteData.turno.precio_final}</p>
+                      )}
+                      {comprobanteData.pago?.payment_id && (
+                        <p>ID de pago: {comprobanteData.pago.payment_id}</p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p>No se pudo cargar el comprobante.</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setComprobanteDialogOpen(false)}>
+              Cerrar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Modal de confirmación */}
       <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>

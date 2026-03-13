@@ -689,3 +689,87 @@ class ListarPagosView(APIView):
         pagos = PagoMercadoPago.objects.select_related("turno", "cliente__user").all()
         serializer = PagoMercadoPagoSerializer(pagos, many=True)
         return Response(serializer.data)
+
+
+class ComprobantePagoView(APIView):
+    """Devuelve los datos del comprobante de pago de un turno específico.
+
+    GET /api/mercadopago/comprobante/<turno_id>/
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, turno_id: int, *args, **kwargs):
+        from apps.authentication.models import ConfiguracionGlobal
+
+        try:
+            pago = (
+                PagoMercadoPago.objects.select_related(
+                    "turno",
+                    "turno__servicio",
+                    "turno__empleado__user",
+                    "cliente__user",
+                )
+                .filter(turno_id=turno_id, estado="approved")
+                .first()
+            )
+            if not pago:
+                return Response(
+                    {"detail": "No hay un pago aprobado asociado a este turno."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            turno = pago.turno
+
+            # Datos de configuración / empresa
+            config = ConfiguracionGlobal.get_config()
+            fecha_fundacion = config.fecha_fundacion
+
+            data = {
+                "empresa": {
+                    "nombre_empresa": config.nombre_empresa or "Beautiful Studio",
+                    "nombre_comercial": config.nombre_comercial or "Beautiful Studio",
+                    "razon_social": config.razon_social or "",
+                    "cuit": config.cuit or "",
+                    "fecha_fundacion": (
+                        fecha_fundacion.isoformat() if fecha_fundacion else None
+                    ),
+                },
+                "turno": {
+                    "id": turno.id,
+                    "servicio_nombre": getattr(turno.servicio, "nombre", ""),
+                    "profesional_nombre": getattr(
+                        turno.empleado.user, "get_full_name", lambda: ""
+                    )(),
+                    "cliente_nombre": getattr(turno.cliente, "nombre_completo", ""),
+                    "cliente_email": getattr(
+                        getattr(turno.cliente, "user", None), "email", ""
+                    ),
+                    "fecha_hora": (
+                        turno.fecha_hora.isoformat() if turno.fecha_hora else None
+                    ),
+                    "duracion_minutos": getattr(
+                        turno.servicio, "duracion_minutos", None
+                    ),
+                    "precio_servicio": str(getattr(turno.servicio, "precio", "")),
+                    "precio_final": str(turno.precio_final or ""),
+                    "senia_pagada": str(turno.senia_pagada or "0"),
+                },
+                "pago": {
+                    "monto": str(pago.monto),
+                    "moneda": pago.moneda,
+                    "descripcion": pago.descripcion,
+                    "payment_id": pago.payment_id,
+                    "preference_id": pago.preference_id,
+                    "estado": pago.estado,
+                    "creado_en": pago.creado_en.isoformat(),
+                },
+            }
+
+            return Response(data, status=status.HTTP_200_OK)
+
+        except Exception as exc:
+            return Response(
+                {"detail": f"Error al obtener comprobante: {str(exc)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

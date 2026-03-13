@@ -242,6 +242,42 @@ class ConfiguracionGlobal(models.Model):
         help_text="Límite total de turnos simultáneos en todo el local (0 = sin límite, usa solo capacidad de salas)",
     )
 
+    # Datos fiscales / de empresa
+    nombre_empresa = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Nombre de empresa",
+        help_text="Nombre de empresa para comprobantes y datos fiscales",
+    )
+
+    nombre_comercial = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Nombre comercial",
+        help_text="Nombre de fantasia del estudio o negocio",
+    )
+
+    razon_social = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Razon social",
+        help_text="Razon social registrada ante AFIP u organismo fiscal",
+    )
+
+    cuit = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="CUIT / Identificador fiscal",
+        help_text="Numero de CUIT o identificador fiscal del negocio",
+    )
+
+    fecha_fundacion = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name="Fecha de fundacion",
+        help_text="Fecha de inicio de actividades del negocio",
+    )
+
     # Metadatos
     activo = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -266,6 +302,10 @@ class ConfiguracionGlobal(models.Model):
                 "margen_fidelizacion_dias": 60,
                 "descuento_fidelizacion_pct": 15.00,
                 "capacidad_maxima_global": 0,
+                "nombre_empresa": "Beautiful Studio",
+                "nombre_comercial": "Beautiful Studio",
+                "razon_social": "Beautiful Studio",
+                "cuit": "",
                 "activo": True,
             },
         )

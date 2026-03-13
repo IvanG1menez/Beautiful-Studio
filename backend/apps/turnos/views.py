@@ -16,6 +16,7 @@ from .serializers import (
     HistorialTurnoSerializer,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
+
 from apps.turnos.services.reasignacion_service import (
     responder_oferta_reasignacion,
     obtener_detalles_oferta_reasignacion,
@@ -234,10 +235,8 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 cliente=turno.cliente, defaults={"saldo": Decimal("0.00")}
             )
 
-            # Calcular monto a acreditar (precio del servicio o precio final del turno)
-            monto_credito = (
-                turno.precio_final if turno.precio_final else turno.servicio.precio
-            )
+            # Calcular monto a acreditar: solo la seña pagada
+            monto_credito = turno.senia_pagada or Decimal("0.00")
 
             # Agregar crédito
             billetera.agregar_saldo(
@@ -434,6 +433,15 @@ class TurnoViewSet(viewsets.ModelViewSet):
             horarios_disponibles = []
             incremento = timedelta(minutes=30)
 
+            # Obtener turnos existentes del empleado en ese día para chequear solapamientos
+            turnos_dia = list(
+                Turno.objects.select_related("servicio").filter(
+                    empleado=empleado,
+                    fecha_hora__date=fecha_obj,
+                    estado__in=["pendiente", "confirmado", "en_proceso"],
+                )
+            )
+
             for horario_rango in horarios_dia:
                 # Crear datetime aware (con zona horaria)
                 hora_actual = timezone.make_aware(
@@ -447,17 +455,30 @@ class TurnoViewSet(viewsets.ModelViewSet):
                     hora_actual + timedelta(minutes=servicio.duracion_minutos)
                     <= hora_fin
                 ):
-                    # Verificar si hay turno en ese horario
+                    # Verificar si hay turno en ese horario considerando duración completa
                     hora_fin_turno = hora_actual + timedelta(
                         minutes=servicio.duracion_minutos
                     )
 
-                    conflicto = Turno.objects.filter(
-                        empleado=empleado,
-                        fecha_hora__lt=hora_fin_turno,
-                        fecha_hora__gte=hora_actual,
-                        estado__in=["pendiente", "confirmado", "en_proceso"],
-                    ).exists()
+                    conflicto = False
+                    for turno_existente in turnos_dia:
+                        if (
+                            not turno_existente.fecha_hora
+                            or not turno_existente.servicio
+                        ):
+                            continue
+                        inicio_existente = turno_existente.fecha_hora
+                        fin_existente = inicio_existente + timedelta(
+                            minutes=turno_existente.servicio.duracion_minutos
+                        )
+                        # Hay solapamiento si el inicio propuesto es antes del fin existente
+                        # y el fin propuesto es después del inicio existente
+                        if (
+                            hora_actual < fin_existente
+                            and hora_fin_turno > inicio_existente
+                        ):
+                            conflicto = True
+                            break
 
                     if not conflicto and hora_actual > timezone.now():
                         hora_str = hora_actual.strftime("%H:%M")

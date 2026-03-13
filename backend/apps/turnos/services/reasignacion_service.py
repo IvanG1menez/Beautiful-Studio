@@ -1,6 +1,4 @@
-"""
-Servicio de reasignación automática de turnos tras cancelaciones
-"""
+"""Servicio de reasignación automática de turnos tras cancelaciones"""
 
 from decimal import Decimal
 import logging
@@ -21,42 +19,31 @@ ESTADOS_ACTIVOS = ["pendiente", "confirmado", "en_proceso", "oferta_enviada"]
 
 def _save_turno_with_history(turno: Turno, reason: str, update_fields=None) -> None:
     """Guarda el turno y registra el motivo del cambio en el historial"""
-    turno._history_user = get_system_history_user()
+    update_change_reason(turno, reason)
     if update_fields:
         turno.save(update_fields=update_fields)
     else:
         turno.save()
-    # Actualizar el reason DESPUÉS de guardar (cuando ya existe el registro de historial)
-    update_change_reason(turno, reason)
 
 
 def _slot_libre(turno_cancelado: Turno) -> bool:
     """Valida que el hueco siga libre antes de enviar o aceptar una oferta."""
-    return (
-        not Turno.objects.filter(
-            empleado=turno_cancelado.empleado,
-            fecha_hora=turno_cancelado.fecha_hora,
-            estado__in=ESTADOS_ACTIVOS,
-        )
-        .exclude(id=turno_cancelado.id)
-        .exists()
-    )
+    return not Turno.objects.filter(
+        empleado=turno_cancelado.empleado,
+        fecha_hora=turno_cancelado.fecha_hora,
+        estado__in=ESTADOS_ACTIVOS,
+    ).exists()
 
 
 def _calcular_monto_final(
     precio_total: Decimal, descuento: Decimal, senia: Decimal
 ) -> Decimal:
-    monto = (precio_total - descuento) - senia
-    if monto < 0:
-        return Decimal("0.00")
-    return monto
+    monto = precio_total - descuento - senia
+    return max(Decimal("0.00"), monto)
 
 
 def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
-    """
-    Selecciona un candidato y envía la oferta de reasignación.
-    Retorna un dict con el estado de la operación.
-    """
+    """Selecciona un candidato y envía la oferta de reasignación."""
     try:
         turno_cancelado = Turno.objects.select_related(
             "servicio", "empleado__user"
@@ -77,6 +64,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
     candidato = (
         Turno.objects.filter(
             servicio=turno_cancelado.servicio,
+            empleado=turno_cancelado.empleado,
             estado="confirmado",
             fecha_hora__gt=turno_cancelado.fecha_hora,
         )
@@ -139,7 +127,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
             args=[log_reasignacion.id], countdown=15 * 60
         )
         logger.info(f"Tarea de expiración encolada para log {log_reasignacion.id}")
-    except Exception as e:
+    except Exception as e:  # pragma: no cover - fallo opcional de Celery
         logger.warning(
             f"No se pudo encolar tarea de expiración (Celery no disponible): {e}"
         )
@@ -149,9 +137,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
 
 
 def expirar_oferta_reasignacion(log_id: int) -> dict:
-    """
-    Marca la oferta como expirada y continúa con el siguiente candidato.
-    """
+    """Marca la oferta como expirada y continúa con el siguiente candidato."""
     try:
         log_reasignacion = LogReasignacion.objects.select_related(
             "turno_cancelado", "turno_ofrecido"
@@ -174,22 +160,20 @@ def expirar_oferta_reasignacion(log_id: int) -> dict:
         and log_reasignacion.turno_ofrecido.estado == "oferta_enviada"
     ):
         turno_ofrecido = log_reasignacion.turno_ofrecido
-        turno_ofrecido.estado = "expirada"
+        turno_ofrecido.estado = "confirmado"
         _save_turno_with_history(
             turno_ofrecido,
-            "Oferta expirada por reasignacion",
+            "Oferta expirada (no respondida a tiempo)",
             update_fields=["estado"],
         )
 
+    # Continuar con siguiente candidato
     iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
-
     return {"status": "expirada"}
 
 
 def responder_oferta_reasignacion(token: str, accion: str) -> dict:
-    """
-    Procesa la respuesta del cliente a una oferta de reasignación.
-    """
+    """Procesa la respuesta del cliente a una oferta de reasignación."""
     try:
         log_reasignacion = LogReasignacion.objects.select_related(
             "turno_cancelado",
@@ -211,6 +195,9 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         log_reasignacion.estado_final = "expirada"
         log_reasignacion.save(update_fields=["estado_final"])
         return {"status": "expirada"}
+
+    turno_cancelado = log_reasignacion.turno_cancelado
+    turno_ofrecido = log_reasignacion.turno_ofrecido
 
     if accion == "rechazar":
         log_reasignacion.estado_final = "rechazada"
@@ -234,9 +221,6 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
     if accion != "aceptar":
         return {"status": "accion_invalida"}
 
-    turno_cancelado = log_reasignacion.turno_cancelado
-    turno_ofrecido = log_reasignacion.turno_ofrecido
-
     if not turno_ofrecido:
         return {"status": "turno_ofrecido_no_disponible"}
 
@@ -244,8 +228,6 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         return {"status": "hueco_no_disponible"}
 
     with transaction.atomic():
-        # Bloquear solo el LogReasignacion para evitar race conditions
-        # (PostgreSQL no permite FOR UPDATE en nullable side of outer join)
         log_reasignacion = LogReasignacion.objects.select_for_update(of=("self",)).get(
             pk=log_reasignacion.pk
         )
@@ -269,25 +251,16 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
 
         turno_cancelado.cliente_id = turno_ofrecido.cliente_id
         turno_cancelado.estado = "confirmado"
-        turno_cancelado.precio_final = monto_final
-        turno_cancelado.senia_pagada = senia_pagada
-        turno_cancelado.notas_cliente = turno_ofrecido.notas_cliente
         _save_turno_with_history(
             turno_cancelado,
-            "Oferta aceptada, turno reasignado",
-            update_fields=[
-                "cliente",
-                "estado",
-                "precio_final",
-                "senia_pagada",
-                "notas_cliente",
-            ],
+            "Oferta de reasignacion aceptada",
+            update_fields=["cliente_id", "estado"],
         )
 
         turno_ofrecido.estado = "cancelado"
         _save_turno_with_history(
             turno_ofrecido,
-            "Oferta aceptada, turno ofrecido cancelado",
+            "Turno cancelado por reasignacion",
             update_fields=["estado"],
         )
 
@@ -298,9 +271,7 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
 
 
 def obtener_detalles_oferta_reasignacion(token: str) -> dict:
-    """
-    Obtiene los detalles de una oferta de reasignación para mostrar al cliente antes de aceptar/rechazar.
-    """
+    """Obtiene detalles de una oferta para mostrar al cliente."""
     try:
         log_reasignacion = LogReasignacion.objects.select_related(
             "turno_cancelado",
@@ -314,7 +285,6 @@ def obtener_detalles_oferta_reasignacion(token: str) -> dict:
     except LogReasignacion.DoesNotExist:
         return {"status": "token_invalido", "error": "Token no válido o expirado"}
 
-    # Verificar si ya fue resuelta
     if log_reasignacion.estado_final:
         return {
             "status": "ya_resuelta",
@@ -322,7 +292,6 @@ def obtener_detalles_oferta_reasignacion(token: str) -> dict:
             "mensaje": f"Esta oferta ya fue {log_reasignacion.estado_final}",
         }
 
-    # Verificar si expiró
     if log_reasignacion.expires_at <= timezone.now():
         return {
             "status": "expirada",
@@ -332,7 +301,6 @@ def obtener_detalles_oferta_reasignacion(token: str) -> dict:
     turno_cancelado = log_reasignacion.turno_cancelado
     turno_ofrecido = log_reasignacion.turno_ofrecido
 
-    # Calcular montos
     descuento = Decimal(log_reasignacion.monto_descuento or 0)
     senia_pagada = Decimal(turno_ofrecido.senia_pagada or 0)
     precio_total = Decimal(turno_cancelado.servicio.precio)

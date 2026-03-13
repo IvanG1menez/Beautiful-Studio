@@ -126,7 +126,8 @@ WSGI_APPLICATION = "core.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
+# Usar PostgreSQL en producción, SQLite en desarrollo para simplicidad.
+"""DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": config("DB_NAME", default="db_proyecto"),
@@ -136,7 +137,14 @@ DATABASES = {
         "PORT": config("DB_PORT", default="5433"),
     }
 }
-
+"""
+# Base de datos SQLite para desarrollo local (sin necesidad de configurar PostgreSQL)
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators

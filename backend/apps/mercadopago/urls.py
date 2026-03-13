@@ -6,6 +6,7 @@ from .views import (
     ListarPagosView,
     VerificarPagoView,
     WebhookMercadoPagoView,
+    ComprobantePagoView,
 )
 
 app_name = "mercadopago"
@@ -23,5 +24,10 @@ urlpatterns = [
         "verificar-pago/<str:preference_id>/",
         VerificarPagoView.as_view(),
         name="verificar-pago",
+    ),
+    path(
+        "comprobante/<int:turno_id>/",
+        ComprobantePagoView.as_view(),
+        name="comprobante-pago",
     ),
 ]

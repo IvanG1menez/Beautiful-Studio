@@ -35,6 +35,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
     fecha_hora_fin = serializers.DateTimeField(read_only=True)
     puede_cancelar = serializers.SerializerMethodField()
     reacomodamiento_exitoso = serializers.SerializerMethodField()
+    tiene_pago_mp = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
@@ -61,6 +62,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "precio_final",
             "senia_pagada",
             "puede_cancelar",
+            "tiene_pago_mp",
             "notas_cliente",
             "notas_empleado",
             "reacomodamiento_exitoso",
@@ -77,6 +79,14 @@ class TurnoListSerializer(serializers.ModelSerializer):
         return LogReasignacion.objects.filter(
             turno_cancelado=obj, estado_final="aceptada"
         ).exists()
+
+    def get_tiene_pago_mp(self, obj):
+        """Indica si el turno tiene un pago de Mercado Pago aprobado asociado."""
+        try:
+            pago = obj.pago_mercadopago
+        except Exception:
+            return False
+        return pago is not None and getattr(pago, "estado", "") == "approved"
 
 
 class TurnoDetailSerializer(serializers.ModelSerializer):

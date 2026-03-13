@@ -294,6 +294,24 @@ class EmailService:
                 f"Preparando email de confirmación para cliente: {turno.cliente.user.email}"
             )
 
+            # Cargar datos fiscales/configuración global para el comprobante
+            try:
+                from apps.authentication.models import ConfiguracionGlobal
+
+                config_global = ConfiguracionGlobal.get_config()
+                nombre_empresa = config_global.nombre_empresa or "Beautiful Studio"
+                razon_social = config_global.razon_social or ""
+                cuit = config_global.cuit or ""
+                fecha_fundacion = config_global.fecha_fundacion
+                fecha_fundacion_str = (
+                    fecha_fundacion.strftime("%d/%m/%Y") if fecha_fundacion else ""
+                )
+            except Exception:
+                nombre_empresa = "Beautiful Studio"
+                razon_social = ""
+                cuit = ""
+                fecha_fundacion_str = ""
+
             contenido = f"""
                 <h2 style="color: #667eea; margin-bottom: 20px;">Tu turno ha sido confirmado</h2>
                 
@@ -326,8 +344,17 @@ class EmailService:
                         <span class="info-value">{turno.get_estado_display()}</span>
                     </div>
                 </div>
+                <div class="info-box" style="margin-top: 20px;">
+                    <div class="info-row">
+                        <span class="info-label">Nombre de fantasía:</span>
+                        <span class="info-value">{nombre_empresa}</span>
+                    </div>
+                    {f'<div class="info-row"><span class="info-label">Razón social:</span><span class="info-value">{razon_social}</span></div>' if razon_social else ''}
+                    {f'<div class="info-row"><span class="info-label">CUIT:</span><span class="info-value">{cuit}</span></div>' if cuit else ''}
+                    {f'<div class="info-row"><span class="info-label">Fecha de inicio:</span><span class="info-value">{fecha_fundacion_str}</span></div>' if fecha_fundacion_str else ''}
+                </div>
                 
-                <p>Te esperamos en Beautiful Studio. ¡Gracias por elegirnos!</p>
+                <p>Te esperamos en {nombre_empresa}. ¡Gracias por elegirnos!</p>
             """
 
             html_message = EmailService._get_base_template().format(
