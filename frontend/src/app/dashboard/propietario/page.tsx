@@ -8,18 +8,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { formatDate, formatTime } from '@/lib/dateUtils';
 import {
   AlertCircle,
-  BarChart3,
   Calendar,
   CheckCircle,
   Clock,
   DollarSign,
   Edit,
   Eye,
-  Filter,
   Loader2,
   Plus,
   Scissors,
-  Settings,
   Shield,
   Sparkles,
   TrendingDown,
@@ -45,6 +42,7 @@ interface DashboardStats {
   turnos_hoy_variacion: number;
   dinero_recuperado: number;
   dinero_recuperado_variacion: number;
+  total_servicios?: number;
 }
 
 interface TurnoAdmin {
@@ -385,28 +383,6 @@ export default function DashboardAdminPage() {
                 </p>
               </div>
             </div>
-            <div className="flex space-x-3">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setActiveTab('historial');
-                  loadHistorial();
-                }}
-              >
-                <Clock className="w-4 h-4 mr-2" />
-                Historial
-                {historialCancelados > 0 && (
-                  <Badge className="ml-2 bg-red-500">{historialCancelados}</Badge>
-                )}
-              </Button>
-              <Button
-                onClick={() => router.push('/dashboard/propietario/configuracion')}
-                className="bg-linear-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-              >
-                <Settings className="w-4 h-4 mr-2" />
-                Configuración Global
-              </Button>
-            </div>
           </div>
         </div>
       </div>
@@ -427,466 +403,351 @@ export default function DashboardAdminPage() {
             </Button>
           </div>
         )}
+        <div className="space-y-6">
+          {/* Tarjetas de estadísticas principales */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Ingresos del Mes</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">
+                  {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.ingresos_mes?.toFixed(2) || 0}`}
+                </div>
+                {renderDelta(stats?.ingresos_mes_variacion, 'vs mes pasado')}
+              </CardContent>
+            </Card>
 
-        <Tabs value={activeTab} onValueChange={(value) => {
-          setActiveTab(value);
-          if (value === 'historial') {
-            loadHistorial();
-          }
-        }} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="overview">Resumen</TabsTrigger>
-            <TabsTrigger value="historial" className="relative">
-              Historial
-              {historialCancelados > 0 && (
-                <Badge className="ml-2 bg-red-500">{historialCancelados}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="turnos">Turnos</TabsTrigger>
-            <TabsTrigger value="reportes">Reportes</TabsTrigger>
-          </TabsList>
+            <Card className="border-orange-200 bg-orange-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-orange-900">Comisión Pendiente</CardTitle>
+                <DollarSign className="h-4 w-4 text-orange-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-700">
+                  {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
+                </div>
+                {renderDelta(stats?.comision_pendiente_variacion, 'vs mes pasado')}
+              </CardContent>
+            </Card>
 
-          {/* Tab: Resumen */}
-          <TabsContent value="overview" className="space-y-6">
-            {/* Tarjetas de estadísticas principales */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Ingresos del Mes</CardTitle>
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.ingresos_mes?.toFixed(2) || 0}`}
-                  </div>
-                  {renderDelta(stats?.ingresos_mes_variacion, 'vs mes pasado')}
-                </CardContent>
-              </Card>
+            <Card className="border-blue-200 bg-blue-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-blue-900">Dinero Recuperado</CardTitle>
+                <Sparkles className="h-4 w-4 text-blue-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-700">
+                  {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.dinero_recuperado?.toFixed(2) || 0}`}
+                </div>
+                {renderDelta(stats?.dinero_recuperado_variacion, 'vs mes pasado')}
+              </CardContent>
+            </Card>
+          </div>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Turnos Hoy</CardTitle>
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_hoy || 0}
-                  </div>
-                  {renderDelta(stats?.turnos_hoy_variacion, 'vs ayer')}
-                </CardContent>
-              </Card>
-
-              <Card className="border-orange-200 bg-orange-50">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-orange-900">Comisión Pendiente</CardTitle>
-                  <DollarSign className="h-4 w-4 text-orange-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-orange-700">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
-                  </div>
-                  {renderDelta(stats?.comision_pendiente_variacion, 'vs mes pasado')}
-                </CardContent>
-              </Card>
-
-              <Card className="border-red-200 bg-red-50">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-red-900">Turnos Pendientes de Pago</CardTitle>
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-red-700">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_pendientes_pago || 0}
-                  </div>
-                  {renderDelta(stats?.turnos_pendientes_pago_variacion, 'vs ayer')}
-                </CardContent>
-              </Card>
-
-              <Card className="border-blue-200 bg-blue-50">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium text-blue-900">Dinero Recuperado</CardTitle>
-                  <Sparkles className="h-4 w-4 text-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-700">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.dinero_recuperado?.toFixed(2) || 0}`}
-                  </div>
-                  {renderDelta(stats?.dinero_recuperado_variacion, 'vs mes pasado')}
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Estadísticas secundarias */}
+          {/* Acciones rápidas */}
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold text-gray-900">Acciones rápidas</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Clientes</CardTitle>
+                  <CardTitle className="text-sm font-medium">Clientes</CardTitle>
                   <Users className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_clientes || 0}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold">
+                        {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_clientes || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Clientes registrados</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => router.push('/dashboard/propietario/clientes/nuevo')}
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Agregar
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Clientes registrados</p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Empleados</CardTitle>
+                  <CardTitle className="text-sm font-medium">Profesionales</CardTitle>
                   <Scissors className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_empleados || 0}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold">
+                        {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_empleados || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Profesionales activos</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => router.push('/dashboard/propietario/profesionales/nuevo')}
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Agregar
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Profesionales activos</p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Próximos 48h</CardTitle>
-                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-sm font-medium">Servicios</CardTitle>
+                  <Scissors className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
-                    {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.turnos_proximos_48h || 0}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl font-bold">
+                        {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_servicios || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Servicios configurados</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => router.push('/dashboard/propietario/servicios/nuevo')}
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Agregar
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Turnos programados</p>
                 </CardContent>
               </Card>
             </div>
+          </section>
 
-            {/* Acción Requerida / Próximos Turnos */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
-                  Acción Requerida / Próximos Turnos
-                </CardTitle>
-                <CardDescription>
-                  Turnos que requieren tu atención inmediata
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Tabs value={accionTab} onValueChange={(value) => handleAccionTabChange(value as any)}>
-                  <TabsList className="grid w-full grid-cols-3 mb-4">
-                    <TabsTrigger value="proximos_48h" className="relative">
-                      Próximos (48h)
-                      {stats && stats.turnos_proximos_48h > 0 && (
-                        <Badge className="ml-2 bg-blue-500">{stats.turnos_proximos_48h}</Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="pendientes_pago" className="relative">
-                      Pendientes de Pago
-                      {stats && stats.turnos_pendientes_pago > 0 && (
-                        <Badge className="ml-2 bg-red-500">{stats.turnos_pendientes_pago}</Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="pendientes_aceptacion" className="relative">
-                      Pendientes de Aceptación
-                      {stats && stats.turnos_pendientes_aceptacion > 0 && (
-                        <Badge className="ml-2 bg-orange-500">{stats.turnos_pendientes_aceptacion}</Badge>
-                      )}
-                    </TabsTrigger>
-                  </TabsList>
+          {/* Acción Requerida / Próximos Turnos */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <AlertCircle className="w-5 h-5 mr-2 text-orange-600" />
+                Acción Requerida / Próximos Turnos
+              </CardTitle>
+              <CardDescription>
+                Turnos que requieren tu atención inmediata
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Tabs value={accionTab} onValueChange={(value) => handleAccionTabChange(value as any)}>
+                <TabsList className="grid w-full grid-cols-3 mb-4">
+                  <TabsTrigger value="proximos_48h" className="relative">
+                    Próximos (48h)
+                    {stats && stats.turnos_proximos_48h > 0 && (
+                      <Badge className="ml-2 bg-blue-500">{stats.turnos_proximos_48h}</Badge>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="pendientes_pago" className="relative">
+                    Pendientes de Pago
+                    {stats && stats.turnos_pendientes_pago > 0 && (
+                      <Badge className="ml-2 bg-red-500">{stats.turnos_pendientes_pago}</Badge>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="pendientes_aceptacion" className="relative">
+                    Pendientes de Aceptación
+                    {stats && stats.turnos_pendientes_aceptacion > 0 && (
+                      <Badge className="ml-2 bg-orange-500">{stats.turnos_pendientes_aceptacion}</Badge>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
 
-                  <TabsContent value="proximos_48h">
-                    {loadingData ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                        <span className="ml-2">Cargando turnos...</span>
-                      </div>
-                    ) : turnosAccion.length > 0 ? (
-                      <div className="space-y-4">
-                        {turnosAccion.map((turno) => {
-                          const dateFormatted = formatDate(turno.fecha_hora);
-                          const timeFormatted = formatTime(turno.fecha_hora);
-                          return (
-                            <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                              <div className="flex items-center space-x-4">
-                                {getEstadoIcon(turno.estado)}
-                                <div>
-                                  <div className="flex items-center space-x-2">
-                                    <span className="font-medium">{getServicioNombre(turno)}</span>
-                                    <Badge variant={getEstadoBadgeVariant(turno.estado)}>
-                                      {turno.estado}
-                                    </Badge>
-                                    {turno.reacomodamiento_exitoso && (
-                                      <span className="flex items-center text-xs text-blue-600">
-                                        <Sparkles className="w-3 h-3 mr-1" />
-                                        Reacomodado
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-sm text-gray-600">
-                                    {getClienteNombre(turno)} • {getEmpleadoNombre(turno)}
-                                  </p>
-                                  <p className="text-sm text-gray-500">
-                                    {dateFormatted} - {timeFormatted}
-                                  </p>
+                <TabsContent value="proximos_48h">
+                  {loadingData ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <span className="ml-2">Cargando turnos...</span>
+                    </div>
+                  ) : turnosAccion.length > 0 ? (
+                    <div className="space-y-4">
+                      {turnosAccion.map((turno) => {
+                        const dateFormatted = formatDate(turno.fecha_hora);
+                        const timeFormatted = formatTime(turno.fecha_hora);
+                        return (
+                          <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                            <div className="flex items-center space-x-4">
+                              {getEstadoIcon(turno.estado)}
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-medium">{getServicioNombre(turno)}</span>
+                                  <Badge variant={getEstadoBadgeVariant(turno.estado)}>
+                                    {turno.estado}
+                                  </Badge>
+                                  {turno.reacomodamiento_exitoso && (
+                                    <span className="flex items-center text-xs text-blue-600">
+                                      <Sparkles className="w-3 h-3 mr-1" />
+                                      Reacomodado
+                                    </span>
+                                  )}
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-semibold text-green-600">
-                                  ${getPrecioTurno(turno)}
+                                <p className="text-sm text-gray-600">
+                                  {getClienteNombre(turno)} • {getEmpleadoNombre(turno)}
                                 </p>
-                                <div className="flex space-x-1 mt-1">
-                                  <Button size="sm" variant="ghost">
-                                    <Eye className="w-3 h-3" />
-                                  </Button>
-                                  <Button size="sm" variant="ghost">
-                                    <Edit className="w-3 h-3" />
-                                  </Button>
-                                </div>
+                                <p className="text-sm text-gray-500">
+                                  {dateFormatted} - {timeFormatted}
+                                </p>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-gray-500">No hay turnos próximos en las siguientes 48 horas</p>
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="pendientes_pago">
-                    {loadingData ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                        <span className="ml-2">Cargando turnos...</span>
-                      </div>
-                    ) : turnosAccion.length > 0 ? (
-                      <div className="space-y-4">
-                        {turnosAccion.map((turno) => {
-                          const dateFormatted = formatDate(turno.fecha_hora);
-                          const timeFormatted = formatTime(turno.fecha_hora);
-                          return (
-                            <div key={turno.id} className="flex items-center justify-between p-4 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100">
-                              <div className="flex items-center space-x-4">
-                                <DollarSign className="w-5 h-5 text-red-600" />
-                                <div>
-                                  <div className="flex items-center space-x-2">
-                                    <span className="font-medium">{getServicioNombre(turno)}</span>
-                                    <Badge className="bg-red-500">Pendiente Pago</Badge>
-                                    {turno.reacomodamiento_exitoso && (
-                                      <span className="flex items-center text-xs text-blue-600">
-                                        <Sparkles className="w-3 h-3 mr-1" />
-                                        Reacomodado
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-sm text-gray-700">
-                                    Profesional: {getEmpleadoNombre(turno)}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    Completado: {dateFormatted} - {timeFormatted}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-bold text-red-700">
-                                  ${getPrecioTurno(turno)}
-                                </p>
-                                <Button size="sm" className="mt-2 bg-red-600 hover:bg-red-700">
-                                  Marcar como Pagado
+                            <div className="text-right">
+                              <p className="font-semibold text-green-600">
+                                ${getPrecioTurno(turno)}
+                              </p>
+                              <div className="flex space-x-1 mt-1">
+                                <Button size="sm" variant="ghost">
+                                  <Eye className="w-3 h-3" />
+                                </Button>
+                                <Button size="sm" variant="ghost">
+                                  <Edit className="w-3 h-3" />
                                 </Button>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
-                        <p className="text-gray-500">No hay turnos pendientes de pago</p>
-                        <p className="text-sm text-gray-400 mt-2">¡Todos los pagos están al día!</p>
-                      </div>
-                    )}
-                  </TabsContent>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No hay turnos próximos en las siguientes 48 horas</p>
+                    </div>
+                  )}
+                </TabsContent>
 
-                  <TabsContent value="pendientes_aceptacion">
-                    {loadingData ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                        <span className="ml-2">Cargando turnos...</span>
-                      </div>
-                    ) : turnosAccion.length > 0 ? (
-                      <div className="space-y-4">
-                        {turnosAccion.map((turno) => {
-                          const dateFormatted = formatDate(turno.fecha_hora);
-                          const timeFormatted = formatTime(turno.fecha_hora);
-                          return (
-                            <div key={turno.id} className="flex items-center justify-between p-4 border border-orange-200 bg-orange-50 rounded-lg hover:bg-orange-100">
-                              <div className="flex items-center space-x-4">
-                                <Clock className="w-5 h-5 text-orange-600" />
-                                <div>
-                                  <div className="flex items-center space-x-2">
-                                    <span className="font-medium">{getServicioNombre(turno)}</span>
-                                    <Badge className="bg-orange-500">Pendiente</Badge>
-                                    {turno.reacomodamiento_exitoso && (
-                                      <span className="flex items-center text-xs text-blue-600">
-                                        <Sparkles className="w-3 h-3 mr-1" />
-                                        Reacomodado
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-sm text-gray-700">
-                                    {getClienteNombre(turno)} → {getEmpleadoNombre(turno)}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    Solicitado para: {dateFormatted} - {timeFormatted}
-                                  </p>
+                <TabsContent value="pendientes_pago">
+                  {loadingData ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <span className="ml-2">Cargando turnos...</span>
+                    </div>
+                  ) : turnosAccion.length > 0 ? (
+                    <div className="space-y-4">
+                      {turnosAccion.map((turno) => {
+                        const dateFormatted = formatDate(turno.fecha_hora);
+                        const timeFormatted = formatTime(turno.fecha_hora);
+                        return (
+                          <div key={turno.id} className="flex items-center justify-between p-4 border border-red-200 bg-red-50 rounded-lg hover:bg-red-100">
+                            <div className="flex items-center space-x-4">
+                              <DollarSign className="w-5 h-5 text-red-600" />
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-medium">{getServicioNombre(turno)}</span>
+                                  <Badge className="bg-red-500">Pendiente Pago</Badge>
+                                  {turno.reacomodamiento_exitoso && (
+                                    <span className="flex items-center text-xs text-blue-600">
+                                      <Sparkles className="w-3 h-3 mr-1" />
+                                      Reacomodado
+                                    </span>
+                                  )}
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-semibold text-orange-700">
-                                  ${getPrecioTurno(turno)}
+                                <p className="text-sm text-gray-700">
+                                  Profesional: {getEmpleadoNombre(turno)}
                                 </p>
-                                <div className="flex space-x-2 mt-2">
-                                  <Button
-                                    size="sm"
-                                    className="bg-green-600 hover:bg-green-700"
-                                    onClick={() => changeTurnoEstado(turno.id, 'confirmado')}
-                                    disabled={actionLoadingId === turno.id}
-                                  >
-                                    {actionLoadingId === turno.id ? 'Procesando...' : 'Aceptar'}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-red-600 border-red-600"
-                                    onClick={() => changeTurnoEstado(turno.id, 'cancelado')}
-                                    disabled={actionLoadingId === turno.id}
-                                  >
-                                    {actionLoadingId === turno.id ? 'Procesando...' : 'Rechazar'}
-                                  </Button>
-                                </div>
+                                <p className="text-sm text-gray-600">
+                                  Completado: {dateFormatted} - {timeFormatted}
+                                </p>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
-                        <p className="text-gray-500">No hay solicitudes pendientes</p>
-                        <p className="text-sm text-gray-400 mt-2">Todas las solicitudes han sido procesadas</p>
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Tab: Turnos */}
-          <TabsContent value="turnos" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Gestión de Turnos</CardTitle>
-                    <CardDescription>Administra todas las citas del sistema</CardDescription>
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button variant="outline">
-                      <Filter className="w-4 h-4 mr-2" />
-                      Filtros
-                    </Button>
-                    <Button>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Nuevo Turno
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-gray-500">
-                  <BarChart3 className="w-12 h-12 mx-auto mb-4" />
-                  <p>Funcionalidad de gestión de turnos en desarrollo</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Tab: Historial */}
-          <TabsContent value="historial" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Historial de Turnos</CardTitle>
-                <CardDescription>Turnos del día con estados cancelado, confirmado y realizado</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loadingHistorial ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                    <span className="ml-2">Cargando historial...</span>
-                  </div>
-                ) : turnosHistorial.length > 0 ? (
-                  <div className="space-y-4">
-                    {turnosHistorial.map((turno) => {
-                      const dateFormatted = formatDate(turno.fecha_hora);
-                      const timeFormatted = formatTime(turno.fecha_hora);
-                      return (
-                        <div key={turno.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{getServicioNombre(turno)}</span>
-                              <Badge className={getEstadoHistorialStyles(turno.estado)}>
-                                {getEstadoHistorialLabel(turno.estado)}
-                              </Badge>
-                              {user?.role && ['propietario', 'superusuario'].includes(user.role) && turno.reacomodamiento_exitoso && (
-                                <Badge variant="outline" className="border-blue-200 text-blue-700">
-                                  Reacomodado
-                                </Badge>
-                              )}
+                            <div className="text-right">
+                              <p className="font-bold text-red-700">
+                                ${getPrecioTurno(turno)}
+                              </p>
+                              <Button size="sm" className="mt-2 bg-red-600 hover:bg-red-700">
+                                Marcar como Pagado
+                              </Button>
                             </div>
-                            <p className="text-sm text-gray-600">
-                              {getClienteNombre(turno)} • {getEmpleadoNombre(turno)}
-                            </p>
-                            <p className="text-sm text-gray-500">
-                              {dateFormatted} - {timeFormatted}
-                            </p>
                           </div>
-                          <div className="text-right">
-                            <p className="font-semibold text-gray-900">
-                              ${getPrecioTurno(turno)}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No hay turnos para mostrar hoy</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No hay turnos pendientes de pago</p>
+                      <p className="text-sm text-gray-400 mt-2">¡Todos los pagos están al día!</p>
+                    </div>
+                  )}
+                </TabsContent>
 
-          {/* Tab: Reportes */}
-          <TabsContent value="reportes" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Reportes y Análisis</CardTitle>
-                <CardDescription>Estadísticas detalladas y reportes del negocio</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-gray-500">
-                  <BarChart3 className="w-12 h-12 mx-auto mb-4" />
-                  <p>Sistema de reportes en desarrollo</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                <TabsContent value="pendientes_aceptacion">
+                  {loadingData ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <span className="ml-2">Cargando turnos...</span>
+                    </div>
+                  ) : turnosAccion.length > 0 ? (
+                    <div className="space-y-4">
+                      {turnosAccion.map((turno) => {
+                        const dateFormatted = formatDate(turno.fecha_hora);
+                        const timeFormatted = formatTime(turno.fecha_hora);
+                        return (
+                          <div key={turno.id} className="flex items-center justify-between p-4 border border-orange-200 bg-orange-50 rounded-lg hover:bg-orange-100">
+                            <div className="flex items-center space-x-4">
+                              <Clock className="w-5 h-5 text-orange-600" />
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-medium">{getServicioNombre(turno)}</span>
+                                  <Badge className="bg-orange-500">Pendiente</Badge>
+                                  {turno.reacomodamiento_exitoso && (
+                                    <span className="flex items-center text-xs text-blue-600">
+                                      <Sparkles className="w-3 h-3 mr-1" />
+                                      Reacomodado
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-gray-700">
+                                  {getClienteNombre(turno)} → {getEmpleadoNombre(turno)}
+                                </p>
+                                <p className="text-sm text-gray-600">
+                                  Solicitado para: {dateFormatted} - {timeFormatted}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-orange-700">
+                                ${getPrecioTurno(turno)}
+                              </p>
+                              <div className="flex space-x-2 mt-2">
+                                <Button
+                                  size="sm"
+                                  className="bg-green-600 hover:bg-green-700"
+                                  onClick={() => changeTurnoEstado(turno.id, 'confirmado')}
+                                  disabled={actionLoadingId === turno.id}
+                                >
+                                  {actionLoadingId === turno.id ? 'Procesando...' : 'Aceptar'}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600 border-red-600"
+                                  onClick={() => changeTurnoEstado(turno.id, 'cancelado')}
+                                  disabled={actionLoadingId === turno.id}
+                                >
+                                  {actionLoadingId === turno.id ? 'Procesando...' : 'Rechazar'}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No hay solicitudes pendientes</p>
+                      <p className="text-sm text-gray-400 mt-2">Todas las solicitudes han sido procesadas</p>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   marcarNotificacionLeida,
   marcarTodasLeidas,
@@ -14,7 +15,8 @@ import {
   obtenerNotificacionesNoLeidas,
   obtenerNotificacionesRecientes,
 } from '@/services/notificacionesService';
-import { Bell } from 'lucide-react';
+import { Bell, Check, Settings } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 export function NotificationBell() {
@@ -22,6 +24,8 @@ export function NotificationBell() {
   const [contador, setContador] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  const { user } = useAuth();
 
   // Cargar notificaciones
   const loadNotificaciones = async () => {
@@ -90,6 +94,27 @@ export function NotificationBell() {
     }
   };
 
+  const getConfiguracionNotificacionesRoute = () => {
+    const role = user?.role?.toLowerCase();
+
+    if (role === 'propietario' || role === 'superusuario') {
+      // Para el administrador, apuntamos a la configuración global
+      return '/dashboard/propietario/configuracion';
+    }
+
+    if (role === 'profesional') {
+      // Pestaña de notificaciones del perfil profesional
+      return '/dashboard/profesional/perfil?tab=notificaciones';
+    }
+
+    if (role === 'cliente') {
+      // Pestaña de notificaciones del perfil cliente
+      return '/dashboard/cliente/perfil?tab=notificaciones';
+    }
+
+    return '/configuracion';
+  };
+
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
@@ -109,18 +134,37 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0" align="end">
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h3 className="font-semibold">Notificaciones</h3>
-          {contador > 0 && (
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold">Notificaciones</h3>
+            {contador === 0 && (
+              <Check className="h-4 w-4 text-green-500" />
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {contador > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleMarcarTodasLeidas}
+                disabled={loading}
+                className="h-7 w-7"
+              >
+                <Check className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               variant="ghost"
-              size="sm"
-              onClick={handleMarcarTodasLeidas}
-              disabled={loading}
-              className="text-xs"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => {
+                setIsOpen(false);
+                router.push(getConfiguracionNotificacionesRoute());
+              }}
+              aria-label="Configuración de notificaciones"
             >
-              Marcar todas como leídas
+              <Settings className="h-4 w-4" />
             </Button>
-          )}
+          </div>
         </div>
 
         <ScrollArea className="h-[400px]">

@@ -1,53 +1,18 @@
 ﻿'use client';
 
-import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { CategoriaOption, ServicioForm, ServicioFormValues } from '@/components/ServicioForm';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Combobox, ComboboxOption } from '@/components/ui/combobox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent } from '@/components/ui/card';
 import { getAuthHeaders } from '@/lib/auth-headers';
-import { ArrowLeft, Loader2, Save, Scissors } from 'lucide-react';
+import { ArrowLeft, Loader2, Scissors } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-
-interface Categoria {
-  id: number;
-  nombre: string;
-  descripcion: string;
-  is_active: boolean;
-  sala?: number | null;
-  sala_nombre?: string;
-  sala_capacidad?: number;
-}
 
 export default function NuevoServicioPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [loadingCategorias, setLoadingCategorias] = useState(true);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
-
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
-  const [notificationMessage, setNotificationMessage] = useState({
-    title: '',
-    description: '',
-    type: 'success' as 'success' | 'error'
-  });
-
-  const [formData, setFormData] = useState({
-    nombre: '',
-    categoria: '',
-    precio: '',
-    duracion_minutos: '',
-    descripcion: '',
-    is_active: true
-  });
-
-  const showNotification = (title: string, description: string, type: 'success' | 'error') => {
-    setNotificationMessage({ title, description, type });
-    setNotificationDialogOpen(true);
-  };
+  const [categorias, setCategorias] = useState<CategoriaOption[]>([]);
 
   // Cargar categorías activas
   useEffect(() => {
@@ -60,22 +25,13 @@ export default function NuevoServicioPage() {
 
         if (response.ok) {
           const data = await response.json();
-          const categoriasActivas = (data.results || data).filter((cat: Categoria) => cat.is_active);
+          const categoriasActivas = (data.results || data).filter((cat: any) => cat.is_active);
           setCategorias(categoriasActivas);
         } else {
-          showNotification(
-            'Error al cargar categorías',
-            'No se pudieron cargar las categorías. Por favor, intenta nuevamente.',
-            'error'
-          );
+          console.error('Error al cargar categorías');
         }
       } catch (error) {
         console.error('Error fetching categorias:', error);
-        showNotification(
-          'Error de conexión',
-          'No se pudo conectar con el servidor',
-          'error'
-        );
       } finally {
         setLoadingCategorias(false);
       }
@@ -83,115 +39,57 @@ export default function NuevoServicioPage() {
 
     fetchCategorias();
   }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (values: ServicioFormValues) => {
     setLoading(true);
 
     try {
-      // Validaciones básicas
-      if (!formData.nombre || !formData.categoria || !formData.precio || !formData.duracion_minutos) {
-        showNotification(
-          'Campos requeridos',
-          'Por favor completa todos los campos obligatorios marcados con *',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
+      const precio = parseFloat(values.precio);
+      const duracion = parseInt(values.duracion_minutos, 10);
+      const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseFloat(values.valor_descuento_adelanto);
+      const tiempoEspera = values.tiempo_espera_respuesta === '' ? 15 : parseInt(values.tiempo_espera_respuesta, 10);
+      const porcentajeSena = values.porcentaje_sena === '' ? 25 : parseFloat(values.porcentaje_sena);
 
-      // Validar precio y duración
-      const precio = parseFloat(formData.precio);
-      const duracion = parseInt(formData.duracion_minutos);
+      const valorFidelizacion = values.tipo_descuento_fidelizacion === 'PORCENTAJE'
+        ? (values.descuento_fidelizacion_pct === '' ? 0 : parseFloat(values.descuento_fidelizacion_pct))
+        : (values.descuento_fidelizacion_monto === '' ? 0 : parseFloat(values.descuento_fidelizacion_monto));
 
-      if (isNaN(precio) || precio <= 0) {
-        showNotification(
-          'Precio inválido',
-          'El precio debe ser un número mayor a 0',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
+      const descuentoFidelizacionPct = values.tipo_descuento_fidelizacion === 'PORCENTAJE' ? valorFidelizacion : 0;
+      const descuentoFidelizacionMonto = values.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? valorFidelizacion : 0;
 
-      if (isNaN(duracion) || duracion <= 0) {
-        showNotification(
-          'Duración inválida',
-          'La duración debe ser un número mayor a 0',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
-
-      // Preparar datos para enviar
       const dataToSend = {
-        nombre: formData.nombre,
-        categoria: parseInt(formData.categoria),
-        precio: precio,
+        nombre: values.nombre,
+        categoria: parseInt(values.categoria, 10),
+        precio,
         duracion_minutos: duracion,
-        descripcion: formData.descripcion,
-        is_active: formData.is_active
+        descripcion: values.descripcion,
+        is_active: values.is_active,
+        permite_reacomodamiento: values.permite_reacomodamiento,
+        tipo_descuento_adelanto: values.tipo_descuento_adelanto,
+        valor_descuento_adelanto: descuentoValor,
+        tiempo_espera_respuesta: tiempoEspera,
+        porcentaje_sena: porcentajeSena,
+        frecuencia_recurrencia_dias: parseInt(values.frecuencia_recurrencia_dias || '30', 10),
+        descuento_fidelizacion_pct: descuentoFidelizacionPct,
+        descuento_fidelizacion_monto: descuentoFidelizacionMonto,
       };
 
       const response = await fetch('/api/servicios/', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(dataToSend)
+        body: JSON.stringify(dataToSend),
       });
 
-      if (response.ok) {
-        showNotification(
-          'Servicio creado',
-          'El servicio ha sido creado exitosamente',
-          'success'
-        );
-
-        // Redirigir después de 1.5 segundos
-        setTimeout(() => {
-          router.push('/dashboard/propietario/servicios');
-        }, 1500);
-      } else {
+      if (!response.ok) {
         const errorData = await response.json();
         const errorMessage = Object.entries(errorData)
           .map(([key, value]) => `${key}: ${value}`)
           .join('\n');
-
-        showNotification(
-          'Error al crear servicio',
-          errorMessage || 'No se pudo crear el servicio. Por favor, verifica los datos e intenta nuevamente.',
-          'error'
-        );
+        throw new Error(errorMessage || 'No se pudo crear el servicio. Por favor, verifica los datos e intenta nuevamente.');
       }
-    } catch (error) {
-      console.error('Error creating servicio:', error);
-      showNotification(
-        'Error de conexión',
-        'No se pudo conectar con el servidor. Por favor, intenta nuevamente.',
-        'error'
-      );
     } finally {
       setLoading(false);
     }
   };
-
-  const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  // Preparar opciones para el Combobox
-  const categoriasOptions: ComboboxOption[] = categorias.map(categoria => ({
-    value: categoria.id.toString(),
-    label: categoria.nombre,
-    description: categoria.descripcion
-  }));
-
-  const categoriaSeleccionada = categorias.find(
-    (categoria) => categoria.id.toString() === formData.categoria
-  );
 
   if (loadingCategorias) {
     return (
@@ -254,185 +152,28 @@ export default function NuevoServicioPage() {
         </div>
       </div>
 
-      {/* Formulario */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Información Básica */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Información Básica</CardTitle>
-            <CardDescription>Datos principales del servicio</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Nombre del Servicio */}
-            <div className="space-y-2">
-              <Label htmlFor="nombre">Nombre del Servicio *</Label>
-              <Input
-                id="nombre"
-                value={formData.nombre}
-                onChange={(e) => handleInputChange('nombre', e.target.value)}
-                placeholder="Ej: Corte de cabello mujer"
-                required
-              />
-            </div>
-
-            {/* Categoría */}
-            <div className="space-y-2">
-              <Label htmlFor="categoria">Categoría *</Label>
-
-              <Combobox
-                options={categoriasOptions}
-                value={formData.categoria}
-                onValueChange={(value) => handleInputChange('categoria', value)}
-                placeholder="Buscar y seleccionar categoría"
-                searchPlaceholder="Buscar categoría..."
-                emptyMessage="No se encontraron categorías"
-              />
-
-              {categoriaSeleccionada && (
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-                  <p>
-                    Este servicio se brindará en: {categoriaSeleccionada.sala_nombre || 'Sala sin asignar'}.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => router.push('/dashboard/propietario/servicios?tab=categorias')}
-                    className="mt-2 text-blue-700 underline"
-                  >
-                    Cambiar sala de la categoría
-                  </button>
-                </div>
-              )}
-
-              <p className="text-sm text-muted-foreground">
-                Los servicios se organizan por categorías para facilitar la navegación
-              </p>
-            </div>
-
-            {/* Descripción */}
-            <div className="space-y-2">
-              <Label htmlFor="descripcion">Descripción</Label>
-              <Textarea
-                id="descripcion"
-                value={formData.descripcion}
-                onChange={(e) => handleInputChange('descripcion', e.target.value)}
-                placeholder="Describe el servicio, qué incluye, para quién es, etc."
-                rows={4}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Precio y Duración */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Precio y Duración</CardTitle>
-            <CardDescription>Información comercial del servicio</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Precio */}
-              <div className="space-y-2">
-                <Label htmlFor="precio">Precio ($) *</Label>
-                <Input
-                  id="precio"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.precio}
-                  onChange={(e) => handleInputChange('precio', e.target.value)}
-                  placeholder="25.00"
-                  required
-                />
-                <p className="text-sm text-muted-foreground">
-                  Precio en tu moneda local
-                </p>
-              </div>
-
-              {/* Duración */}
-              <div className="space-y-2">
-                <Label htmlFor="duracion_minutos">Duración (minutos) *</Label>
-                <Input
-                  id="duracion_minutos"
-                  type="number"
-                  min="1"
-                  value={formData.duracion_minutos}
-                  onChange={(e) => handleInputChange('duracion_minutos', e.target.value)}
-                  placeholder="45"
-                  required
-                />
-                <p className="text-sm text-muted-foreground">
-                  Tiempo aproximado del servicio
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Disponibilidad */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Disponibilidad</CardTitle>
-            <CardDescription>Controla la visibilidad del servicio</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="is_active"
-                checked={formData.is_active}
-                onChange={(e) => handleInputChange('is_active', e.target.checked)}
-                className="h-4 w-4"
-              />
-              <Label htmlFor="is_active" className="cursor-pointer">
-                Servicio activo y disponible para reservar
-              </Label>
-            </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              Si está desactivado, los clientes no podrán reservar este servicio
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Botones de Acción */}
-        <div className="flex justify-end gap-4">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push('/dashboard/propietario/servicios')}
-            disabled={loading}
-          >
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Creando...
-              </>
-            ) : (
-              <>
-                <Save className="mr-2 h-4 w-4" />
-                Crear Servicio
-              </>
-            )}
-          </Button>
-        </div>
-      </form>
-
-      {/* Modal de Notificación */}
-      <AlertDialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{notificationMessage.title}</AlertDialogTitle>
-            <AlertDialogDescription className="whitespace-pre-line">
-              {notificationMessage.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ServicioForm
+        mode="create"
+        categorias={categorias}
+        initialValues={{
+          nombre: '',
+          categoria: '',
+          precio: '',
+          duracion_minutos: '',
+          descripcion: '',
+          is_active: true,
+          permite_reacomodamiento: false,
+          tipo_descuento_adelanto: 'PORCENTAJE',
+          valor_descuento_adelanto: '',
+          tiempo_espera_respuesta: '15',
+          porcentaje_sena: '25.00',
+          frecuencia_recurrencia_dias: '30',
+          tipo_descuento_fidelizacion: 'PORCENTAJE',
+          descuento_fidelizacion_pct: '0',
+          descuento_fidelizacion_monto: '0',
+        }}
+        onSubmit={handleSubmit}
+      />
     </div>
   );
 }

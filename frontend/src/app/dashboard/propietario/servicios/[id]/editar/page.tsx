@@ -1,28 +1,11 @@
 'use client';
 
-import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { CategoriaOption, ServicioForm, ServicioFormValues } from '@/components/ServicioForm';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Combobox, ComboboxOption } from '@/components/ui/combobox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import { getAuthHeaders } from '@/lib/auth-headers';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-
-interface Categoria {
-  id: number;
-  nombre: string;
-  descripcion: string;
-  is_active: boolean;
-  sala?: number | null;
-  sala_nombre?: string;
-  sala_capacidad?: number;
-}
 
 interface Servicio {
   id: number;
@@ -50,37 +33,8 @@ export default function EditarServicioPage() {
 
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
-
-  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
-  const [notificationMessage, setNotificationMessage] = useState({
-    title: '',
-    description: '',
-    type: 'success' as 'success' | 'error'
-  });
-
-  const [formData, setFormData] = useState({
-    nombre: '',
-    categoria: '',
-    precio: '',
-    duracion_minutos: '',
-    descripcion: '',
-    is_active: true,
-    permite_reacomodamiento: false,
-    tipo_descuento_adelanto: 'PORCENTAJE' as 'PORCENTAJE' | 'MONTO_FIJO',
-    valor_descuento_adelanto: '',
-    tiempo_espera_respuesta: '15',
-    porcentaje_sena: '25.00',
-    frecuencia_recurrencia_dias: '30',
-    tipo_descuento_fidelizacion: 'PORCENTAJE' as 'PORCENTAJE' | 'MONTO_FIJO',
-    descuento_fidelizacion_pct: '0',
-    descuento_fidelizacion_monto: '0'
-  });
-
-  const showNotification = (title: string, description: string, type: 'success' | 'error') => {
-    setNotificationMessage({ title, description, type });
-    setNotificationDialogOpen(true);
-  };
+  const [categorias, setCategorias] = useState<CategoriaOption[]>([]);
+  const [initialValues, setInitialValues] = useState<ServicioFormValues | null>(null);
 
   // Cargar categorías y datos del servicio
   useEffect(() => {
@@ -98,7 +52,7 @@ export default function EditarServicioPage() {
         if (categoriasRes.ok) {
           const categoriasData = await categoriasRes.json();
           const categoriasActivas = (categoriasData.results || categoriasData).filter(
-            (cat: Categoria) => cat.is_active
+            (cat: any) => cat.is_active
           );
           setCategorias(categoriasActivas);
         }
@@ -113,7 +67,7 @@ export default function EditarServicioPage() {
             tipoDescuentoFidelizacion = 'PORCENTAJE';
           }
 
-          setFormData({
+          setInitialValues({
             nombre: servicio.nombre,
             categoria: servicio.categoria.toString(),
             precio: servicio.precio,
@@ -128,25 +82,17 @@ export default function EditarServicioPage() {
             frecuencia_recurrencia_dias: servicio.frecuencia_recurrencia_dias?.toString() || '30',
             tipo_descuento_fidelizacion: tipoDescuentoFidelizacion,
             descuento_fidelizacion_pct: servicio.descuento_fidelizacion_pct?.toString?.() || servicio.descuento_fidelizacion_pct?.toString?.() || '0',
-            descuento_fidelizacion_monto: servicio.descuento_fidelizacion_monto?.toString?.() || servicio.descuento_fidelizacion_monto?.toString?.() || '0'
+            descuento_fidelizacion_monto: servicio.descuento_fidelizacion_monto?.toString?.() || servicio.descuento_fidelizacion_monto?.toString?.() || '0',
           });
         } else {
-          showNotification(
-            'Error al cargar servicio',
-            'No se pudo cargar la información del servicio',
-            'error'
-          );
+          console.error('Error al cargar servicio');
           setTimeout(() => {
             router.push('/dashboard/propietario/servicios');
           }, 2000);
         }
       } catch (error) {
         console.error('Error fetching data:', error);
-        showNotification(
-          'Error de conexión',
-          'No se pudo conectar con el servidor',
-          'error'
-        );
+        console.error('Error de conexión al cargar servicio:', error);
       } finally {
         setLoadingData(false);
       }
@@ -157,213 +103,57 @@ export default function EditarServicioPage() {
     }
   }, [servicioId]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (values: ServicioFormValues) => {
     setLoading(true);
 
     try {
-      // Validaciones básicas
-      if (!formData.nombre || !formData.categoria || !formData.precio || !formData.duracion_minutos) {
-        showNotification(
-          'Campos requeridos',
-          'Por favor completa todos los campos obligatorios',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
+      const precio = parseFloat(values.precio);
+      const duracion = parseInt(values.duracion_minutos, 10);
+      const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseFloat(values.valor_descuento_adelanto);
+      const tiempoEspera = values.tiempo_espera_respuesta === '' ? 15 : parseInt(values.tiempo_espera_respuesta, 10);
+      const porcentajeSena = values.porcentaje_sena === '' ? 25 : parseFloat(values.porcentaje_sena);
 
-      // Validar precio y duración
-      const precio = parseFloat(formData.precio);
-      const duracion = parseInt(formData.duracion_minutos);
+      const valorFidelizacion = values.tipo_descuento_fidelizacion === 'PORCENTAJE'
+        ? (values.descuento_fidelizacion_pct === '' ? 0 : parseFloat(values.descuento_fidelizacion_pct))
+        : (values.descuento_fidelizacion_monto === '' ? 0 : parseFloat(values.descuento_fidelizacion_monto));
 
-      if (isNaN(precio) || precio <= 0) {
-        showNotification(
-          'Precio inválido',
-          'El precio debe ser un número mayor a 0',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
+      const descuentoFidelizacionPct = values.tipo_descuento_fidelizacion === 'PORCENTAJE' ? valorFidelizacion : 0;
+      const descuentoFidelizacionMonto = values.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? valorFidelizacion : 0;
 
-      if (isNaN(duracion) || duracion <= 0) {
-        showNotification(
-          'Duración inválida',
-          'La duración debe ser un número mayor a 0',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
-
-      const descuentoValor = formData.valor_descuento_adelanto === ''
-        ? 0
-        : parseFloat(formData.valor_descuento_adelanto);
-      const tiempoEspera = formData.tiempo_espera_respuesta === ''
-        ? 15
-        : parseInt(formData.tiempo_espera_respuesta);
-      const porcentajeSena = formData.porcentaje_sena === ''
-        ? 25
-        : parseFloat(formData.porcentaje_sena);
-
-      if (formData.permite_reacomodamiento) {
-        if (isNaN(descuentoValor) || descuentoValor < 0) {
-          showNotification(
-            'Descuento inválido',
-            'El descuento debe ser un número igual o mayor a 0',
-            'error'
-          );
-          setLoading(false);
-          return;
-        }
-
-        if (formData.tipo_descuento_adelanto === 'PORCENTAJE' && descuentoValor > 100) {
-          showNotification(
-            'Descuento inválido',
-            'El porcentaje de descuento no puede superar el 100%',
-            'error'
-          );
-          setLoading(false);
-          return;
-        }
-
-        if (isNaN(tiempoEspera) || tiempoEspera <= 0) {
-          showNotification(
-            'Tiempo de espera inválido',
-            'El tiempo de espera debe ser un número mayor a 0',
-            'error'
-          );
-          setLoading(false);
-          return;
-        }
-      }
-
-      if (isNaN(porcentajeSena) || porcentajeSena < 0 || porcentajeSena > 100) {
-        showNotification(
-          'Porcentaje de seña inválido',
-          'El porcentaje de seña debe estar entre 0 y 100',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
-
-      // Validaciones de descuento de fidelización
-      const valorFidelizacion = formData.tipo_descuento_fidelizacion === 'PORCENTAJE'
-        ? (formData.descuento_fidelizacion_pct === '' ? 0 : parseFloat(formData.descuento_fidelizacion_pct))
-        : (formData.descuento_fidelizacion_monto === '' ? 0 : parseFloat(formData.descuento_fidelizacion_monto));
-
-      if (isNaN(valorFidelizacion) || valorFidelizacion < 0) {
-        showNotification(
-          'Descuento de fidelización inválido',
-          'El descuento de fidelización debe ser un número igual o mayor a 0',
-          'error'
-        );
-        setLoading(false);
-        return;
-      }
-
-      if (formData.tipo_descuento_fidelizacion === 'PORCENTAJE') {
-        if (valorFidelizacion > 100) {
-          showNotification(
-            'Descuento de fidelización inválido',
-            'El porcentaje de fidelización debe estar entre 0 y 100',
-            'error'
-          );
-          setLoading(false);
-          return;
-        }
-        if (!Number.isInteger(valorFidelizacion)) {
-          showNotification(
-            'Descuento de fidelización inválido',
-            'El porcentaje de fidelización debe ser un número entero (sin decimales)',
-            'error'
-          );
-          setLoading(false);
-          return;
-        }
-      }
-
-      const descuentoFidelizacionPct = formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? valorFidelizacion : 0;
-      const descuentoFidelizacionMonto = formData.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? valorFidelizacion : 0;
-
-      // Preparar datos para enviar
       const dataToSend = {
-        nombre: formData.nombre,
-        categoria: parseInt(formData.categoria),
-        precio: precio,
+        nombre: values.nombre,
+        categoria: parseInt(values.categoria, 10),
+        precio,
         duracion_minutos: duracion,
-        descripcion: formData.descripcion,
-        is_active: formData.is_active,
-        permite_reacomodamiento: formData.permite_reacomodamiento,
-        tipo_descuento_adelanto: formData.tipo_descuento_adelanto,
+        descripcion: values.descripcion,
+        is_active: values.is_active,
+        permite_reacomodamiento: values.permite_reacomodamiento,
+        tipo_descuento_adelanto: values.tipo_descuento_adelanto,
         valor_descuento_adelanto: descuentoValor,
         tiempo_espera_respuesta: tiempoEspera,
         porcentaje_sena: porcentajeSena,
-        frecuencia_recurrencia_dias: parseInt(formData.frecuencia_recurrencia_dias) || 30,
+        frecuencia_recurrencia_dias: parseInt(values.frecuencia_recurrencia_dias || '30', 10),
         descuento_fidelizacion_pct: descuentoFidelizacionPct,
-        descuento_fidelizacion_monto: descuentoFidelizacionMonto
+        descuento_fidelizacion_monto: descuentoFidelizacionMonto,
       };
 
       const response = await fetch(`/api/servicios/${servicioId}/`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify(dataToSend)
+        body: JSON.stringify(dataToSend),
       });
 
-      if (response.ok) {
-        showNotification(
-          'Servicio actualizado',
-          'Los datos del servicio han sido actualizados exitosamente',
-          'success'
-        );
-
-        // Redirigir después de 1.5 segundos
-        setTimeout(() => {
-          router.push('/dashboard/propietario/servicios');
-        }, 1500);
-      } else {
+      if (!response.ok) {
         const errorData = await response.json();
         const errorMessage = Object.entries(errorData)
           .map(([key, value]) => `${key}: ${value}`)
           .join('\n');
-
-        showNotification(
-          'Error al actualizar servicio',
-          errorMessage || 'No se pudo actualizar el servicio. Por favor, verifica los datos e intenta nuevamente.',
-          'error'
-        );
+        throw new Error(errorMessage || 'No se pudo actualizar el servicio. Por favor, verifica los datos e intenta nuevamente.');
       }
-    } catch (error) {
-      console.error('Error updating servicio:', error);
-      showNotification(
-        'Error de conexión',
-        'No se pudo conectar con el servidor. Por favor, intenta nuevamente.',
-        'error'
-      );
     } finally {
       setLoading(false);
     }
   };
-
-  const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  // Preparar opciones para el Combobox
-  const categoriasOptions: ComboboxOption[] = categorias.map(categoria => ({
-    value: categoria.id.toString(),
-    label: categoria.nombre,
-    description: categoria.descripcion
-  }));
-
-  const categoriaSeleccionada = categorias.find(
-    (categoria) => categoria.id.toString() === formData.categoria
-  );
 
   if (loadingData) {
     return (
@@ -395,401 +185,14 @@ export default function EditarServicioPage() {
         </div>
       </div>
 
-      {/* Formulario */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Información Básica */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Información Básica</CardTitle>
-            <CardDescription>Datos principales del servicio</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Nombre del Servicio */}
-            <div className="space-y-2">
-              <Label htmlFor="nombre">Nombre del Servicio *</Label>
-              <Input
-                id="nombre"
-                value={formData.nombre}
-                onChange={(e) => handleInputChange('nombre', e.target.value)}
-                placeholder="Ej: Corte de cabello mujer"
-                required
-              />
-            </div>
-
-            {/* Categoría */}
-            <div className="space-y-2">
-              <Label htmlFor="categoria">Categoría *</Label>
-
-              <Combobox
-                options={categoriasOptions}
-                value={formData.categoria}
-                onValueChange={(value) => handleInputChange('categoria', value)}
-                placeholder="Buscar y seleccionar categoría"
-                searchPlaceholder="Buscar categoría..."
-                emptyMessage="No se encontraron categorías"
-              />
-
-              {categoriaSeleccionada && (
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-                  <p>
-                    Este servicio se brindará en: {categoriaSeleccionada.sala_nombre || 'Sala sin asignar'}.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => router.push('/dashboard/propietario/servicios?tab=categorias')}
-                    className="mt-2 text-blue-700 underline"
-                  >
-                    Cambiar sala de la categoría
-                  </button>
-                </div>
-              )}
-
-              <p className="text-sm text-muted-foreground">
-                Los servicios se organizan por categorías para facilitar la navegación
-              </p>
-            </div>
-
-            {/* Descripción */}
-            <div className="space-y-2">
-              <Label htmlFor="descripcion">Descripción</Label>
-              <Textarea
-                id="descripcion"
-                value={formData.descripcion}
-                onChange={(e) => handleInputChange('descripcion', e.target.value)}
-                placeholder="Describe el servicio, qué incluye, para quién es, etc."
-                rows={4}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Precio y Duración */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Precio y Duración</CardTitle>
-            <CardDescription>Información comercial del servicio</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Precio */}
-              <div className="space-y-2">
-                <Label htmlFor="precio">Precio ($) *</Label>
-                <Input
-                  id="precio"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.precio}
-                  onChange={(e) => handleInputChange('precio', e.target.value)}
-                  placeholder="25.00"
-                  required
-                />
-                <p className="text-sm text-muted-foreground">
-                  Precio en tu moneda local
-                </p>
-              </div>
-
-              {/* Duración */}
-              <div className="space-y-2">
-                <Label htmlFor="duracion_minutos">Duración (minutos) *</Label>
-                <Input
-                  id="duracion_minutos"
-                  type="number"
-                  min="1"
-                  value={formData.duracion_minutos}
-                  onChange={(e) => handleInputChange('duracion_minutos', e.target.value)}
-                  placeholder="45"
-                  required
-                />
-                <p className="text-sm text-muted-foreground">
-                  Tiempo aproximado del servicio
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Fidelización y Retorno */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Fidelización y Retorno de Clientes</CardTitle>
-            <CardDescription>Configura la frecuencia de retorno y descuentos promocionales para este servicio</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="frecuencia_recurrencia_dias">Frecuencia de retorno sugerida (días)</Label>
-              <Input
-                id="frecuencia_recurrencia_dias"
-                type="number"
-                min="0"
-                value={formData.frecuencia_recurrencia_dias}
-                onChange={(e) => handleInputChange('frecuencia_recurrencia_dias', e.target.value)}
-                placeholder="30"
-              />
-              <p className="text-sm text-muted-foreground">
-                Este servicio se ofrecerá a clientes que no hayan vuelto en los días definidos en su ficha. Si es 0, se usará la configuración global.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="tipo_descuento_fidelizacion">Tipo de descuento de fidelización</Label>
-                <Select
-                  value={formData.tipo_descuento_fidelizacion}
-                  onValueChange={(value) => handleInputChange('tipo_descuento_fidelizacion', value)}
-                >
-                  <SelectTrigger id="tipo_descuento_fidelizacion">
-                    <SelectValue placeholder="Selecciona el tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="PORCENTAJE">%</SelectItem>
-                    <SelectItem value="MONTO_FIJO">$</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-sm text-muted-foreground">
-                  Elegí si el descuento de fidelización será un porcentaje o un monto fijo sobre el precio del servicio.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="valor_descuento_fidelizacion">Valor del descuento de fidelización</Label>
-                <Input
-                  id="valor_descuento_fidelizacion"
-                  type="number"
-                  step={formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? '1' : '0.01'}
-                  min="0"
-                  max={formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? '100' : undefined}
-                  value={
-                    formData.tipo_descuento_fidelizacion === 'PORCENTAJE'
-                      ? formData.descuento_fidelizacion_pct
-                      : formData.descuento_fidelizacion_monto
-                  }
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setFormData((prev) => ({
-                      ...prev,
-                      descuento_fidelizacion_pct:
-                        prev.tipo_descuento_fidelizacion === 'PORCENTAJE' ? value : '0',
-                      descuento_fidelizacion_monto:
-                        prev.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? value : '0'
-                    }));
-                  }}
-                  placeholder={formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? '15' : '500'}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Si elegís %, se aceptan números enteros de 0 a 100. Si elegís $, se usará el valor como monto fijo de descuento.
-                </p>
-              </div>
-            </div>
-
-            {/* Vista previa del precio promocional en tiempo real */}
-            <div className="mt-4 rounded-md border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-sm text-purple-900">
-              {(() => {
-                const precio = parseFloat(formData.precio || '0') || 0;
-                const pct = formData.tipo_descuento_fidelizacion === 'PORCENTAJE'
-                  ? parseFloat(formData.descuento_fidelizacion_pct || '0') || 0
-                  : 0;
-                const monto = formData.tipo_descuento_fidelizacion === 'MONTO_FIJO'
-                  ? parseFloat(formData.descuento_fidelizacion_monto || '0') || 0
-                  : 0;
-
-                let precioConDescuento = precio;
-                if (monto > 0) {
-                  precioConDescuento = Math.max(0, precio - monto);
-                } else if (pct > 0) {
-                  precioConDescuento = precio * (1 - pct / 100);
-                }
-
-                if (!precio) {
-                  return <span>Ingresá un precio para ver el valor promocional.</span>;
-                }
-
-                if (precioConDescuento === precio) {
-                  return (
-                    <span>
-                      Sin descuento de fidelización configurado. El precio se mantiene en{' '}
-                      <strong>${precio.toFixed(2)}</strong>.
-                    </span>
-                  );
-                }
-
-                return (
-                  <span>
-                    Con la configuración actual, el precio de fidelización sería{' '}
-                    <strong>${precioConDescuento.toFixed(2)}</strong> (desde ${precio.toFixed(2)}).
-                  </span>
-                );
-              })()}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Configuración de Automatización */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Configuración de Automatización</CardTitle>
-            <CardDescription>Configura el reacomodamiento automático de turnos</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="permite_reacomodamiento" className="text-base font-medium">
-                  Permitir reacomodamiento de turnos
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Habilita la lógica de rellenar huecos para este servicio
-                </p>
-              </div>
-              <Switch
-                id="permite_reacomodamiento"
-                checked={formData.permite_reacomodamiento}
-                onCheckedChange={(checked) => handleInputChange('permite_reacomodamiento', checked)}
-              />
-            </div>
-
-            {formData.permite_reacomodamiento && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="tipo_descuento_adelanto">
-                      Tipo de descuento por adelanto
-                    </Label>
-                    <Select
-                      value={formData.tipo_descuento_adelanto}
-                      onValueChange={(value) => handleInputChange('tipo_descuento_adelanto', value)}
-                    >
-                      <SelectTrigger id="tipo_descuento_adelanto">
-                        <SelectValue placeholder="Selecciona el tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="PORCENTAJE">%</SelectItem>
-                        <SelectItem value="MONTO_FIJO">$</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="valor_descuento_adelanto">
-                      Valor del descuento (aplica sobre el precio total)
-                    </Label>
-                    <Input
-                      id="valor_descuento_adelanto"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.valor_descuento_adelanto}
-                      onChange={(e) => handleInputChange('valor_descuento_adelanto', e.target.value)}
-                      placeholder={formData.tipo_descuento_adelanto === 'PORCENTAJE' ? '10' : '500'}
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      El descuento se aplica sobre el precio total del servicio para mayor transparencia con el cliente.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="tiempo_espera_respuesta">Minutos de espera de respuesta</Label>
-                    <Input
-                      id="tiempo_espera_respuesta"
-                      type="number"
-                      min="1"
-                      value={formData.tiempo_espera_respuesta}
-                      onChange={(e) => handleInputChange('tiempo_espera_respuesta', e.target.value)}
-                      placeholder="15"
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Tiempo antes de pasar la propuesta al siguiente cliente
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="porcentaje_sena">Porcentaje de Seña (0 a 100)</Label>
-                    <Input
-                      id="porcentaje_sena"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={formData.porcentaje_sena}
-                      onChange={(e) => handleInputChange('porcentaje_sena', e.target.value)}
-                      placeholder="25.00"
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Porcentaje que se cobrará por Mercado Pago
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Disponibilidad */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Disponibilidad</CardTitle>
-            <CardDescription>Controla la visibilidad del servicio</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="is_active"
-                checked={formData.is_active}
-                onChange={(e) => handleInputChange('is_active', e.target.checked)}
-                className="h-4 w-4"
-              />
-              <Label htmlFor="is_active" className="cursor-pointer">
-                Servicio activo y disponible para reservar
-              </Label>
-            </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              Si está desactivado, los clientes no podrán reservar este servicio
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Botones de Acción */}
-        <div className="flex justify-end gap-4">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push('/dashboard/propietario/servicios')}
-            disabled={loading}
-          >
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Guardando...
-              </>
-            ) : (
-              <>
-                <Save className="mr-2 h-4 w-4" />
-                Guardar Cambios
-              </>
-            )}
-          </Button>
-        </div>
-      </form>
-
-      {/* Modal de Notificación */}
-      <AlertDialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{notificationMessage.title}</AlertDialogTitle>
-            <AlertDialogDescription className="whitespace-pre-line">
-              {notificationMessage.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {initialValues && (
+        <ServicioForm
+          mode="edit"
+          categorias={categorias}
+          initialValues={initialValues}
+          onSubmit={handleSubmit}
+        />
+      )}
     </div>
   );
 }

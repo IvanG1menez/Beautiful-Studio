@@ -1,10 +1,10 @@
+import { FormEnterNavigation } from "@/components/FormEnterNavigation";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { QueryProvider } from "@/contexts/QueryProvider";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import UserHeader from "../components/UserHeader";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,7 +33,9 @@ export default function RootLayout({
       >
         <QueryProvider>
           <AuthProvider>
-            {children}
+            <FormEnterNavigation>
+              {children}
+            </FormEnterNavigation>
             <Toaster />
           </AuthProvider>
         </QueryProvider>

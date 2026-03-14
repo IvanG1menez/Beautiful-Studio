@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { Calendar, Scissors, Sparkles, Users } from 'lucide-react';
+import { Calendar, CheckCircle2, Clock, Mail, Scissors, Smartphone, Sparkles, Users, Wallet } from 'lucide-react';
 import Link from 'next/link';
 
 export default function HomePage() {
@@ -40,29 +40,29 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Hero Section */}
+      {/* Hero Section orientado al cliente final */}
       <section className="relative py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="max-w-3xl mx-auto">
             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
-              Gestión Integral para
+              Tu lugar para cuidar
               <span className="block text-transparent bg-clip-text bg-linear-to-r from-pink-500 to-purple-600">
-                Salones de Belleza
+                tu belleza
               </span>
             </h1>
             <p className="text-xl text-gray-600 mb-8">
-              Administra turnos, clientes, empleados y servicios desde una sola plataforma.
-              Optimiza tu negocio y mejora la experiencia de tus clientes.
+              Reservá tus turnos de peluquería, color, manos, pies y tratamientos en un solo lugar.
+              Sin chats eternos, sin confusiones: vos elegís el momento y nosotros nos encargamos del resto.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/register">
                 <Button size="lg" className="w-full sm:w-auto">
-                  Comenzar Gratis
+                  Soy nueva/o, crear mi cuenta
                 </Button>
               </Link>
               <Link href="/login">
                 <Button variant="outline" size="lg" className="w-full sm:w-auto">
-                  Iniciar Sesión
+                  Ya tengo cuenta
                 </Button>
               </Link>
             </div>
@@ -70,15 +70,16 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Features Section */}
+      {/* Sección de servicios generales del estudio (sin detalle técnico) */}
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl font-bold text-gray-900 mb-4">
-              Todo lo que necesitas en un solo lugar
+              Todo para tu rutina de belleza
             </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Herramientas profesionales diseñadas específicamente para salones de belleza
+              Un mismo espacio donde podés agendar cortes, color, manos, pies, cejas, pestañas,
+              depilación y tratamientos faciales para sentirte bien todos los días.
             </p>
           </div>
 
@@ -89,7 +90,7 @@ export default function HomePage() {
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Gestión de Turnos</h3>
               <p className="text-gray-600">
-                Programa, modifica y administra citas de manera eficiente. Calendar integrado y notificaciones automáticas.
+                Reservá turnos sin llamar ni escribir. Elegí día, horario y profesional de forma rápida y clara.
               </p>
             </div>
 
@@ -97,9 +98,9 @@ export default function HomePage() {
               <div className="w-16 h-16 bg-linear-to-r from-blue-500 to-cyan-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Users className="w-8 h-8 text-white" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Base de Clientes</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Profesionales que te conocen</h3>
               <p className="text-gray-600">
-                Mantén un registro detallado de tus clientes, sus preferencias e historial de servicios.
+                Volvé con tu estilista de confianza y dejá registradas tus preferencias para repetir ese look que te encantó.
               </p>
             </div>
 
@@ -107,10 +108,115 @@ export default function HomePage() {
               <div className="w-16 h-16 bg-linear-to-r from-green-500 to-teal-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Sparkles className="w-8 h-8 text-white" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Catálogo de Servicios</h3>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Servicios para cada momento</h3>
               <p className="text-gray-600">
-                Organiza tu oferta de servicios por categorías, precios y duraciones. Fácil de actualizar.
+                Desde un retoque rápido hasta una sesión completa de cuidado: siempre hay un servicio pensado para vos.
               </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Experiencia para quien se atiende */}
+      <section className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="text-left md:text-left">
+                <h2 className="text-3xl font-bold text-gray-900 mb-2">
+                  Una experiencia pensada para vos
+                </h2>
+                <p className="text-gray-600 max-w-xl">
+                  Pedir un turno debería ser tan simple y agradable como venir al salón: sin enredos, sin dudas y con toda la información a mano.
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Reservas online en segundos</p>
+                      <p className="text-sm text-gray-600">
+                        Elegí servicio, profesional, día y horario sin tener que escribir ni llamar por WhatsApp.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <Clock className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Agenda y historial siempre a mano</p>
+                      <p className="text-sm text-gray-600">
+                        Podés ver tus próximos turnos y todo lo que te hiciste en el estudio, con fecha, horario y profesional.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <Mail className="w-5 h-5 text-purple-600 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Recordatorios automáticos</p>
+                      <p className="text-sm text-gray-600">
+                        Recibís confirmaciones y recordatorios por email para que no se te pase ningún turno.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <Smartphone className="w-5 h-5 text-indigo-600 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Gestión 100% desde el celular</p>
+                      <p className="text-sm text-gray-600">
+                        Podés cambiar o cancelar turnos desde cualquier dispositivo, en cualquier momento del día.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <Wallet className="w-5 h-5 text-emerald-600 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Billetera virtual y créditos</p>
+                      <p className="text-sm text-gray-600">
+                        Si cancelás con anticipación, podés acumular crédito en tu billetera para próximas reservas.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <Users className="w-5 h-5 text-pink-600 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Siempre en sintonía con el salón</p>
+                      <p className="text-sm text-gray-600">
+                        Lo que ves en tu cuenta está conectado con la agenda real del estudio, para evitar errores de horarios o dobles reservas.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-linear-to-r from-pink-500 to-purple-600 rounded-2xl p-6 text-white">
+                <h3 className="text-lg font-semibold mb-1">¿Te gustaría reservar tu próximo turno ahora?</h3>
+                <p className="text-sm text-pink-50 mb-4">
+                  Creá tu cuenta en segundos y empezá a manejar tus citas desde donde estés.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Link href="/register" className="w-full sm:w-auto">
+                    <Button className="w-full bg-white text-pink-600 hover:bg-pink-50">
+                      Crear mi cuenta de cliente
+                    </Button>
+                  </Link>
+                  <Link href="/login" className="w-full sm:w-auto">
+                    <Button variant="outline" className="w-full border-white text-white hover:bg-white/10">
+                      Iniciar sesión
+                    </Button>
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
         </div>

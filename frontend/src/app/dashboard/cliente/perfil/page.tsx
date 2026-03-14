@@ -16,13 +16,19 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  actualizarConfigNotificaciones,
+  obtenerConfigNotificaciones,
+  type NotificacionConfig,
+} from '@/services/notificacionesService';
+import {
   AlertCircle,
+  Bell,
   Calendar,
   CheckCircle,
-  Clock,
   Eye,
   EyeOff,
   Loader2,
@@ -31,9 +37,9 @@ import {
   MapPin,
   Phone,
   Star,
-  User,
+  User
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 interface ClienteProfile {
@@ -54,6 +60,7 @@ interface ClienteProfile {
 export default function PerfilClientePage() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<ClienteProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -87,6 +94,17 @@ export default function PerfilClientePage() {
     confirm: false,
   });
 
+  const [notificationsSettings, setNotificationsSettings] = useState({
+    nuevo_turno: true,
+    cancelacion_turno: true,
+    cambios_turno: true,
+  });
+  const [notificationsConfig, setNotificationsConfig] = useState<NotificacionConfig | null>(null);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+
+  const initialTab = (searchParams.get('tab') as string) || 'personal';
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+
   useEffect(() => {
     if (!user) {
       router.push('/login');
@@ -94,6 +112,7 @@ export default function PerfilClientePage() {
     }
 
     loadProfile();
+    loadNotificationsConfig();
   }, [user, router]);
 
   const getAuthToken = () => localStorage.getItem('auth_token');
@@ -114,6 +133,23 @@ export default function PerfilClientePage() {
         ...options.headers,
       },
     });
+  };
+
+  const loadNotificationsConfig = async () => {
+    try {
+      setLoadingNotifications(true);
+      const config = await obtenerConfigNotificaciones();
+      setNotificationsConfig(config);
+      setNotificationsSettings({
+        nuevo_turno: config.notificar_solicitud_turno,
+        cancelacion_turno: config.notificar_cancelacion_turno,
+        cambios_turno: config.notificar_modificacion_turno,
+      });
+    } catch (error) {
+      console.error('Error loading notification config (cliente):', error);
+    } finally {
+      setLoadingNotifications(false);
+    }
   };
 
   const loadProfile = async () => {
@@ -236,6 +272,34 @@ export default function PerfilClientePage() {
     }
   };
 
+  const handleToggleNotificacion = async (
+    field: 'nuevo_turno' | 'cancelacion_turno' | 'cambios_turno',
+    checked: boolean,
+  ) => {
+    setNotificationsSettings(prev => ({
+      ...prev,
+      [field]: checked,
+    }));
+
+    const backendFieldMap: Record<typeof field, keyof NotificacionConfig> = {
+      nuevo_turno: 'notificar_solicitud_turno',
+      cancelacion_turno: 'notificar_cancelacion_turno',
+      cambios_turno: 'notificar_modificacion_turno',
+    };
+
+    const backendField = backendFieldMap[field];
+
+    try {
+      await actualizarConfigNotificaciones({ [backendField]: checked });
+    } catch (error) {
+      console.error('Error updating notification config (cliente):', error);
+      setNotificationsSettings(prev => ({
+        ...prev,
+        [field]: !checked,
+      }));
+    }
+  };
+
   const getInitials = (firstName?: string, lastName?: string) => {
     const first = firstName?.charAt(0) || '';
     const last = lastName?.charAt(0) || '';
@@ -320,11 +384,14 @@ export default function PerfilClientePage() {
           </CardContent>
         </Card>
 
-        <Tabs defaultValue="personal" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="space-y-6"
+        >
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="personal">Datos Personales</TabsTrigger>
-            <TabsTrigger value="historial">Historial de Turnos</TabsTrigger>
-            <TabsTrigger value="credenciales">Credenciales</TabsTrigger>
+            <TabsTrigger value="notificaciones">Notificaciones</TabsTrigger>
           </TabsList>
 
           {/* Tab: Datos Personales */}
@@ -389,6 +456,14 @@ export default function PerfilClientePage() {
                           required
                         />
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordDialog(true)}
+                        className="text-xs text-purple-600 hover:underline flex items-center gap-1 mt-1"
+                      >
+                        <Lock className="w-3 h-3" />
+                        Cambiar contraseña
+                      </button>
                     </div>
 
                     <div className="space-y-2">
@@ -477,64 +552,68 @@ export default function PerfilClientePage() {
             </Card>
           </TabsContent>
 
-          {/* Tab: Historial de Turnos */}
-          <TabsContent value="historial">
+          {/* Tab: Notificaciones */}
+          <TabsContent value="notificaciones">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Clock className="w-5 h-5" />
-                  Historial de Turnos
+                  <Bell className="w-5 h-5" />
+                  Notificaciones
                 </CardTitle>
                 <CardDescription>
-                  Consulta tus turnos anteriores y próximos (solo lectura)
+                  Elegí qué avisos querés recibir dentro de la plataforma.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <Alert className="bg-purple-50 border-purple-200">
-                  <AlertCircle className="h-4 w-4 text-purple-600" />
-                  <AlertDescription className="text-purple-800">
-                    Tu historial de turnos se muestra en la sección <strong>"Mis Turnos"</strong> del menú principal.
-                    Desde allí puedes ver, gestionar y reservar nuevos turnos.
-                  </AlertDescription>
-                </Alert>
-
-                <div className="mt-6 text-center py-8">
-                  <Clock className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-                  <p className="text-gray-600 mb-4">
-                    Ve a la sección de turnos para ver tu historial completo
+              <CardContent className="space-y-4">
+                {loadingNotifications && (
+                  <p className="text-xs text-gray-500">
+                    Cargando preferencias de notificaciones...
                   </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => router.push('/dashboard/cliente/turnos')}
-                  >
-                    Ir a Mis Turnos
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                )}
 
-          {/* Tab: Credenciales */}
-          <TabsContent value="credenciales">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Lock className="w-5 h-5" />
-                  Credenciales
-                </CardTitle>
-                <CardDescription>
-                  Gestiona tu contraseña y seguridad de la cuenta
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button
-                  onClick={() => setShowPasswordDialog(true)}
-                  variant="outline"
-                  className="w-full"
-                >
-                  <Lock className="w-4 h-4 mr-2" />
-                  Cambiar Contraseña
-                </Button>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-sm font-medium">Nuevo turno reservado</Label>
+                    <p className="text-xs text-gray-500">
+                      Avisos en la app cuando se crea un turno a tu nombre.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={notificationsSettings.nuevo_turno}
+                    onCheckedChange={checked => handleToggleNotificacion('nuevo_turno', checked)}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-sm font-medium">Cancelación de turno</Label>
+                    <p className="text-xs text-gray-500">
+                      Notificaciones si un turno se cancela o rechaza.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={notificationsSettings.cancelacion_turno}
+                    onCheckedChange={checked => handleToggleNotificacion('cancelacion_turno', checked)}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-sm font-medium">Cambios en tus turnos</Label>
+                    <p className="text-xs text-gray-500">
+                      Avisos cuando se reprograma o cambia el estado de un turno.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={notificationsSettings.cambios_turno}
+                    onCheckedChange={checked => handleToggleNotificacion('cambios_turno', checked)}
+                  />
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  Los correos de confirmación de reserva se seguirán enviando siempre a tu email
+                  como comprobante, independientemente de estas preferencias.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>

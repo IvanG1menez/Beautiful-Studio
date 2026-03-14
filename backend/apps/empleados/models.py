@@ -44,7 +44,7 @@ class Empleado(models.Model):
     biografia = models.TextField(
         blank=True, null=True, verbose_name="Biografía profesional"
     )
-    
+
     # Campos de ranking y métricas (Módulo Inteligente)
     promedio_calificacion = models.DecimalField(
         max_digits=3,
@@ -52,14 +52,14 @@ class Empleado(models.Model):
         default=5.0,
         validators=[MinValueValidator(0), MaxValueValidator(10)],
         verbose_name="Promedio de calificación",
-        help_text="Promedio de todas las encuestas recibidas (0-10)"
+        help_text="Promedio de todas las encuestas recibidas (0-10)",
     )
     total_encuestas = models.PositiveIntegerField(
         default=0,
         verbose_name="Total de encuestas",
-        help_text="Número total de encuestas respondidas"
+        help_text="Número total de encuestas respondidas",
     )
-    
+
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
     )
@@ -91,6 +91,36 @@ class Empleado(models.Model):
             return self.user.email
         except AttributeError:
             return "Email no disponible"
+
+    def get_especialidades_display(self) -> str:
+        """Devuelve una descripción legible de los servicios/especialidades del profesional.
+
+        Se basa en la relación EmpleadoServicio (servicios_disponibles). Si el profesional
+        tiene uno o más servicios asociados, se muestran sus nombres. En caso contrario,
+        se retorna "No especificada" para mantener compatibilidad con el frontend.
+        """
+
+        # Usar la relación inversa definida en EmpleadoServicio
+        servicios_rel = self.servicios_disponibles.select_related("servicio").all()
+
+        nombres_unicos = []
+        for relacion in servicios_rel:
+            nombre = getattr(relacion.servicio, "nombre", None)
+            if nombre and nombre not in nombres_unicos:
+                nombres_unicos.append(nombre)
+
+        if not nombres_unicos:
+            return "No especificada"
+
+        # Si solo hay un servicio, devolver solo ese nombre
+        if len(nombres_unicos) == 1:
+            return nombres_unicos[0]
+
+        # Si hay varios, concatenar los primeros con coma.
+        # Esto mantiene el campo como texto corto para la UI.
+        return ", ".join(nombres_unicos[:3]) + (
+            "..." if len(nombres_unicos) > 3 else ""
+        )
 
 
 class EmpleadoServicio(models.Model):

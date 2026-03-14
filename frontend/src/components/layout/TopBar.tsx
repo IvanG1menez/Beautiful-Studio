@@ -1,5 +1,6 @@
 'use client';
 
+import { NotificationBell } from '@/components/NotificationBell';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,6 +14,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,17 +24,22 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/AuthContext';
+import { getAuthHeaders } from '@/lib/auth-headers';
+import { formatCurrency } from '@/lib/utils';
+import type { Billetera, MovimientoBilletera } from '@/types';
 import {
-  Bell,
   ChevronDown,
   LogOut,
   Menu,
   Settings,
+  TrendingDown,
+  TrendingUp,
   User,
-  X
+  Wallet,
+  X,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface TopBarProps {
   className?: string;
@@ -102,6 +109,29 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
     return '/perfil'; // Fallback
   };
 
+  // Obtener ruta de configuración según el rol
+  const getSettingsRoute = () => {
+    const role = user?.role?.toLowerCase();
+
+    if (role === 'propietario' || role === 'superusuario') {
+      // Configuración global del estudio
+      return '/dashboard/propietario/configuracion';
+    }
+
+    if (role === 'profesional') {
+      // Pestaña de notificaciones dentro del perfil del profesional
+      return '/dashboard/profesional/perfil?tab=notificaciones';
+    }
+
+    if (role === 'cliente') {
+      // Pestaña de notificaciones dentro del perfil del cliente
+      return '/dashboard/cliente/perfil?tab=notificaciones';
+    }
+
+    // Fallback a configuración general si existiera
+    return '/configuracion';
+  };
+
   // Manejar logout con confirmación
   const handleLogoutClick = () => {
     setLogoutDialogOpen(true);
@@ -155,12 +185,13 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
 
           {/* Lado derecho - Usuario y acciones */}
           <div className="flex items-center gap-3">
-            {/* Notificaciones (opcional) */}
-            <Button variant="ghost" size="sm" className="relative">
-              <Bell className="h-5 w-5" />
-              {/* Badge de notificaciones no leídas */}
-              <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full"></span>
-            </Button>
+            {/* Notificaciones */}
+            <NotificationBell />
+
+            {/* Billetera cliente */}
+            {user.role?.toLowerCase() === 'cliente' && (
+              <ClientWalletQuickAccess />
+            )}
 
             {/* Separador */}
             <div className="h-6 w-px bg-gray-300"></div>
@@ -205,7 +236,7 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
                   <span>Mi Perfil</span>
                 </DropdownMenuItem>
 
-                <DropdownMenuItem onClick={() => router.push('/configuracion')}>
+                <DropdownMenuItem onClick={() => router.push(getSettingsRoute())}>
                   <Settings className="mr-2 h-4 w-4" />
                   <span>Configuración</span>
                 </DropdownMenuItem>
@@ -248,6 +279,192 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+function ClientWalletQuickAccess() {
+  const { user } = useAuth();
+  const [billetera, setBilletera] = useState<Billetera | null>(null);
+  const [loadingBilletera, setLoadingBilletera] = useState(false);
+  const [movimientos, setMovimientos] = useState<MovimientoBilletera[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [loadingMovimientos, setLoadingMovimientos] = useState(false);
+
+  const role = user?.role?.toLowerCase();
+
+  const loadBilletera = async () => {
+    try {
+      setLoadingBilletera(true);
+      const response = await fetch('/api/clientes/me/billetera/', {
+        headers: getAuthHeaders(),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setBilletera(data);
+      }
+    } catch (error) {
+      console.error('Error loading billetera:', error);
+    } finally {
+      setLoadingBilletera(false);
+    }
+  };
+
+  const loadMovimientos = async () => {
+    try {
+      setLoadingMovimientos(true);
+      const response = await fetch('/api/clientes/me/billetera/movimientos/', {
+        headers: getAuthHeaders(),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setMovimientos(data);
+      }
+    } catch (error) {
+      console.error('Error loading movimientos:', error);
+    } finally {
+      setLoadingMovimientos(false);
+    }
+  };
+
+  // Cargar billetera al montar para clientes
+  useEffect(() => {
+    if (role === 'cliente') {
+      loadBilletera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  if (role !== 'cliente') {
+    return null;
+  }
+
+  const saldoNumber = billetera ? parseFloat(billetera.saldo) : 0;
+
+  const handleOpen = async () => {
+    setDialogOpen(true);
+    await loadMovimientos();
+  };
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="flex items-center gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+        onClick={handleOpen}
+        disabled={loadingBilletera}
+        title="Tu billetera"
+      >
+        <Wallet className="h-5 w-5" />
+        <span className="font-semibold">
+          {loadingBilletera ? '...' : formatCurrency(saldoNumber)}
+        </span>
+      </Button>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Tu Billetera</DialogTitle>
+            <DialogDescription>
+              Historial de movimientos y crédito disponible para tus próximas reservas
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-green-500">
+                  <Wallet className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm text-green-800 font-medium">Saldo disponible</p>
+                  <p className="text-2xl font-bold text-green-700">
+                    {formatCurrency(saldoNumber)}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-green-800 max-w-xs text-right">
+                Cancela turnos con anticipación para acumular crédito y usarlo en tus próximas reservas.
+              </p>
+            </div>
+
+            {loadingMovimientos ? (
+              <div className="flex items-center justify-center py-8 text-gray-500 text-sm">
+                Cargando movimientos...
+              </div>
+            ) : movimientos.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-sm">
+                <p>No hay movimientos registrados aún.</p>
+                <p className="mt-2 text-green-700">
+                  Cancela turnos con anticipación para empezar a acumular crédito.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {movimientos.map((mov) => (
+                  <div
+                    key={mov.id}
+                    className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          {mov.tipo === 'credito' ? (
+                            <div className="p-1.5 bg-green-100 rounded-full">
+                              <TrendingUp className="w-4 h-4 text-green-600" />
+                            </div>
+                          ) : (
+                            <div className="p-1.5 bg-red-100 rounded-full">
+                              <TrendingDown className="w-4 h-4 text-red-600" />
+                            </div>
+                          )}
+                          <span className="font-semibold">{mov.tipo_display}</span>
+                          <span
+                            className={`text-sm font-semibold px-2 py-0.5 rounded-full ${mov.tipo === 'credito'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-red-100 text-red-700'
+                              }`}
+                          >
+                            {mov.tipo === 'credito' ? '+' : '-'}
+                            {formatCurrency(parseFloat(mov.monto))}
+                          </span>
+                        </div>
+
+                        <p className="text-sm text-gray-600 mb-2">
+                          {mov.descripcion || 'Sin descripción'}
+                        </p>
+
+                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                          <span>
+                            Saldo anterior: {formatCurrency(parseFloat(mov.saldo_anterior))}
+                          </span>
+                          <span>→</span>
+                          <span className="font-semibold">
+                            Saldo nuevo: {formatCurrency(parseFloat(mov.saldo_nuevo))}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right text-xs text-gray-500 ml-4">
+                        <p>{new Date(mov.created_at).toLocaleDateString('es-ES', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}</p>
+                        <p>{new Date(mov.created_at).toLocaleTimeString('es-ES', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

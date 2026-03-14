@@ -4,7 +4,6 @@ import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  Bell,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -18,7 +17,6 @@ import {
   Settings,
   Target,
   TrendingUp,
-  User,
   Users,
   Wallet
 } from 'lucide-react';
@@ -51,6 +49,16 @@ export default function DashboardPropietarioLayout({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  const isOperacionesActive =
+    pathname?.startsWith('/dashboard/propietario/clientes') ||
+    pathname?.startsWith('/dashboard/propietario/profesionales') ||
+    pathname?.startsWith('/dashboard/propietario/servicios') ||
+    pathname?.startsWith('/dashboard/propietario/encuestas');
+
+  const isPruebasActive =
+    pathname?.startsWith('/dashboard/propietario/diagnostico') ||
+    pathname?.startsWith('/dashboard/propietario/oportunidades');
+
   const menuItems = [
     {
       label: 'Dashboard',
@@ -59,27 +67,42 @@ export default function DashboardPropietarioLayout({
       active: pathname === '/dashboard/propietario',
     },
     {
-      label: 'Clientes',
+      label: 'Operaciones',
       icon: Users,
-      href: '/dashboard/propietario/clientes',
-      active: pathname?.startsWith('/dashboard/propietario/clientes'),
-    },
-    {
-      label: 'Profesionales',
-      icon: Scissors,
-      href: '/dashboard/propietario/profesionales',
-      active: pathname?.startsWith('/dashboard/propietario/profesionales'),
-    },
-    {
-      label: 'Servicios',
-      icon: Scissors,
-      href: '/dashboard/propietario/servicios',
-      active: pathname?.startsWith('/dashboard/propietario/servicios'),
+      active: isOperacionesActive,
+      submenu: [
+        {
+          label: 'Clientes',
+          icon: Users,
+          href: '/dashboard/propietario/clientes',
+          active: pathname?.startsWith('/dashboard/propietario/clientes'),
+        },
+        {
+          label: 'Profesionales',
+          icon: Scissors,
+          href: '/dashboard/propietario/profesionales',
+          active: pathname?.startsWith('/dashboard/propietario/profesionales'),
+        },
+        {
+          label: 'Servicios',
+          icon: Scissors,
+          href: '/dashboard/propietario/servicios',
+          active: pathname?.startsWith('/dashboard/propietario/servicios'),
+        },
+        {
+          label: 'Encuestas',
+          icon: MessageSquare,
+          href: '/dashboard/propietario/encuestas',
+          active: pathname?.startsWith('/dashboard/propietario/encuestas'),
+        },
+      ],
     },
     {
       label: 'Reportes',
       icon: PieChart,
-      active: pathname?.startsWith('/dashboard/propietario/reportes'),
+      active:
+        pathname?.startsWith('/dashboard/propietario/reportes') ||
+        pathname?.startsWith('/dashboard/propietario/historial'),
       submenu: [
         {
           label: 'Resumen Financiero',
@@ -99,43 +122,38 @@ export default function DashboardPropietarioLayout({
           href: '/dashboard/propietario/reportes/billetera',
           active: pathname === '/dashboard/propietario/reportes/billetera',
         },
+        {
+          label: 'Historial',
+          icon: History,
+          href: '/dashboard/propietario/historial',
+          active: pathname?.startsWith('/dashboard/propietario/historial'),
+        },
       ],
     },
     {
-      label: 'Encuestas',
-      icon: MessageSquare,
-      href: '/dashboard/propietario/encuestas',
-      active: pathname?.startsWith('/dashboard/propietario/encuestas'),
-    },
-    {
-      label: 'Oportunidades',
-      icon: Target,
-      href: '/dashboard/propietario/oportunidades',
-      active: pathname?.startsWith('/dashboard/propietario/oportunidades'),
-    },
-    {
-      label: 'Diagnóstico',
+      label: 'Pruebas',
       icon: Settings,
-      href: '/dashboard/propietario/diagnostico',
-      active: pathname?.startsWith('/dashboard/propietario/diagnostico'),
+      active: isPruebasActive,
+      submenu: [
+        {
+          label: 'Diagnóstico',
+          icon: Settings,
+          href: '/dashboard/propietario/diagnostico',
+          active: pathname?.startsWith('/dashboard/propietario/diagnostico'),
+        },
+        {
+          label: 'Oportunidades',
+          icon: Target,
+          href: '/dashboard/propietario/oportunidades',
+          active: pathname?.startsWith('/dashboard/propietario/oportunidades'),
+        },
+      ],
     },
     {
-      label: 'Historial',
-      icon: History,
-      href: '/dashboard/propietario/historial',
-      active: pathname?.startsWith('/dashboard/propietario/historial'),
-    },
-    {
-      label: 'Notificaciones',
-      icon: Bell,
-      href: '/dashboard/propietario/notificaciones',
-      active: pathname?.startsWith('/dashboard/propietario/notificaciones'),
-    },
-    {
-      label: 'Mi Perfil',
-      icon: User,
-      href: '/dashboard/propietario/perfil',
-      active: pathname?.startsWith('/dashboard/propietario/perfil'),
+      label: 'Configuración',
+      icon: Settings,
+      href: '/dashboard/propietario/configuracion',
+      active: pathname?.startsWith('/dashboard/propietario/configuracion'),
     },
   ];
 
@@ -159,10 +177,11 @@ export default function DashboardPropietarioLayout({
         {/* Sidebar */}
         <aside
           className={`
-            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+            ${isMobile && !sidebarOpen ? '-translate-x-full' : 'translate-x-0'}
             ${isMobile ? 'absolute z-40' : 'relative'}
-            transition-transform duration-300 ease-in-out
-            w-64 bg-gray-900 text-white
+            ${sidebarOpen ? 'w-64' : 'w-20'}
+            transition-all duration-300 ease-in-out
+            bg-gray-900 text-white
             flex flex-col
             h-full
           `}
@@ -170,13 +189,14 @@ export default function DashboardPropietarioLayout({
           {/* Sidebar Header */}
           <div className="p-4 border-b border-gray-800">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-lg">Panel Propietario</h3>
+              {sidebarOpen && <h3 className="font-semibold text-lg">Panel Propietario</h3>}
               {!isMobile && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="text-white hover:bg-gray-800"
+                  className="text-white hover:bg-gray-800 ml-auto"
+                  title={sidebarOpen ? 'Contraer menú' : 'Expandir menú'}
                 >
                   {sidebarOpen ? (
                     <ChevronLeft className="h-4 w-4" />
@@ -213,7 +233,7 @@ export default function DashboardPropietarioLayout({
                       >
                         <div className="flex items-center gap-3">
                           <Icon className="h-5 w-5" />
-                          <span className="font-medium">{item.label}</span>
+                          {sidebarOpen && <span className="font-medium">{item.label}</span>}
                         </div>
                         {isExpanded ? (
                           <ChevronUp className="h-4 w-4" />
@@ -223,7 +243,7 @@ export default function DashboardPropietarioLayout({
                       </button>
 
                       {/* Submenú */}
-                      {isExpanded && (
+                      {sidebarOpen && isExpanded && (
                         <div className="ml-4 mt-1 space-y-1">
                           {item.submenu.map((subItem) => {
                             const SubIcon = subItem.icon;
@@ -242,7 +262,7 @@ export default function DashboardPropietarioLayout({
                                 onClick={() => isMobile && setSidebarOpen(false)}
                               >
                                 <SubIcon className="h-4 w-4" />
-                                <span>{subItem.label}</span>
+                                {sidebarOpen && <span>{subItem.label}</span>}
                               </Link>
                             );
                           })}
@@ -256,6 +276,7 @@ export default function DashboardPropietarioLayout({
                       className={`
                         flex items-center gap-3 px-4 py-3 rounded-lg
                         transition-colors duration-200
+                        ${sidebarOpen ? '' : 'justify-center'}
                         ${item.active
                           ? 'bg-blue-600 text-white'
                           : 'text-gray-300 hover:bg-gray-800 hover:text-white'
@@ -264,7 +285,7 @@ export default function DashboardPropietarioLayout({
                       onClick={() => isMobile && setSidebarOpen(false)}
                     >
                       <Icon className="h-5 w-5" />
-                      <span className="font-medium">{item.label}</span>
+                      {sidebarOpen && <span className="font-medium">{item.label}</span>}
                     </Link>
                   )}
                 </div>
@@ -273,12 +294,14 @@ export default function DashboardPropietarioLayout({
           </nav>
 
           {/* Sidebar Footer */}
-          <div className="p-4 border-t border-gray-800">
-            <div className="text-xs text-gray-400">
-              <p>Beautiful Studio v1.0</p>
-              <p className="mt-1">© 2025 Todos los derechos reservados</p>
+          {sidebarOpen && (
+            <div className="p-4 border-t border-gray-800">
+              <div className="text-xs text-gray-400">
+                <p>Beautiful Studio v1.0</p>
+                <p className="mt-1">© 2025 Todos los derechos reservados</p>
+              </div>
             </div>
-          </div>
+          )}
         </aside>
 
         {/* Main Content */}

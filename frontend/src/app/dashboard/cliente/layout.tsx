@@ -7,10 +7,9 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Home,
+  Settings,
   Star,
-  User
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -53,21 +52,15 @@ export default function DashboardClienteLayout({
       active: pathname?.startsWith('/dashboard/cliente/turnos/nuevo'),
     },
     {
-      label: 'Mis Turnos',
-      icon: Clock,
-      href: '/dashboard/cliente/turnos',
-      active: pathname === '/dashboard/cliente/turnos',
-    },
-    {
       label: 'Servicios',
       icon: Star,
       href: '/dashboard/cliente/servicios',
       active: pathname?.startsWith('/dashboard/cliente/servicios'),
     },
     {
-      label: 'Mi Perfil',
-      icon: User,
-      href: '/dashboard/cliente/perfil',
+      label: 'Configuración',
+      icon: Settings,
+      href: '/dashboard/cliente/perfil?tab=notificaciones',
       active: pathname?.startsWith('/dashboard/cliente/perfil'),
     },
   ];

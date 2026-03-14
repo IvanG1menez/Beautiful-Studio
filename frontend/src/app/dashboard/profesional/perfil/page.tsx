@@ -16,10 +16,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
+import { actualizarConfigNotificaciones, obtenerConfigNotificaciones, type NotificacionConfig } from '@/services/notificacionesService';
 import {
   AlertCircle,
+  Bell,
   Briefcase,
   Calendar,
   CheckCircle,
@@ -35,7 +38,7 @@ import {
   Scissors,
   User
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 interface RangoHorario {
@@ -94,6 +97,7 @@ const DIAS_SEMANA: { [key: number]: string } = {
 export default function PerfilEmpleadoPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [profile, setProfile] = useState<EmpleadoProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -136,6 +140,17 @@ export default function PerfilEmpleadoPage() {
     confirm: false,
   });
 
+  const [notificationsSettings, setNotificationsSettings] = useState({
+    nuevo_turno: true,
+    cancelacion_turno: true,
+    cambios_turno: true,
+  });
+  const [notificationsConfig, setNotificationsConfig] = useState<NotificacionConfig | null>(null);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+
+  const initialTab = (searchParams.get('tab') as string) || 'personal';
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
+
   useEffect(() => {
     if (!user) {
       router.push('/login');
@@ -143,6 +158,7 @@ export default function PerfilEmpleadoPage() {
     }
 
     loadProfile();
+    loadNotificationsConfig();
   }, [user, router]);
 
   // Funciones para manejo de horarios
@@ -209,6 +225,25 @@ export default function PerfilEmpleadoPage() {
         ...options.headers,
       },
     });
+  };
+
+  const loadNotificationsConfig = async () => {
+    try {
+      setLoadingNotifications(true);
+      const config = await obtenerConfigNotificaciones();
+      setNotificationsConfig(config);
+      setNotificationsSettings({
+        nuevo_turno: config.notificar_solicitud_turno,
+        cancelacion_turno: config.notificar_cancelacion_turno,
+        cambios_turno: config.notificar_modificacion_turno,
+      });
+    } catch (error) {
+      console.error('Error loading notification config:', error);
+      // No bloqueamos la pantalla; solo mostramos mensaje genérico si ya hay otros errores
+      setError(prev => prev || 'Error al cargar las preferencias de notificaciones');
+    } finally {
+      setLoadingNotifications(false);
+    }
   };
 
   const loadProfile = async () => {
@@ -366,6 +401,37 @@ export default function PerfilEmpleadoPage() {
     }
   };
 
+  const handleToggleNotificacion = async (
+    field: 'nuevo_turno' | 'cancelacion_turno' | 'cambios_turno',
+    checked: boolean,
+  ) => {
+    setNotificationsSettings(prev => ({
+      ...prev,
+      [field]: checked,
+    }));
+
+    // Mapear al nombre real del campo en NotificacionConfig
+    const backendFieldMap: Record<typeof field, keyof NotificacionConfig> = {
+      nuevo_turno: 'notificar_solicitud_turno',
+      cancelacion_turno: 'notificar_cancelacion_turno',
+      cambios_turno: 'notificar_modificacion_turno',
+    };
+
+    const backendField = backendFieldMap[field];
+
+    try {
+      await actualizarConfigNotificaciones({ [backendField]: checked });
+    } catch (error) {
+      console.error('Error updating notification config:', error);
+      setError('Error al actualizar las preferencias de notificaciones');
+      // Revertir en caso de error
+      setNotificationsSettings(prev => ({
+        ...prev,
+        [field]: !checked,
+      }));
+    }
+  };
+
   const getInitials = (firstName?: string, lastName?: string) => {
     const first = firstName?.charAt(0) || '';
     const last = lastName?.charAt(0) || '';
@@ -446,11 +512,15 @@ export default function PerfilEmpleadoPage() {
           </CardContent>
         </Card>
 
-        <Tabs defaultValue="personal" className="space-y-6">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="space-y-6"
+        >
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="personal">Datos Personales</TabsTrigger>
             <TabsTrigger value="profesional">Datos Profesionales</TabsTrigger>
-            <TabsTrigger value="credenciales">Credenciales</TabsTrigger>
+            <TabsTrigger value="notificaciones">Notificaciones</TabsTrigger>
           </TabsList>
 
           {/* Tab: Datos Personales */}
@@ -545,6 +615,14 @@ export default function PerfilEmpleadoPage() {
                           placeholder="12345678"
                         />
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswordDialog(true)}
+                        className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
+                      >
+                        <Lock className="w-3 h-3" />
+                        Cambiar contraseña
+                      </button>
                     </div>
                   </div>
 
@@ -607,26 +685,6 @@ export default function PerfilEmpleadoPage() {
                     </div>
                   </div>
                 </div>
-
-                <Separator />
-
-                {/* Días de Trabajo (del modelo Empleado) */}
-                {profile?.dias_trabajo && (
-                  <div className="space-y-2">
-                    <Label className="text-gray-700 flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
-                      Días de Trabajo
-                    </Label>
-                    <div className="flex items-center space-x-2 p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                      <span className="text-gray-900 font-medium">
-                        {profile.dias_trabajo}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500 ml-1">
-                      Formato: L (Lunes), M (Martes), Mi (Miércoles), J (Jueves), V (Viernes), S (Sábado), D (Domingo)
-                    </p>
-                  </div>
-                )}
 
                 <Separator />
 
@@ -704,27 +762,68 @@ export default function PerfilEmpleadoPage() {
             </Card>
           </TabsContent>
 
-          {/* Tab: Credenciales */}
-          <TabsContent value="credenciales">
+          {/* Tab: Notificaciones */}
+          <TabsContent value="notificaciones">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Lock className="w-5 h-5" />
-                  Credenciales
+                  <Bell className="w-5 h-5" />
+                  Notificaciones
                 </CardTitle>
                 <CardDescription>
-                  Gestiona tu contraseña y seguridad de la cuenta
+                  Elige qué avisos querés recibir sobre tus turnos
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button
-                  onClick={() => setShowPasswordDialog(true)}
-                  variant="outline"
-                  className="w-full"
-                >
-                  <Lock className="w-4 h-4 mr-2" />
-                  Cambiar Contraseña
-                </Button>
+                <div className="space-y-4">
+                  {loadingNotifications && (
+                    <p className="text-xs text-gray-500">
+                      Cargando preferencias de notificaciones...
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium">Nuevo turno reservado</Label>
+                      <p className="text-xs text-gray-500">
+                        Recibí una notificación cuando un cliente reserva un turno contigo.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notificationsSettings.nuevo_turno}
+                      onCheckedChange={(checked) => handleToggleNotificacion('nuevo_turno', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium">Cancelación de turno</Label>
+                      <p className="text-xs text-gray-500">
+                        Avisos cuando un cliente cancela un turno asignado a vos.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notificationsSettings.cancelacion_turno}
+                      onCheckedChange={(checked) => handleToggleNotificacion('cancelacion_turno', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium">Cambios en tus turnos</Label>
+                      <p className="text-xs text-gray-500">
+                        Notificaciones cuando se reprograma o cambia el estado de un turno.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notificationsSettings.cambios_turno}
+                      onCheckedChange={(checked) => handleToggleNotificacion('cambios_turno', checked)}
+                    />
+                  </div>
+
+                  <p className="text-xs text-gray-500">
+                    Más adelante vamos a conectar estas preferencias con el sistema de notificaciones del estudio.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
