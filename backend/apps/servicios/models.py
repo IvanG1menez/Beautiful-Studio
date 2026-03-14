@@ -105,6 +105,26 @@ class Servicio(models.Model):
         verbose_name="Porcentaje de seña",
         help_text="Porcentaje que se cobrará por Mercado Pago",
     )
+    descuento_fidelizacion_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name="Descuento de fidelización (%)",
+        help_text=(
+            "Porcentaje de descuento específico para este servicio en campañas de fidelización. "
+            "Si es 0, se usará el porcentaje global de configuración."
+        ),
+    )
+    descuento_fidelizacion_monto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        verbose_name="Descuento de fidelización ($)",
+        help_text=(
+            "Monto fijo de descuento para campañas de fidelización. "
+            "Si es mayor a 0, tendrá prioridad sobre el porcentaje."
+        ),
+    )
     frecuencia_recurrencia_dias = models.PositiveIntegerField(
         default=30,
         verbose_name="Frecuencia de retorno sugerida (días)",

@@ -2,8 +2,13 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.utils import timezone
-from .models import Notificacion, NotificacionConfig
+from django.shortcuts import get_object_or_404, redirect
+from django.conf import settings
+from django.contrib.auth import login as django_login
+from rest_framework.authtoken.models import Token as DRFToken
+
+from apps.clientes.models import Billetera
+from .models import Notificacion, NotificacionConfig, AccessToken
 from .serializers import NotificacionSerializer, NotificacionConfigSerializer
 
 
@@ -16,6 +21,7 @@ class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
     - marcar_todas_leidas: Marcar todas las notificaciones como leídas
     - no_leidas: Obtener solo las notificaciones no leídas
     """
+
     serializer_class = NotificacionSerializer
     permission_classes = [IsAuthenticated]
 
@@ -23,7 +29,7 @@ class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
         """Solo retorna las notificaciones del usuario autenticado"""
         return Notificacion.objects.filter(usuario=self.request.user)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def marcar_leida(self, request, pk=None):
         """Marca una notificación como leída"""
         notificacion = self.get_object()
@@ -31,31 +37,27 @@ class NotificacionViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(notificacion)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=["post"])
     def marcar_todas_leidas(self, request):
         """Marca todas las notificaciones no leídas como leídas"""
         notificaciones = self.get_queryset().filter(leida=False)
         count = notificaciones.count()
-        
+
         for notificacion in notificaciones:
             notificacion.marcar_leida()
-        
-        return Response({
-            'message': f'{count} notificaciones marcadas como leídas',
-            'count': count
-        })
 
-    @action(detail=False, methods=['get'])
+        return Response(
+            {"message": f"{count} notificaciones marcadas como leídas", "count": count}
+        )
+
+    @action(detail=False, methods=["get"])
     def no_leidas(self, request):
         """Obtiene solo las notificaciones no leídas"""
         notificaciones = self.get_queryset().filter(leida=False)
         serializer = self.get_serializer(notificaciones, many=True)
-        return Response({
-            'count': notificaciones.count(),
-            'results': serializer.data
-        })
+        return Response({"count": notificaciones.count(), "results": serializer.data})
 
-    @action(detail=False, methods=['get'])
+    @action(detail=False, methods=["get"])
     def recientes(self, request):
         """Obtiene las últimas 10 notificaciones"""
         notificaciones = self.get_queryset()[:10]
@@ -69,6 +71,7 @@ class NotificacionConfigViewSet(viewsets.ModelViewSet):
     - retrieve: Obtener la configuración actual
     - update/partial_update: Actualizar la configuración
     """
+
     serializer_class = NotificacionConfigSerializer
     permission_classes = [IsAuthenticated]
 
@@ -91,7 +94,7 @@ class NotificacionConfigViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         """Actualiza la configuración del usuario"""
-        partial = kwargs.pop('partial', False)
+        partial = kwargs.pop("partial", False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -100,5 +103,59 @@ class NotificacionConfigViewSet(viewsets.ModelViewSet):
 
     def partial_update(self, request, *args, **kwargs):
         """Actualización parcial de la configuración"""
-        kwargs['partial'] = True
+        kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+
+def validar_acceso_magico(request, token_slug):
+    """Vista de autologin mediante un AccessToken de un solo uso.
+
+    Flujo:
+    - Busca el token por UUID y verifica que no haya sido usado.
+    - Si expiró, lo marca como usado y redirige al frontend con error.
+    - Si es válido, autentica al usuario, genera un token DRF y decide si
+      el beneficio es "saldo" o "descuento" según la billetera.
+    - Redirige al frontend a la página de fidelización con el token y el
+      tipo de beneficio en la querystring.
+    """
+
+    access_token = get_object_or_404(
+        AccessToken,
+        token=token_slug,
+        used_at__isnull=True,
+    )
+
+    # Si el token está expirado, lo invalidamos y redirigimos con error
+    if access_token.is_expired:
+        access_token.mark_used()
+        expired_url = (
+            f"{settings.FRONTEND_URL}/fidelizacion/confirmar?error=token_expired"
+        )
+        return redirect(expired_url)
+
+    user = access_token.user
+
+    # Autenticación de sesión tradicional (por si se usa en vistas Django)
+    django_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+
+    # Token DRF para el frontend (Next.js) – autologin por API
+    api_token, _ = DRFToken.objects.get_or_create(user=user)
+
+    # Marcar el AccessToken como usado (one-shot)
+    access_token.mark_used()
+
+    # Determinar si el cliente tiene saldo en billetera
+    tiene_saldo = False
+    try:
+        billetera = Billetera.objects.get(cliente__user=user)
+        tiene_saldo = billetera.saldo > 0
+    except Billetera.DoesNotExist:
+        billetera = None
+
+    beneficio = "saldo" if tiene_saldo else "descuento"
+
+    # Construir URL de destino en el frontend
+    base_url = f"{settings.FRONTEND_URL}/fidelizacion/confirmar"
+    redirect_url = f"{base_url}?auth_token={api_token.key}&beneficio={beneficio}"
+
+    return redirect(redirect_url)

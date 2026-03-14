@@ -39,6 +39,8 @@ interface Servicio {
   tiempo_espera_respuesta: number;
   porcentaje_sena: string;
   frecuencia_recurrencia_dias: number;
+  descuento_fidelizacion_pct: number;
+  descuento_fidelizacion_monto: number;
 }
 
 export default function EditarServicioPage() {
@@ -69,7 +71,10 @@ export default function EditarServicioPage() {
     valor_descuento_adelanto: '',
     tiempo_espera_respuesta: '15',
     porcentaje_sena: '25.00',
-    frecuencia_recurrencia_dias: '30'
+    frecuencia_recurrencia_dias: '30',
+    tipo_descuento_fidelizacion: 'PORCENTAJE' as 'PORCENTAJE' | 'MONTO_FIJO',
+    descuento_fidelizacion_pct: '0',
+    descuento_fidelizacion_monto: '0'
   });
 
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
@@ -100,6 +105,14 @@ export default function EditarServicioPage() {
 
         if (servicioRes.ok) {
           const servicio: Servicio = await servicioRes.json();
+          // Determinar tipo de descuento de fidelización según los valores existentes
+          let tipoDescuentoFidelizacion: 'PORCENTAJE' | 'MONTO_FIJO' = 'PORCENTAJE';
+          if ((servicio.descuento_fidelizacion_monto ?? 0) > 0) {
+            tipoDescuentoFidelizacion = 'MONTO_FIJO';
+          } else if ((servicio.descuento_fidelizacion_pct ?? 0) > 0) {
+            tipoDescuentoFidelizacion = 'PORCENTAJE';
+          }
+
           setFormData({
             nombre: servicio.nombre,
             categoria: servicio.categoria.toString(),
@@ -112,7 +125,10 @@ export default function EditarServicioPage() {
             valor_descuento_adelanto: servicio.valor_descuento_adelanto?.toString?.() || servicio.valor_descuento_adelanto || '',
             tiempo_espera_respuesta: servicio.tiempo_espera_respuesta?.toString?.() || servicio.tiempo_espera_respuesta?.toString() || '15',
             porcentaje_sena: servicio.porcentaje_sena?.toString?.() || servicio.porcentaje_sena || '25.00',
-            frecuencia_recurrencia_dias: servicio.frecuencia_recurrencia_dias?.toString() || '30'
+            frecuencia_recurrencia_dias: servicio.frecuencia_recurrencia_dias?.toString() || '30',
+            tipo_descuento_fidelizacion: tipoDescuentoFidelizacion,
+            descuento_fidelizacion_pct: servicio.descuento_fidelizacion_pct?.toString?.() || servicio.descuento_fidelizacion_pct?.toString?.() || '0',
+            descuento_fidelizacion_monto: servicio.descuento_fidelizacion_monto?.toString?.() || servicio.descuento_fidelizacion_monto?.toString?.() || '0'
           });
         } else {
           showNotification(
@@ -233,6 +249,45 @@ export default function EditarServicioPage() {
         return;
       }
 
+      // Validaciones de descuento de fidelización
+      const valorFidelizacion = formData.tipo_descuento_fidelizacion === 'PORCENTAJE'
+        ? (formData.descuento_fidelizacion_pct === '' ? 0 : parseFloat(formData.descuento_fidelizacion_pct))
+        : (formData.descuento_fidelizacion_monto === '' ? 0 : parseFloat(formData.descuento_fidelizacion_monto));
+
+      if (isNaN(valorFidelizacion) || valorFidelizacion < 0) {
+        showNotification(
+          'Descuento de fidelización inválido',
+          'El descuento de fidelización debe ser un número igual o mayor a 0',
+          'error'
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (formData.tipo_descuento_fidelizacion === 'PORCENTAJE') {
+        if (valorFidelizacion > 100) {
+          showNotification(
+            'Descuento de fidelización inválido',
+            'El porcentaje de fidelización debe estar entre 0 y 100',
+            'error'
+          );
+          setLoading(false);
+          return;
+        }
+        if (!Number.isInteger(valorFidelizacion)) {
+          showNotification(
+            'Descuento de fidelización inválido',
+            'El porcentaje de fidelización debe ser un número entero (sin decimales)',
+            'error'
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
+      const descuentoFidelizacionPct = formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? valorFidelizacion : 0;
+      const descuentoFidelizacionMonto = formData.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? valorFidelizacion : 0;
+
       // Preparar datos para enviar
       const dataToSend = {
         nombre: formData.nombre,
@@ -246,7 +301,9 @@ export default function EditarServicioPage() {
         valor_descuento_adelanto: descuentoValor,
         tiempo_espera_respuesta: tiempoEspera,
         porcentaje_sena: porcentajeSena,
-        frecuencia_recurrencia_dias: parseInt(formData.frecuencia_recurrencia_dias) || 30
+        frecuencia_recurrencia_dias: parseInt(formData.frecuencia_recurrencia_dias) || 30,
+        descuento_fidelizacion_pct: descuentoFidelizacionPct,
+        descuento_fidelizacion_monto: descuentoFidelizacionMonto
       };
 
       const response = await fetch(`/api/servicios/${servicioId}/`, {
@@ -456,7 +513,7 @@ export default function EditarServicioPage() {
         <Card>
           <CardHeader>
             <CardTitle>Fidelización y Retorno de Clientes</CardTitle>
-            <CardDescription>Configura la frecuencia sugerida de retorno para este servicio</CardDescription>
+            <CardDescription>Configura la frecuencia de retorno y descuentos promocionales para este servicio</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -472,6 +529,97 @@ export default function EditarServicioPage() {
               <p className="text-sm text-muted-foreground">
                 Este servicio se ofrecerá a clientes que no hayan vuelto en los días definidos en su ficha. Si es 0, se usará la configuración global.
               </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="tipo_descuento_fidelizacion">Tipo de descuento de fidelización</Label>
+                <Select
+                  value={formData.tipo_descuento_fidelizacion}
+                  onValueChange={(value) => handleInputChange('tipo_descuento_fidelizacion', value)}
+                >
+                  <SelectTrigger id="tipo_descuento_fidelizacion">
+                    <SelectValue placeholder="Selecciona el tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PORCENTAJE">%</SelectItem>
+                    <SelectItem value="MONTO_FIJO">$</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Elegí si el descuento de fidelización será un porcentaje o un monto fijo sobre el precio del servicio.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="valor_descuento_fidelizacion">Valor del descuento de fidelización</Label>
+                <Input
+                  id="valor_descuento_fidelizacion"
+                  type="number"
+                  step={formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? '1' : '0.01'}
+                  min="0"
+                  max={formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? '100' : undefined}
+                  value={
+                    formData.tipo_descuento_fidelizacion === 'PORCENTAJE'
+                      ? formData.descuento_fidelizacion_pct
+                      : formData.descuento_fidelizacion_monto
+                  }
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setFormData((prev) => ({
+                      ...prev,
+                      descuento_fidelizacion_pct:
+                        prev.tipo_descuento_fidelizacion === 'PORCENTAJE' ? value : '0',
+                      descuento_fidelizacion_monto:
+                        prev.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? value : '0'
+                    }));
+                  }}
+                  placeholder={formData.tipo_descuento_fidelizacion === 'PORCENTAJE' ? '15' : '500'}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Si elegís %, se aceptan números enteros de 0 a 100. Si elegís $, se usará el valor como monto fijo de descuento.
+                </p>
+              </div>
+            </div>
+
+            {/* Vista previa del precio promocional en tiempo real */}
+            <div className="mt-4 rounded-md border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-sm text-purple-900">
+              {(() => {
+                const precio = parseFloat(formData.precio || '0') || 0;
+                const pct = formData.tipo_descuento_fidelizacion === 'PORCENTAJE'
+                  ? parseFloat(formData.descuento_fidelizacion_pct || '0') || 0
+                  : 0;
+                const monto = formData.tipo_descuento_fidelizacion === 'MONTO_FIJO'
+                  ? parseFloat(formData.descuento_fidelizacion_monto || '0') || 0
+                  : 0;
+
+                let precioConDescuento = precio;
+                if (monto > 0) {
+                  precioConDescuento = Math.max(0, precio - monto);
+                } else if (pct > 0) {
+                  precioConDescuento = precio * (1 - pct / 100);
+                }
+
+                if (!precio) {
+                  return <span>Ingresá un precio para ver el valor promocional.</span>;
+                }
+
+                if (precioConDescuento === precio) {
+                  return (
+                    <span>
+                      Sin descuento de fidelización configurado. El precio se mantiene en{' '}
+                      <strong>${precio.toFixed(2)}</strong>.
+                    </span>
+                  );
+                }
+
+                return (
+                  <span>
+                    Con la configuración actual, el precio de fidelización sería{' '}
+                    <strong>${precioConDescuento.toFixed(2)}</strong> (desde ${precio.toFixed(2)}).
+                  </span>
+                );
+              })()}
             </div>
           </CardContent>
         </Card>

@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from django.db.models import Max, Count
+from django.conf import settings
 from decimal import Decimal
 import logging
 
@@ -20,6 +21,9 @@ from apps.turnos.services.reacomodamiento_service import iniciar_reacomodamiento
 
 from apps.turnos.services.reasignacion_service import expirar_oferta_reasignacion
 from apps.emails.services.email_service import EmailService
+from apps.emails.models import Notificacion
+from apps.empleados.models import EmpleadoServicio
+from apps.emails.tasks import _buscar_proximo_horario_disponible
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +334,12 @@ def diagnostico_fidelizacion_clientes(request):
     dias_inactividad_filtro = request.data.get("dias_inactividad")
     enviar_emails = request.data.get("enviar_emails", False)
 
+    logger.info(
+        "[DIAGNÓSTICO FIDELIZACIÓN] llamado con dias_inactividad=%s, enviar_emails=%s",
+        dias_inactividad_filtro,
+        enviar_emails,
+    )
+
     if dias_inactividad_filtro:
         dias_inactividad_filtro = int(dias_inactividad_filtro)
 
@@ -431,34 +441,193 @@ def diagnostico_fidelizacion_clientes(request):
 
         if enviar_emails:
             try:
-                # TODO: Integrar con EmailService para enviar email real
-                # Por ahora simulamos el envío
-                logger.info(
-                    f"[DIAGNÓSTICO] Enviando invitación a {cliente.nombre_completo} ({cliente.user.email})"
-                )
+                # Validar que haya servicio asociado
+                if not servicio:
+                    resultado_cliente["email_enviado"] = False
+                    resultado_cliente["email_status"] = "simulado"
+                    resultado_cliente["email_error"] = (
+                        "Cliente sin servicio asociado para fidelización"
+                    )
+                else:
+                    # Buscar el último turno completado de este cliente para el servicio
+                    turno_ref = (
+                        Turno.objects.filter(
+                            cliente=cliente,
+                            servicio=servicio,
+                            estado="completado",
+                        )
+                        .select_related("empleado__user")
+                        .order_by("-fecha_hora")
+                        .first()
+                    )
 
-                # Aquí iría la llamada real al servicio de emails:
-                # EmailService.enviar_email_fidelizacion(
-                #     cliente=cliente,
-                #     servicio=servicio,
-                #     descuento_pct=descuento_pct
-                # )
+                    if not turno_ref or not turno_ref.empleado:
+                        resultado_cliente["email_enviado"] = False
+                        resultado_cliente["email_status"] = "simulado"
+                        resultado_cliente["email_error"] = (
+                            "Sin profesional asociado para fidelización"
+                        )
+                    else:
+                        empleado = turno_ref.empleado
+                        fecha_ref = (
+                            turno_ref.fecha_hora_completado or turno_ref.fecha_hora
+                        )
 
-                resultado_cliente["email_enviado"] = True
-                resultado_cliente["email_status"] = "exitoso"
-                emails_enviados += 1
+                        # Validaciones básicas del profesional
+                        if (
+                            not getattr(empleado, "user", None)
+                            or not empleado.user.is_active
+                        ):
+                            resultado_cliente["email_enviado"] = False
+                            resultado_cliente["email_status"] = "simulado"
+                            resultado_cliente["email_error"] = (
+                                "Profesional inactivo o sin usuario"
+                            )
+                        elif not EmpleadoServicio.objects.filter(
+                            empleado=empleado, servicio=servicio
+                        ).exists():
+                            resultado_cliente["email_enviado"] = False
+                            resultado_cliente["email_status"] = "simulado"
+                            resultado_cliente["email_error"] = (
+                                "Profesional no realiza este servicio"
+                            )
+                        elif Notificacion.objects.filter(
+                            usuario=cliente.user,
+                            tipo="fidelizacion",
+                            data__servicio_id=servicio.id,
+                            data__empleado_id=empleado.id,
+                            created_at__gte=fecha_ref,
+                        ).exists():
+                            # Ya se envió una notificación en este ciclo
+                            resultado_cliente["email_enviado"] = False
+                            resultado_cliente["email_status"] = "simulado"
+                            resultado_cliente["email_error"] = (
+                                "Ya se envió una notificación en este ciclo"
+                            )
+                        else:
+                            # Buscar próximo horario disponible
+                            fecha_sugerida = _buscar_proximo_horario_disponible(
+                                empleado, servicio
+                            )
+
+                            if not fecha_sugerida:
+                                resultado_cliente["email_enviado"] = False
+                                resultado_cliente["email_status"] = "simulado"
+                                resultado_cliente["email_error"] = (
+                                    "Sin horarios disponibles para sugerir"
+                                )
+                            else:
+                                # Determinar saldo de billetera
+                                saldo = Decimal("0.00")
+                                tiene_saldo = False
+                                try:
+                                    billetera = Billetera.objects.get(cliente=cliente)
+                                    saldo = billetera.saldo
+                                    tiene_saldo = saldo > 0
+                                except Billetera.DoesNotExist:
+                                    tiene_saldo = False
+
+                                # Construir URL de reserva específica para fidelización
+                                # sin login automático por token.
+                                # Igual que en la tarea Celery, agregamos el
+                                # parámetro "beneficio" para que el frontend
+                                # redirija correctamente al flujo de descuento
+                                # o al wizard normal.
+                                beneficio = "saldo" if tiene_saldo else "descuento"
+
+                                base_url = (
+                                    getattr(settings, "FRONTEND_URL", None)
+                                    or getattr(settings, "BACKEND_URL", None)
+                                    or "http://localhost:3000"
+                                )
+                                url_reserva = (
+                                    f"{base_url}/fidelizacion/confirmar?beneficio={beneficio}&cliente={cliente.id}"
+                                    f"&servicio={servicio.id}&empleado={empleado.id}"
+                                    f"&fecha={fecha_sugerida.date().isoformat()}"
+                                    f"&hora={fecha_sugerida.strftime('%H:%M')}"
+                                )
+
+                                logger.info(
+                                    "[DIAGNÓSTICO FIDELIZACIÓN] candidato id=%s, email=%s, tiene_saldo=%s, url=%s",
+                                    cliente.id,
+                                    cliente.user.email,
+                                    tiene_saldo,
+                                    url_reserva,
+                                )
+
+                                if tiene_saldo:
+                                    enviado = EmailService.enviar_email_fidelizacion_con_saldo(
+                                        cliente=cliente,
+                                        servicio=servicio,
+                                        empleado=empleado,
+                                        fecha_sugerida=fecha_sugerida,
+                                        saldo_disponible=saldo,
+                                        url_reserva=url_reserva,
+                                    )
+                                    tipo_email = "con_saldo"
+                                else:
+                                    enviado = EmailService.enviar_email_fidelizacion_sin_saldo(
+                                        cliente=cliente,
+                                        servicio=servicio,
+                                        empleado=empleado,
+                                        fecha_sugerida=fecha_sugerida,
+                                        url_reserva=url_reserva,
+                                    )
+                                    tipo_email = "sin_saldo"
+
+                                if enviado:
+                                    emails_enviados += 1
+                                    resultado_cliente["email_enviado"] = True
+                                    resultado_cliente["email_status"] = "exitoso"
+
+                                    Notificacion.objects.create(
+                                        usuario=cliente.user,
+                                        tipo="fidelizacion",
+                                        titulo="Recordatorio de servicio",
+                                        mensaje=(
+                                            f"Fidelización para {servicio.nombre} "
+                                            f"con {empleado.nombre_completo}"
+                                        ),
+                                        data={
+                                            "servicio_id": servicio.id,
+                                            "empleado_id": empleado.id,
+                                            "fecha_ultimo_turno": (
+                                                fecha_ref.isoformat()
+                                                if fecha_ref
+                                                else None
+                                            ),
+                                            "fecha_sugerida": fecha_sugerida.isoformat(),
+                                            "tipo_email": tipo_email,
+                                            "origen": "diagnostico",
+                                        },
+                                    )
+                                else:
+                                    emails_fallidos += 1
+                                    resultado_cliente["email_enviado"] = False
+                                    resultado_cliente["email_status"] = "error"
+                                    resultado_cliente["email_error"] = (
+                                        "Fallo al enviar el email"
+                                    )
 
             except Exception as e:
                 resultado_cliente["email_enviado"] = False
                 resultado_cliente["email_status"] = "error"
                 resultado_cliente["email_error"] = str(e)
                 emails_fallidos += 1
-                logger.error(f"Error enviando email a {cliente.user.email}: {str(e)}")
+                logger.error(
+                    "[DIAGNÓSTICO FIDELIZACIÓN] Error enviando email a %s: %s",
+                    cliente.user.email,
+                    str(e),
+                )
         else:
             resultado_cliente["email_enviado"] = False
             resultado_cliente["email_status"] = "simulado"
 
         resultados.append(resultado_cliente)
+
+    emails_simulados = len(
+        [r for r in resultados if r.get("email_status") == "simulado"]
+    )
 
     return Response(
         {
@@ -474,11 +643,7 @@ def diagnostico_fidelizacion_clientes(request):
                 "total_candidatos": len(clientes_candidatos),
                 "emails_enviados": emails_enviados,
                 "emails_fallidos": emails_fallidos,
-                "emails_simulados": (
-                    len(clientes_candidatos) - emails_enviados - emails_fallidos
-                    if not enviar_emails
-                    else 0
-                ),
+                "emails_simulados": emails_simulados,
             },
             "resultados": resultados,
         },

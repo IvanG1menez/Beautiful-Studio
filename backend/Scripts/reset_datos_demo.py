@@ -12,6 +12,7 @@ Usuarios creados (login por email):
 - Profesional:  profesional@beautifulstudio.com  / pass: profesional123
 - Cliente 1:    cliente1@beautifulstudio.com     / pass: cliente123
 - Cliente 2:    cliente2@beautifulstudio.com     / pass: cliente123
+- Cliente 3:    cliente3@beautifulstudio.com     / pass: cliente123
 """
 
 from datetime import date, time
@@ -246,6 +247,9 @@ def crear_usuarios_base():
             "tiempo_espera_respuesta": 20,
             "porcentaje_sena": Decimal("30.00"),
             "frecuencia_recurrencia_dias": 45,
+            # Descuentos de fidelización de ejemplo
+            "descuento_fidelizacion_pct": Decimal("15.00"),
+            "descuento_fidelizacion_monto": Decimal("0.00"),
             "duracion_minutos": 120,
             "is_active": True,
         },
@@ -375,6 +379,61 @@ def crear_usuarios_base():
     billetera2, _ = Billetera.objects.get_or_create(cliente=cliente2)
     billetera2.saldo = Decimal("500.00")
     billetera2.save()
+
+    # Cliente 3 (sin saldo en billetera)
+    cliente3_email = "cliente3@beautifulstudio.com"
+
+    cliente3_user, created = User.objects.get_or_create(
+        email=cliente3_email,
+        defaults={
+            "username": "cliente3",
+            "first_name": "Laura",
+            "last_name": "Martínez",
+            "role": "cliente",
+            "is_staff": False,
+            "is_superuser": False,
+        },
+    )
+
+    if created:
+        cliente3_user.set_password("cliente123")
+        cliente3_user.save()
+        print(
+            "✅ Usuario cliente 'cliente3@beautifulstudio.com' creado (pass: cliente123)"
+        )
+    else:
+        changed = False
+        if cliente3_user.role != "cliente":
+            cliente3_user.role = "cliente"
+            changed = True
+        if changed:
+            cliente3_user.save(update_fields=["role"])
+        print("ℹ️ Usuario cliente 'cliente3@beautifulstudio.com' ya existía")
+
+    # Identidad del cliente 3
+    cliente3_user.first_name = "Laura"
+    cliente3_user.last_name = "Martínez"
+    cliente3_user.dni = cliente3_user.dni or "30133444"
+    cliente3_user.phone = cliente3_user.phone or "+54 9 11 4444-3333"
+    cliente3_user.save(update_fields=["first_name", "last_name", "dni", "phone"])
+
+    cliente3, created = Cliente.objects.get_or_create(user=cliente3_user)
+    cliente3.fecha_nacimiento = date(1992, 7, 21)
+    cliente3.direccion = "Av. Corrientes 1234, Ciudad Autónoma de Buenos Aires"
+    cliente3.preferencias = (
+        "Le gustan los cambios de look completos y probar nuevos servicios."
+    )
+    cliente3.is_vip = False
+    cliente3.save()
+    if created:
+        print("✅ Perfil Cliente creado para 'cliente3@beautifulstudio.com'")
+    else:
+        print("ℹ️ Perfil Cliente actualizado para 'cliente3@beautifulstudio.com'")
+
+    # Billetera para cliente3 con saldo 0
+    billetera3, _ = Billetera.objects.get_or_create(cliente=cliente3)
+    billetera3.saldo = Decimal("0.00")
+    billetera3.save()
 
 
 def run():

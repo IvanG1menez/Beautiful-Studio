@@ -201,6 +201,35 @@ class CrearPreferenciaSinTurnoView(APIView):
 
         # ── Cálculo de monto ────────────────────────────────────────────────────────
         precio_total = Decimal(str(servicio.precio or 0))
+        # Aplicar descuento de fidelización si el frontend lo indica (flujo de
+        # emails de retorno para clientes sin saldo en billetera).
+        if data.get("aplicar_descuento_fidelizacion"):
+            from apps.authentication.models import ConfiguracionGlobal
+
+            descuento_monto = getattr(servicio, "descuento_fidelizacion_monto", None)
+            descuento_pct = getattr(servicio, "descuento_fidelizacion_pct", None)
+
+            descuento_monto = Decimal(str(descuento_monto or 0))
+            descuento_pct = Decimal(str(descuento_pct or 0))
+
+            if descuento_monto > 0:
+                precio_total = max(Decimal("0"), precio_total - descuento_monto)
+            elif descuento_pct > 0:
+                precio_total = (
+                    precio_total * (Decimal("100") - descuento_pct) / Decimal("100")
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                # Fallback al porcentaje global de fidelización si el servicio
+                # no tiene descuento específico configurado.
+                config_global = ConfiguracionGlobal.get_config()
+                global_pct = Decimal(
+                    str(getattr(config_global, "descuento_fidelizacion_pct", 0) or 0)
+                )
+                if global_pct > 0:
+                    precio_total = (
+                        precio_total * (Decimal("100") - global_pct) / Decimal("100")
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
         porcentaje_sena = Decimal(str(servicio.porcentaje_sena or 0))
         usar_sena = data.get("usar_sena", True)
 

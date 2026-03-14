@@ -1,5 +1,9 @@
 from django.db import models
 from django.conf import settings
+import uuid
+from datetime import timedelta
+
+from django.utils import timezone
 
 
 class NotificacionConfig(models.Model):
@@ -87,6 +91,7 @@ class Notificacion(models.Model):
         ("nuevo_cliente", "Nuevo Cliente"),
         ("reporte_diario", "Reporte Diario"),
         ("recordatorio", "Recordatorio"),
+        ("fidelizacion", "Fidelización de Clientes"),
     ]
 
     usuario = models.ForeignKey(
@@ -170,3 +175,67 @@ class PasswordResetToken(models.Model):
         self.used = True
         self.used_at = timezone.now()
         self.save(update_fields=["used", "used_at"])
+
+
+class AccessToken(models.Model):
+    """Token de acceso mágico para autologin desde emails.
+
+    Se usa para flujos como fidelización de clientes, permitiendo que el
+    usuario acceda sin ingresar credenciales. Es de un solo uso y expira
+    automáticamente luego de un tiempo configurable.
+    """
+
+    class TipoAccion(models.TextChoices):
+        CON_SALDO = "CON_SALDO", "Con saldo en billetera"
+        CON_DESCUENTO = "CON_DESCUENTO", "Con descuento"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="access_tokens",
+    )
+    token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_index=True,
+    )
+    tipo_accion = models.CharField(
+        max_length=20,
+        choices=TipoAccion.choices,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    # Tiempo de expiración del enlace en horas (por defecto, 48hs)
+    EXPIRATION_HOURS = 48
+
+    @property
+    def is_expired(self) -> bool:
+        """Indica si el token ya expiró o fue usado."""
+
+        if self.used_at is not None:
+            return True
+
+        expiry_time = self.created_at + timedelta(hours=self.EXPIRATION_HOURS)
+        return timezone.now() > expiry_time
+
+    def mark_used(self) -> None:
+        """Marca el token como usado (one-shot)."""
+
+        if self.used_at is None:
+            self.used_at = timezone.now()
+            self.save(update_fields=["used_at"])
+
+    class Meta:
+        db_table = "emails_accesstoken"
+        verbose_name = "Token de Acceso"
+        verbose_name_plural = "Tokens de Acceso"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["token"]),
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"AccessToken({self.user.email}, {self.token})"

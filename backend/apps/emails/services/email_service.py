@@ -19,12 +19,25 @@ class EmailService:
     @staticmethod
     def _get_email_destinatario(email_original: str) -> str:
         """
-        Retorna el email de destino según el entorno
-        En DEBUG, envía a Mailtrap (gimenezivanb@gmail.com)
-        En producción, envía al email real
+        Retorna el email de destino.
+
+        Antes se forzaba en DEBUG a enviar siempre a una casilla fija
+        (gimenezivanb@gmail.com), lo que hacía que todos los correos
+        (incluidos los de clientes) llegaran al mismo inbox.
+
+        Ahora se respeta siempre el email real del usuario, salvo que
+        se configure explícitamente un override mediante
+        `settings.EMAIL_DEBUG_REDIRECT` (para casos puntuales).
         """
-        if settings.DEBUG:
-            return "gimenezivanb@gmail.com"
+        override = getattr(settings, "EMAIL_DEBUG_REDIRECT", None)
+        if override:
+            logger.info(
+                "[EmailService] Redirigiendo email desde %s hacia override %s",
+                email_original,
+                override,
+            )
+            return override
+
         return email_original
 
     @staticmethod
@@ -883,6 +896,251 @@ class EmailService:
 
         except Exception as e:
             logger.error(f"Error enviando reporte diario: {str(e)}")
+            return False
+
+    @staticmethod
+    def enviar_email_fidelizacion_con_saldo(
+        cliente,
+        servicio,
+        empleado,
+        fecha_sugerida=None,
+        saldo_disponible=None,
+        url_reserva: Optional[str] = None,
+    ) -> bool:
+        """Envía email de fidelización a un cliente que tiene saldo en billetera.
+
+        Args:
+            cliente: Instancia de Cliente.
+            servicio: Instancia de Servicio.
+            empleado: Profesional sugerido para el servicio.
+            fecha_sugerida: Datetime opcional con la fecha/hora sugerida del próximo turno.
+            saldo_disponible: Saldo de billetera disponible (Decimal opcional).
+            url_reserva: URL del frontend para reservar/confirmar el turno.
+        """
+        try:
+            if not cliente or not getattr(cliente, "user", None):
+                logger.warning("Cliente sin usuario asociado para fidelización")
+                return False
+
+            user = cliente.user
+            if not user.email:
+                logger.warning("Usuario sin email configurado para fidelización")
+                return False
+
+            nombre_cliente = user.first_name or user.username
+            nombre_profesional = (
+                getattr(empleado, "nombre_completo", None)
+                or getattr(
+                    getattr(empleado, "user", None),
+                    "get_full_name",
+                    lambda: "Profesional",
+                )()
+            )
+
+            fecha_sugerida_str = (
+                fecha_sugerida.strftime("%d/%m/%Y %H:%M") if fecha_sugerida else None
+            )
+
+            saldo_str = None
+            if saldo_disponible is not None:
+                try:
+                    saldo_str = f"${saldo_disponible}"
+                except Exception:
+                    saldo_str = str(saldo_disponible)
+
+            if url_reserva is None:
+                base_url = (
+                    getattr(settings, "FRONTEND_URL", None)
+                    or getattr(settings, "BACKEND_URL", None)
+                    or "http://localhost:3000"
+                )
+                url_reserva = f"{base_url}/fidelizacion"  # Ruta genérica, el frontend podrá especializarla
+
+            call_to_action = "Confirmar mi próximo turno"
+
+            contenido_horario = (
+                f'<div class="info-row"><span class="info-label">Próximo horario sugerido:</span><span class="info-value">{fecha_sugerida_str}</span></div>'
+                if fecha_sugerida_str
+                else ""
+            )
+
+            contenido_saldo = (
+                f'<div class="info-row"><span class="info-label">Saldo disponible en tu billetera:</span><span class="info-value">{saldo_str}</span></div>'
+                if saldo_str
+                else ""
+            )
+
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">¡Te esperamos de vuelta!</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+                <p>Hace un tiempo que no te vemos por <strong>{servicio.nombre}</strong> con <strong>{nombre_profesional}</strong> y nos encantaría que vuelvas.</p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{nombre_profesional}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{servicio.nombre}</span>
+                    </div>
+                    {contenido_horario}
+                    {contenido_saldo}
+                </div>
+
+                <div class="alert alert-success">
+                    <strong>¡Tenés saldo disponible en tu billetera!</strong><br>
+                    Aprovechalo para tu próximo servicio y no lo dejes pasar.
+                </div>
+
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="{url_reserva}" class="button">{call_to_action}</a>
+                </p>
+
+                <p style="font-size: 0.9em; color: #718096; margin-top: 10px;">
+                    Si ya reservaste tu próximo turno, podés ignorar este mensaje.
+                </p>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Te extrañamos en el salón",
+                header_titulo="Tenemos un turno para vos",
+                contenido=contenido,
+            )
+
+            plain_message = strip_tags(html_message)
+
+            email_destino = EmailService._get_email_destinatario(user.email)
+
+            send_mail(
+                subject="Tenés saldo para usar en tu próximo servicio",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                f"Email de fidelización (con saldo) enviado a {email_destino} (original: {user.email})"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error enviando email de fidelización con saldo: {str(e)}")
+            return False
+
+    @staticmethod
+    def enviar_email_fidelizacion_sin_saldo(
+        cliente,
+        servicio,
+        empleado,
+        fecha_sugerida=None,
+        url_reserva: Optional[str] = None,
+    ) -> bool:
+        """Envía email de fidelización a un cliente sin saldo en billetera.
+
+        El mensaje sugiere un beneficio/descuento, pero la lógica económica
+        concreta se deja a criterio del negocio.
+        """
+        try:
+            if not cliente or not getattr(cliente, "user", None):
+                logger.warning("Cliente sin usuario asociado para fidelización")
+                return False
+
+            user = cliente.user
+            if not user.email:
+                logger.warning("Usuario sin email configurado para fidelización")
+                return False
+
+            nombre_cliente = user.first_name or user.username
+            nombre_profesional = (
+                getattr(empleado, "nombre_completo", None)
+                or getattr(
+                    getattr(empleado, "user", None),
+                    "get_full_name",
+                    lambda: "Profesional",
+                )()
+            )
+
+            fecha_sugerida_str = (
+                fecha_sugerida.strftime("%d/%m/%Y %H:%M") if fecha_sugerida else None
+            )
+
+            if url_reserva is None:
+                base_url = (
+                    getattr(settings, "FRONTEND_URL", None)
+                    or getattr(settings, "BACKEND_URL", None)
+                    or "http://localhost:3000"
+                )
+                url_reserva = f"{base_url}/fidelizacion"  # Ruta genérica, el frontend podrá especializarla
+
+            call_to_action = "Aprovechar mi beneficio"
+
+            contenido_horario = (
+                f'<div class="info-row"><span class="info-label">Próximo horario sugerido:</span><span class="info-value">{fecha_sugerida_str}</span></div>'
+                if fecha_sugerida_str
+                else ""
+            )
+
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">Tenemos un beneficio para vos</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+                <p>Pasó un tiempo desde tu último <strong>{servicio.nombre}</strong> con <strong>{nombre_profesional}</strong> y queremos ayudarte a mantener tu rutina.</p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{nombre_profesional}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{servicio.nombre}</span>
+                    </div>
+                    {contenido_horario}
+                </div>
+
+                <div class="alert alert-info">
+                    <strong>Beneficio especial:</strong> {"Te ofrecemos un descuento exclusivo en este servicio si reservas con este link."}
+                </div>
+
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="{url_reserva}" class="button">{call_to_action}</a>
+                </p>
+
+                <p style="font-size: 0.9em; color: #718096; margin-top: 10px;">
+                    El detalle exacto del beneficio será definido por el salón.
+                </p>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Tenemos un beneficio para vos",
+                header_titulo="Te extrañamos",
+                contenido=contenido,
+            )
+
+            plain_message = strip_tags(html_message)
+
+            email_destino = EmailService._get_email_destinatario(user.email)
+
+            send_mail(
+                subject="Tenemos un beneficio para vos en tu próximo servicio",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                f"Email de fidelización (sin saldo) enviado a {email_destino} (original: {user.email})"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error enviando email de fidelización sin saldo: {str(e)}")
             return False
 
     @staticmethod

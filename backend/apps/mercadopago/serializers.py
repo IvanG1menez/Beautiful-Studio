@@ -28,6 +28,10 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
     creditos_a_aplicar = serializers.DecimalField(
         required=False, default=0, max_digits=10, decimal_places=2, min_value=0
     )
+    # Flag opcional para aplicar descuento de fidelización (flujo de emails de retorno)
+    aplicar_descuento_fidelizacion = serializers.BooleanField(
+        required=False, default=False
+    )
 
 
 class PagoMercadoPagoSerializer(serializers.ModelSerializer):
