@@ -2,6 +2,7 @@
 
 import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Calendar,
@@ -133,7 +134,8 @@ export default function DashboardClienteLayout({
           </nav>
 
           {sidebarOpen && (
-            <div className="p-4 border-t border-purple-700">
+            <div className="p-4 border-t border-purple-700 flex flex-col gap-3">
+              <ThemeToggle />
               <div className="text-xs text-purple-200">
                 <p>Beautiful Studio</p>
                 <p className="mt-1">Tu belleza, nuestra pasión</p>
@@ -142,7 +144,7 @@ export default function DashboardClienteLayout({
           )}
         </aside>
 
-        <main className="flex-1 overflow-y-auto bg-gray-50">
+        <main className="flex-1 overflow-y-auto bg-background">
           {children}
         </main>
 

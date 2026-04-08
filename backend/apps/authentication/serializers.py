@@ -261,6 +261,7 @@ class ConfiguracionGlobalSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "min_horas_cancelacion_credito",
+            "dias_vencimiento_credito",
             "margen_fidelizacion_dias",
             "descuento_fidelizacion_pct",
             "capacidad_maxima_global",

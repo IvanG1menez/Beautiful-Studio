@@ -740,7 +740,18 @@ export default function ServiciosAdminPage() {
                           <span>💰 ${servicio.precio}</span>
                           <span>⏱️ {servicio.duracion_minutos} min</span>
                           {servicio.porcentaje_sena && (
-                            <span>💳 Seña {servicio.porcentaje_sena}%</span>
+                            <span>
+                              {(() => {
+                                const precio = Number(servicio.precio) || 0;
+                                const pct = typeof servicio.porcentaje_sena === 'number'
+                                  ? servicio.porcentaje_sena
+                                  : Number(servicio.porcentaje_sena) || 0;
+                                const montoSena = precio > 0 && pct > 0 ? (precio * pct) / 100 : 0;
+                                return montoSena
+                                  ? `💳 Seña aprox $${montoSena.toFixed(0)}`
+                                  : '💳 Seña sin configurar';
+                              })()}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -800,7 +811,17 @@ export default function ServiciosAdminPage() {
                           )}
                           {servicio.porcentaje_sena && (
                             <div>
-                              <span className="font-medium">Seña:</span> {servicio.porcentaje_sena}%
+                              <span className="font-medium">Seña:</span>{' '}
+                              {(() => {
+                                const precio = Number(servicio.precio) || 0;
+                                const pct = typeof servicio.porcentaje_sena === 'number'
+                                  ? servicio.porcentaje_sena
+                                  : Number(servicio.porcentaje_sena) || 0;
+                                const montoSena = precio > 0 && pct > 0 ? (precio * pct) / 100 : 0;
+                                return montoSena
+                                  ? `$${montoSena.toFixed(2)} (${pct.toFixed ? pct.toFixed(2) : pct}%)`
+                                  : `${pct}%`;
+                              })()}
                             </div>
                           )}
                           {servicio.permite_reacomodamiento !== undefined && (

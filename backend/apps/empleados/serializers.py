@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Empleado, HorarioEmpleado
+from .models import Empleado, HorarioEmpleado, EmpleadoServicio
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
@@ -262,8 +262,6 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "is_disponible",
             "biografia",
             "nivel_experiencia",
-            "promedio_calificacion",
-            "total_encuestas",
             "created_at",
             "updated_at",
         )
@@ -302,3 +300,22 @@ class HorarioEmpleadoSerializer(serializers.ModelSerializer):
                     {"hora_fin": "La hora de fin debe ser mayor a la hora de inicio"}
                 )
         return data
+
+
+class EmpleadoServicioSerializer(serializers.ModelSerializer):
+    """Serializer simple para la relación Empleado-Servicio.
+
+    Se usa para exponer los servicios asociados a un profesional
+    en endpoints como /empleados/<empleado_id>/servicios/.
+    """
+
+    servicio = serializers.SerializerMethodField()
+
+    def get_servicio(self, obj):
+        from apps.servicios.serializers import ServicioListSerializer
+
+        return ServicioListSerializer(obj.servicio).data
+
+    class Meta:
+        model = EmpleadoServicio
+        fields = ["id", "empleado", "servicio", "nivel_experiencia", "created_at"]

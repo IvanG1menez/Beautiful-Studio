@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,7 +13,6 @@ import {
   Calendar,
   CheckCircle,
   Clock,
-  Loader2,
   MapPin,
   Phone,
   User,
@@ -37,7 +37,12 @@ interface Turno {
   fecha_hora_fin: string;
   estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio';
   estado_display: string;
-  precio_final: string;
+  precio_final: string | null;
+  servicio_precio?: string;
+  senia_pagada?: string;
+  monto_pendiente?: string;
+  monto_pendiente_original?: string;
+  descuento_aplicado?: string;
   notas_cliente?: string;
   notas_empleado?: string;
   created_at: string;
@@ -182,7 +187,7 @@ export default function DashboardClientePage() {
   if (!isClient) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin" />
+        <BeautifulSpinner label="Cargando tu panel de cliente..." />
       </div>
     );
   }
@@ -190,13 +195,13 @@ export default function DashboardClientePage() {
   const proximoCita = proximosTurnos.length > 0 ? proximosTurnos[0] : null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header con saludo y próxima cita */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-card shadow-sm border-b border-border">
         <div className="container mx-auto px-6 py-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">
+              <h1 className="text-3xl font-bold text-foreground">
                 ¡Hola, {perfilCliente?.user?.first_name || 'Cliente'}!
               </h1>
               <p className="text-gray-600 mt-1">
@@ -208,10 +213,7 @@ export default function DashboardClientePage() {
             {loadingTurnos ? (
               <Card className="md:w-96">
                 <CardContent className="pt-6">
-                  <div className="flex items-center justify-center">
-                    <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-                    <span className="ml-2 text-sm text-gray-500">Cargando...</span>
-                  </div>
+                  <BeautifulSpinner label="Cargando próxima cita..." />
                 </CardContent>
               </Card>
             ) : proximoCita ? (
@@ -268,7 +270,7 @@ export default function DashboardClientePage() {
               <CardHeader>
                 <CardTitle>Mis Turnos</CardTitle>
                 <CardDescription>
-                  Gestiona tus citas programadas y consulta el historial
+                  Gestiona tus citas programadas y consulta la auditoría
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -281,7 +283,7 @@ export default function DashboardClientePage() {
                       )}
                     </TabsTrigger>
                     <TabsTrigger value="historial">
-                      Historial
+                      Auditoría
                       {historialTurnos.length > 0 && (
                         <Badge variant="secondary" className="ml-2">{historialTurnos.length}</Badge>
                       )}
@@ -291,8 +293,7 @@ export default function DashboardClientePage() {
                   <TabsContent value="proximos" className="mt-0">
                     {loadingTurnos ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-                        <span className="ml-2 text-gray-500">Cargando turnos...</span>
+                        <BeautifulSpinner label="Cargando tus próximos turnos..." />
                       </div>
                     ) : proximosTurnos.length > 0 ? (
                       <div className="space-y-3">
@@ -326,8 +327,24 @@ export default function DashboardClientePage() {
                                     <Clock className="w-4 h-4" />
                                     <span>{formatTime(turno.fecha_hora)} - {formatTime(turno.fecha_hora_fin)}</span>
                                   </div>
-                                  <div className="font-medium text-gray-900">
-                                    ${turno.precio_final}
+                                  <div className="font-medium text-gray-900 flex flex-col items-start">
+                                    {(() => {
+                                      const montoPendiente = parseFloat(turno.monto_pendiente || turno.precio_final || '0');
+                                      const montoOriginal = parseFloat(turno.monto_pendiente_original || turno.monto_pendiente || turno.precio_final || '0');
+                                      const descuento = parseFloat(turno.descuento_aplicado || '0');
+
+                                      if (descuento > 0 && montoOriginal > 0) {
+                                        return (
+                                          <>
+                                            <span className="line-through text-gray-400 text-xs">Antes ${montoOriginal.toFixed(2)}</span>
+                                            <span className="text-green-700 font-bold text-sm">Ahora ${montoPendiente.toFixed(2)}</span>
+                                            <span className="text-xs text-green-600">Bono aplicado: -${descuento.toFixed(2)}</span>
+                                          </>
+                                        );
+                                      }
+
+                                      return <span>${montoPendiente.toFixed(2)}</span>;
+                                    })()}
                                   </div>
                                 </div>
                               </div>
@@ -350,8 +367,7 @@ export default function DashboardClientePage() {
                   <TabsContent value="historial" className="mt-0">
                     {loadingTurnos ? (
                       <div className="flex items-center justify-center py-12">
-                        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-                        <span className="ml-2 text-gray-500">Cargando historial...</span>
+                        <BeautifulSpinner label="Cargando auditoría de turnos..." />
                       </div>
                     ) : historialTurnos.length > 0 ? (
                       <div className="space-y-3">
@@ -407,7 +423,7 @@ export default function DashboardClientePage() {
                     ) : (
                       <div className="text-center py-12">
                         <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500">No tienes historial de turnos</p>
+                        <p className="text-gray-500">No tienes auditoría de turnos</p>
                       </div>
                     )}
                   </TabsContent>
@@ -425,8 +441,7 @@ export default function DashboardClientePage() {
               <CardContent>
                 {loadingPerfil ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-                    <span className="ml-2 text-gray-500">Cargando perfil...</span>
+                    <BeautifulSpinner label="Cargando tu perfil..." />
                   </div>
                 ) : perfilCliente ? (
                   <div className="space-y-4">

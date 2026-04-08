@@ -11,12 +11,18 @@ Endpoints:
 
 import json
 import logging
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
+from io import BytesIO
 
 from django.db import transaction
+from django.http import HttpResponse
+from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.dateparse import parse_datetime
+
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -33,6 +39,7 @@ from .models import PagoMercadoPago
 from .serializers import (
     CrearPreferenciaSerializer,
     CrearPreferenciaSinTurnoSerializer,
+    CrearPreferenciaStaffSerializer,
     PagoMercadoPagoSerializer,
 )
 from . import services
@@ -230,14 +237,20 @@ class CrearPreferenciaSinTurnoView(APIView):
                         precio_total * (Decimal("100") - global_pct) / Decimal("100")
                     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        porcentaje_sena = Decimal(str(servicio.porcentaje_sena or 0))
-        usar_sena = data.get("usar_sena", True)
+        tipo_pago = (data.get("tipo_pago") or "").upper()
+        if tipo_pago not in {"SENIA", "PAGO_COMPLETO"}:
+            usar_sena = data.get("usar_sena", True)
+            tipo_pago = "SENIA" if usar_sena else "PAGO_COMPLETO"
 
-        # Precio base: seña o total
-        if usar_sena and porcentaje_sena > 0:
-            monto_base = (precio_total * porcentaje_sena / Decimal("100")).quantize(
+        monto_sena_fijo = Decimal(str(getattr(servicio, "monto_sena_fijo", 0) or 0))
+        if monto_sena_fijo <= 0 and precio_total > 0:
+            monto_sena_fijo = (precio_total / Decimal("2")).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
+
+        # Precio base: seña fija o total
+        if tipo_pago == "SENIA":
+            monto_base = monto_sena_fijo
         else:
             monto_base = precio_total
 
@@ -278,6 +291,8 @@ class CrearPreferenciaSinTurnoView(APIView):
                 notas_cliente=data.get("notas_cliente", "") or "",
                 estado="confirmado",
                 precio_final=servicio.precio,
+                senia_pagada=max(Decimal("0.00"), monto_base),
+                tipo_pago=tipo_pago,
             )
             logger.info(
                 "Turno gratuito creado (créditos 100%%) pk=%s cliente=%s",
@@ -310,7 +325,8 @@ class CrearPreferenciaSinTurnoView(APIView):
             "empleado_id": data["empleado_id"],
             "fecha_hora": data["fecha_hora"].isoformat(),
             "notas_cliente": data.get("notas_cliente", "") or "",
-            "usar_sena": usar_sena,
+            "usar_sena": tipo_pago == "SENIA",
+            "tipo_pago": tipo_pago,
             "creditos_aplicados": str(creditos_aplicados),
             "monto_cobrado": str(monto_final),
         }
@@ -333,6 +349,201 @@ class CrearPreferenciaSinTurnoView(APIView):
 
         logger.info(
             "Preferencia sin turno creada — cliente=%s servicio=%s monto=%.2f preference_id=%s",
+            cliente.pk,
+            servicio.pk,
+            monto_final,
+            resultado["preference_id"],
+        )
+
+        return Response(
+            {
+                "status": "pending",
+                "preference_id": resultado["preference_id"],
+                "init_point": resultado["init_point"],
+                "sandbox_init_point": resultado["sandbox_init_point"],
+                "public_key": getattr(settings, "MP_PUBLIC_KEY", ""),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CrearPreferenciaStaffView(APIView):
+    """Crea una preferencia MP para pagos iniciados desde el panel.
+
+    POST /api/mercadopago/preferencia-staff/
+
+    El turno se creará en el webhook, igual que en el flujo sin turno, pero
+    el cliente puede ser walk-in (creado al vuelo) o ya existente.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = CrearPreferenciaStaffSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        # Permisos básicos
+        user = request.user
+        if not (
+            user.is_staff
+            or getattr(user, "role", None)
+            in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"detail": "No tiene permisos para iniciar pagos desde el panel."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Resolver o crear cliente
+        from apps.clientes.models import Cliente
+        from apps.users.models import User
+
+        cliente = None
+        ya_registrado = True
+
+        cliente_id = data.get("cliente_id")
+        if cliente_id:
+            cliente = (
+                Cliente.objects.select_related("user").filter(pk=cliente_id).first()
+            )
+
+        dni = (data.get("dni") or "").strip()
+        email = (data.get("email") or "").strip()
+
+        if cliente is None and dni:
+            cliente = (
+                Cliente.objects.select_related("user").filter(user__dni=dni).first()
+            )
+
+        if cliente is None and email:
+            cliente = (
+                Cliente.objects.select_related("user").filter(user__email=email).first()
+            )
+
+        if cliente is None:
+            ya_registrado = False
+            nombre = (data.get("nombre") or "").strip() or "Cliente"
+            telefono = (data.get("telefono") or "").strip() or None
+
+            partes_nombre = nombre.split(" ", 1)
+            first_name = partes_nombre[0]
+            last_name = partes_nombre[1] if len(partes_nombre) > 1 else ""
+
+            username_base = email or (dni and f"cliente-{dni}") or None
+            if not username_base:
+                username_base = f"cliente-{uuid.uuid4().hex[:8]}"
+
+            user_email = email or f"no-email-{uuid.uuid4().hex[:8]}@example.com"
+
+            user_obj = User.objects.create_user(
+                username=username_base,
+                email=user_email,
+                first_name=first_name,
+                last_name=last_name,
+            )
+            user_obj.role = "cliente"
+            user_obj.dni = dni or None
+            user_obj.phone = telefono
+            user_obj.set_unusable_password()
+            user_obj.save()
+
+            cliente = Cliente.objects.create(user=user_obj)
+
+        # Obtener servicio y empleado
+        try:
+            servicio = Servicio.objects.get(pk=data["servicio_id"], is_active=True)
+        except Servicio.DoesNotExist:
+            return Response(
+                {"detail": f"Servicio {data['servicio_id']} no encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            Empleado.objects.get(pk=data["empleado_id"])
+        except Empleado.DoesNotExist:
+            return Response(
+                {"detail": f"Profesional {data['empleado_id']} no encontrado."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Cálculo de monto (seña o total, sin billetera)
+        precio_total = Decimal(str(servicio.precio or 0))
+        tipo_pago = (data.get("tipo_pago") or "").upper()
+        if tipo_pago not in {"SENIA", "PAGO_COMPLETO"}:
+            usar_sena = data.get("usar_sena", True)
+            tipo_pago = "SENIA" if usar_sena else "PAGO_COMPLETO"
+
+        monto_sena_fijo = Decimal(str(getattr(servicio, "monto_sena_fijo", 0) or 0))
+        if monto_sena_fijo <= 0 and precio_total > 0:
+            monto_sena_fijo = (precio_total / Decimal("2")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
+        if tipo_pago == "SENIA":
+            monto_base = monto_sena_fijo
+        else:
+            monto_base = precio_total
+
+        monto_final = round(float(monto_base), 2)
+
+        min_mp_amount = float(getattr(settings, "MP_MIN_AMOUNT", 100))
+        if monto_final < min_mp_amount:
+            return Response(
+                {
+                    "detail": (
+                        f"El monto a cobrar (${monto_final:.2f}) es inferior al mínimo "
+                        f"permitido por Mercado Pago (${min_mp_amount:.2f} ARS)."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        canal_reserva = (
+            "panel_profesional"
+            if getattr(user, "role", None) == "profesional"
+            else "panel_propietario"
+        )
+
+        turno_payload = {
+            "cliente_id": cliente.pk,
+            "servicio_id": servicio.pk,
+            "empleado_id": data["empleado_id"],
+            "fecha_hora": data["fecha_hora"].isoformat(),
+            "notas_cliente": data.get("notas_cliente", "") or "",
+            "usar_sena": tipo_pago == "SENIA",
+            "tipo_pago": tipo_pago,
+            "creditos_aplicados": "0",
+            "monto_cobrado": str(monto_final),
+            "canal_reserva": canal_reserva,
+            "metodo_pago": "mercadopago_qr",
+            "es_cliente_registrado": ya_registrado,
+            "walkin_nombre": data.get("nombre") or "",
+            "walkin_dni": dni,
+            "walkin_email": email,
+            "walkin_telefono": data.get("telefono") or "",
+        }
+
+        external_reference = json.dumps(turno_payload)
+        notification_url = getattr(settings, "MERCADO_PAGO_WEBHOOK_URL", "")
+
+        try:
+            resultado = services.crear_preferencia(
+                titulo=servicio.nombre,
+                descripcion=f"Turno — {servicio.nombre}",
+                monto=monto_final,
+                external_reference=external_reference,
+                notification_url=notification_url,
+                payer_email=cliente.user.email or "",
+            )
+        except ValueError as exc:
+            logger.error("Error creando preferencia MP staff: %s", exc)
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        logger.info(
+            "Preferencia staff creada — cliente=%s servicio=%s monto=%.2f preference_id=%s",
             cliente.pk,
             servicio.pk,
             monto_final,
@@ -405,6 +616,22 @@ class WebhookMercadoPagoView(APIView):
         )
         creditos_wh = Decimal(str(turno_payload.get("creditos_aplicados") or 0))
 
+        # Monto ya abonado por el cliente al momento de crear el turno.
+        # Incluye tanto el pago vía MP como los créditos de billetera aplicados.
+        senia_total = monto_cobrado + max(creditos_wh, Decimal("0"))
+
+        canal_reserva = turno_payload.get("canal_reserva")
+        metodo_pago = turno_payload.get("metodo_pago") or "mercadopago"
+        tipo_pago = (turno_payload.get("tipo_pago") or "").upper()
+        if tipo_pago not in {"SENIA", "PAGO_COMPLETO", "SIN_PAGO"}:
+            usar_sena_payload = bool(turno_payload.get("usar_sena", True))
+            tipo_pago = "SENIA" if usar_sena_payload else "PAGO_COMPLETO"
+        es_cliente_registrado = bool(turno_payload.get("es_cliente_registrado", True))
+        walkin_nombre = turno_payload.get("walkin_nombre") or ""
+        walkin_dni = turno_payload.get("walkin_dni") or ""
+        walkin_email = turno_payload.get("walkin_email") or ""
+        walkin_telefono = turno_payload.get("walkin_telefono") or ""
+
         with transaction.atomic():
             # Idempotente sobre el slot único (empleado + fecha_hora).
             # Si el turno ya existe (reintento de webhook, test previo, etc.)
@@ -418,6 +645,15 @@ class WebhookMercadoPagoView(APIView):
                     "notas_cliente": turno_payload.get("notas_cliente", "") or "",
                     "estado": "confirmado",
                     "precio_final": servicio_wh.precio,
+                    "senia_pagada": max(Decimal("0"), senia_total),
+                    "canal_reserva": canal_reserva,
+                    "metodo_pago": metodo_pago,
+                    "tipo_pago": tipo_pago,
+                    "es_cliente_registrado": es_cliente_registrado,
+                    "walkin_nombre": walkin_nombre or None,
+                    "walkin_dni": walkin_dni or None,
+                    "walkin_email": walkin_email or None,
+                    "walkin_telefono": walkin_telefono or None,
                 },
             )
             if not turno_creado:
@@ -425,6 +661,50 @@ class WebhookMercadoPagoView(APIView):
                     "Webhook MP: turno pk=%s ya existía (slot ocupado), reutilizando.",
                     turno_wh.pk,
                 )
+
+                # Actualizar metadatos de canal/pago si aún no están seteados
+                campos_update = []
+                if canal_reserva and not turno_wh.canal_reserva:
+                    turno_wh.canal_reserva = canal_reserva
+                    campos_update.append("canal_reserva")
+                if metodo_pago and not turno_wh.metodo_pago:
+                    turno_wh.metodo_pago = metodo_pago
+                    campos_update.append("metodo_pago")
+                if tipo_pago and not turno_wh.tipo_pago:
+                    turno_wh.tipo_pago = tipo_pago
+                    campos_update.append("tipo_pago")
+                if (
+                    not turno_wh.walkin_nombre
+                    and walkin_nombre
+                    and not es_cliente_registrado
+                ):
+                    turno_wh.walkin_nombre = walkin_nombre
+                    campos_update.append("walkin_nombre")
+                if not turno_wh.walkin_dni and walkin_dni and not es_cliente_registrado:
+                    turno_wh.walkin_dni = walkin_dni
+                    campos_update.append("walkin_dni")
+                if (
+                    not turno_wh.walkin_email
+                    and walkin_email
+                    and not es_cliente_registrado
+                ):
+                    turno_wh.walkin_email = walkin_email
+                    campos_update.append("walkin_email")
+                if (
+                    not turno_wh.walkin_telefono
+                    and walkin_telefono
+                    and not es_cliente_registrado
+                ):
+                    turno_wh.walkin_telefono = walkin_telefono
+                    campos_update.append("walkin_telefono")
+                if campos_update:
+                    turno_wh.save(update_fields=campos_update)
+
+                # Si el turno ya existía pero no tiene registrada la seña, la
+                # actualizamos con el monto abonado en este flujo.
+                if not turno_wh.senia_pagada or turno_wh.senia_pagada <= 0:
+                    turno_wh.senia_pagada = max(Decimal("0"), senia_total)
+                    turno_wh.save(update_fields=["senia_pagada"])
 
             # Búsqueda en dos pasos para evitar conflicto en la OneToOne turno_id:
             #   1. Por preference_id  → reintento exacto del mismo webhook.
@@ -700,7 +980,68 @@ class VerificarPagoView(APIView):
                 status=status.HTTP_200_OK,
             )
         except PagoMercadoPago.DoesNotExist:
-            return Response({"status": "pending"}, status=status.HTTP_200_OK)
+            # Fallback sin webhook: consultar MP por preference_id.
+            # Si MP confirma aprobado, registrar turno/pago localmente de forma
+            # idempotente reutilizando la misma lógica del webhook.
+            try:
+                pago_mp = services.buscar_pago_aprobado_por_preference(preference_id)
+            except ValueError as exc:
+                logger.warning(
+                    "VerificarPago fallback MP falló para preference_id=%s: %s",
+                    preference_id,
+                    exc,
+                )
+                return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+            if not pago_mp:
+                return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+            external_reference = pago_mp.get("external_reference", "")
+            turno_payload = WebhookMercadoPagoView()._parse_turno_payload(
+                external_reference
+            )
+
+            if turno_payload is None:
+                logger.warning(
+                    "VerificarPago fallback: external_reference no corresponde al flujo nuevo "
+                    "(preference_id=%s)",
+                    preference_id,
+                )
+                return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+            payment_id = str(pago_mp.get("id") or "")
+            monto_cobrado = float(
+                pago_mp.get("transaction_amount")
+                or turno_payload.get("monto_cobrado")
+                or 0
+            )
+
+            try:
+                WebhookMercadoPagoView()._crear_turno_desde_payload(
+                    turno_payload,
+                    payment_id,
+                    preference_id,
+                    monto_cobrado_override=monto_cobrado or None,
+                )
+            except Exception as exc:
+                logger.error(
+                    "VerificarPago fallback: error registrando pago/turno preference_id=%s: %s",
+                    preference_id,
+                    exc,
+                )
+                return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+            try:
+                pago = PagoMercadoPago.objects.select_related("turno").get(
+                    preference_id=preference_id,
+                    estado="approved",
+                )
+                return Response(
+                    {"status": "approved", "turno_id": pago.turno.pk},
+                    status=status.HTTP_200_OK,
+                )
+            except PagoMercadoPago.DoesNotExist:
+                return Response({"status": "pending"}, status=status.HTTP_200_OK)
 
 
 class ListarPagosView(APIView):
@@ -800,5 +1141,183 @@ class ComprobantePagoView(APIView):
         except Exception as exc:
             return Response(
                 {"detail": f"Error al obtener comprobante: {str(exc)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ComprobantePagoPDFView(APIView):
+    """Devuelve un comprobante de pago en formato PDF para un turno.
+
+    GET /api/mercadopago/comprobante/<turno_id>/pdf/
+
+    El PDF se genera a partir del pago aprobado asociado al turno.
+    """
+
+    # Permitimos acceso sin autenticación porque este endpoint se usará
+    # desde links enviados por email al cliente.
+    permission_classes = []
+
+    def get(self, request, turno_id: int, *args, **kwargs):
+        from apps.authentication.models import ConfiguracionGlobal
+
+        try:
+            pago = (
+                PagoMercadoPago.objects.select_related(
+                    "turno",
+                    "turno__servicio",
+                    "turno__empleado__user",
+                    "cliente__user",
+                )
+                .filter(turno_id=turno_id, estado="approved")
+                .first()
+            )
+            if not pago:
+                return Response(
+                    {"detail": "No hay un pago aprobado asociado a este turno."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            turno = pago.turno
+
+            # Datos de configuración / empresa
+            config = ConfiguracionGlobal.get_config()
+            fecha_fundacion = config.fecha_fundacion
+
+            buffer = BytesIO()
+            pdf = canvas.Canvas(buffer, pagesize=A4)
+            width, height = A4
+
+            y = height - 50
+
+            # Encabezado de empresa
+            pdf.setFont("Helvetica-Bold", 16)
+            pdf.drawString(
+                40,
+                y,
+                config.nombre_empresa or config.nombre_comercial or "Beautiful Studio",
+            )
+            y -= 18
+
+            pdf.setFont("Helvetica", 10)
+            if config.razon_social:
+                pdf.drawString(40, y, f"Razón social: {config.razon_social}")
+                y -= 14
+            if config.cuit:
+                pdf.drawString(40, y, f"CUIT: {config.cuit}")
+                y -= 14
+            if fecha_fundacion:
+                pdf.drawString(
+                    40,
+                    y,
+                    f"Inicio de actividades: {fecha_fundacion.strftime('%d/%m/%Y')}",
+                )
+                y -= 20
+
+            pdf.setFont("Helvetica-Bold", 12)
+            pdf.drawString(40, y, "Comprobante de Pago de Turno")
+            y -= 10
+            pdf.setFont("Helvetica", 10)
+            pdf.drawString(
+                40,
+                y,
+                f"Fecha de emisión: {pago.creado_en.strftime('%d/%m/%Y %H:%M')} hs",
+            )
+            y -= 24
+
+            # Datos del cliente
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(40, y, "Datos del cliente")
+            y -= 16
+            pdf.setFont("Helvetica", 10)
+            pdf.drawString(
+                40, y, f"Nombre: {getattr(turno.cliente, 'nombre_completo', '')}"
+            )
+            y -= 14
+            cliente_email = getattr(getattr(turno.cliente, "user", None), "email", "")
+            if cliente_email:
+                pdf.drawString(40, y, f"Email: {cliente_email}")
+                y -= 18
+
+            # Datos del turno
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(40, y, "Datos del turno")
+            y -= 16
+            pdf.setFont("Helvetica", 10)
+            pdf.drawString(40, y, f"ID de turno: {turno.id}")
+            y -= 14
+            pdf.drawString(
+                40,
+                y,
+                f"Servicio: {getattr(turno.servicio, 'nombre', '')}",
+            )
+            y -= 14
+            pdf.drawString(
+                40,
+                y,
+                f"Profesional: {turno.empleado.user.get_full_name()}",
+            )
+            y -= 14
+            if turno.fecha_hora:
+                pdf.drawString(
+                    40,
+                    y,
+                    f"Fecha y hora: {turno.fecha_hora.strftime('%d/%m/%Y %H:%M')} hs",
+                )
+                y -= 18
+
+            # Detalle del pago
+            pdf.setFont("Helvetica-Bold", 11)
+            pdf.drawString(40, y, "Detalle del pago")
+            y -= 16
+            pdf.setFont("Helvetica", 10)
+            pdf.drawString(
+                40,
+                y,
+                f"Monto abonado: ${pago.monto} {pago.moneda}",
+            )
+            y -= 14
+            if turno.senia_pagada:
+                pdf.drawString(
+                    40,
+                    y,
+                    f"Seña acumulada: ${turno.senia_pagada}",
+                )
+                y -= 14
+            if turno.precio_final:
+                pdf.drawString(
+                    40,
+                    y,
+                    f"Precio final del turno: ${turno.precio_final}",
+                )
+                y -= 14
+
+            pdf.drawString(40, y, f"Medio de pago: Mercado Pago")
+            y -= 14
+            pdf.drawString(40, y, f"ID de pago: {pago.payment_id}")
+            y -= 14
+            pdf.drawString(40, y, f"Estado: {pago.estado}")
+            y -= 24
+
+            pdf.setFont("Helvetica-Oblique", 9)
+            pdf.drawString(
+                40,
+                y,
+                "Este comprobante es válido como constancia de pago emitida por Beautiful Studio.",
+            )
+
+            pdf.showPage()
+            pdf.save()
+
+            buffer.seek(0)
+            response = HttpResponse(buffer.read(), content_type="application/pdf")
+            response["Content-Disposition"] = (
+                f'attachment; filename="comprobante_turno_{turno.id}.pdf"'
+            )
+            return response
+
+        except Exception as exc:
+            logger.exception("Error generando comprobante PDF")
+            return Response(
+                {"detail": f"Error al generar comprobante PDF: {str(exc)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

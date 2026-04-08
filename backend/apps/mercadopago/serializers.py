@@ -21,9 +21,12 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
     empleado_id = serializers.IntegerField(min_value=1)
     fecha_hora = serializers.DateTimeField()
     notas_cliente = serializers.CharField(required=False, allow_blank=True, default="")
-    # Si True, se cobra solo la seña (porcentaje_sena % del precio total).
-    # Si False, se cobra el precio completo.
+    # Compatibilidad legacy: si True, cobra seña; si False, total.
     usar_sena = serializers.BooleanField(required=False, default=True)
+    # Nuevo modo recomendado: tipo de pago explícito.
+    tipo_pago = serializers.ChoiceField(
+        choices=["SENIA", "PAGO_COMPLETO"], required=False
+    )
     # Créditos de billetera a descontar del monto (nunca negativos).
     creditos_a_aplicar = serializers.DecimalField(
         required=False, default=0, max_digits=10, decimal_places=2, min_value=0
@@ -32,6 +35,46 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
     aplicar_descuento_fidelizacion = serializers.BooleanField(
         required=False, default=False
     )
+
+
+class CrearPreferenciaStaffSerializer(serializers.Serializer):
+    """Datos para crear una preferencia de MP iniciada desde el panel.
+
+    A diferencia de ``CrearPreferenciaSinTurnoSerializer``, el cliente puede
+    ser un walk-in o uno ya existente, y el usuario autenticado suele ser un
+    profesional o propietario.
+    """
+
+    servicio_id = serializers.IntegerField(min_value=1)
+    empleado_id = serializers.IntegerField(min_value=1)
+    fecha_hora = serializers.DateTimeField()
+    notas_cliente = serializers.CharField(required=False, allow_blank=True, default="")
+
+    # Datos del cliente (uno de: cliente_id, dni o email)
+    cliente_id = serializers.IntegerField(required=False)
+    dni = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    nombre = serializers.CharField(required=False, allow_blank=True)
+    telefono = serializers.CharField(required=False, allow_blank=True)
+
+    # Compatibilidad legacy: si True, cobra seña; si False, total.
+    usar_sena = serializers.BooleanField(required=False, default=True)
+    # Nuevo modo recomendado: tipo de pago explícito.
+    tipo_pago = serializers.ChoiceField(
+        choices=["SENIA", "PAGO_COMPLETO"], required=False
+    )
+
+    def validate(self, attrs):
+        # Requiere al menos algún identificador mínimo del cliente
+        if not (
+            attrs.get("cliente_id")
+            or (attrs.get("dni") or "").strip()
+            or (attrs.get("email") or "").strip()
+        ):
+            raise serializers.ValidationError(
+                "Debe proporcionar cliente_id o al menos DNI o email para identificar al cliente."
+            )
+        return attrs
 
 
 class PagoMercadoPagoSerializer(serializers.ModelSerializer):

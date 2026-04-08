@@ -1,9 +1,11 @@
-'use client';
+"use client";
 
-import TopBar from '@/components/layout/TopBar';
-import { Button } from '@/components/ui/button';
-import { useAuth } from '@/contexts/AuthContext';
+import TopBar from "@/components/layout/TopBar";
+import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { useAuth } from "@/contexts/AuthContext";
 import {
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -11,18 +13,17 @@ import {
   FileText,
   History,
   LayoutDashboard,
-  MessageSquare,
   PieChart,
   Scissors,
   Settings,
   Target,
   TrendingUp,
   Users,
-  Wallet
-} from 'lucide-react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+  Wallet,
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function DashboardPropietarioLayout({
   children,
@@ -45,122 +46,122 @@ export default function DashboardPropietarioLayout({
     };
 
     checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
   const isOperacionesActive =
-    pathname?.startsWith('/dashboard/propietario/clientes') ||
-    pathname?.startsWith('/dashboard/propietario/profesionales') ||
-    pathname?.startsWith('/dashboard/propietario/servicios') ||
-    pathname?.startsWith('/dashboard/propietario/encuestas');
+    pathname?.startsWith("/dashboard/propietario/clientes") ||
+    pathname?.startsWith("/dashboard/propietario/profesionales") ||
+    pathname?.startsWith("/dashboard/propietario/servicios");
 
   const isPruebasActive =
-    pathname?.startsWith('/dashboard/propietario/diagnostico') ||
-    pathname?.startsWith('/dashboard/propietario/oportunidades');
+    pathname?.startsWith("/dashboard/propietario/diagnostico") ||
+    pathname?.startsWith("/dashboard/propietario/oportunidades");
 
   const menuItems = [
     {
-      label: 'Dashboard',
+      label: "Dashboard",
       icon: LayoutDashboard,
-      href: '/dashboard/propietario',
-      active: pathname === '/dashboard/propietario',
+      href: "/dashboard/propietario",
+      active: pathname === "/dashboard/propietario",
     },
     {
-      label: 'Operaciones',
+      label: "Operaciones",
       icon: Users,
       active: isOperacionesActive,
       submenu: [
         {
-          label: 'Clientes',
+          label: "Clientes",
           icon: Users,
-          href: '/dashboard/propietario/clientes',
-          active: pathname?.startsWith('/dashboard/propietario/clientes'),
+          href: "/dashboard/propietario/clientes",
+          active: pathname?.startsWith("/dashboard/propietario/clientes"),
         },
         {
-          label: 'Profesionales',
+          label: "Profesionales",
           icon: Scissors,
-          href: '/dashboard/propietario/profesionales',
-          active: pathname?.startsWith('/dashboard/propietario/profesionales'),
+          href: "/dashboard/propietario/profesionales",
+          active: pathname?.startsWith("/dashboard/propietario/profesionales"),
         },
         {
-          label: 'Servicios',
+          label: "Servicios",
           icon: Scissors,
-          href: '/dashboard/propietario/servicios',
-          active: pathname?.startsWith('/dashboard/propietario/servicios'),
-        },
-        {
-          label: 'Encuestas',
-          icon: MessageSquare,
-          href: '/dashboard/propietario/encuestas',
-          active: pathname?.startsWith('/dashboard/propietario/encuestas'),
+          href: "/dashboard/propietario/servicios",
+          active: pathname?.startsWith("/dashboard/propietario/servicios"),
         },
       ],
     },
     {
-      label: 'Reportes',
+      label: "Reportes",
       icon: PieChart,
       active:
-        pathname?.startsWith('/dashboard/propietario/reportes') ||
-        pathname?.startsWith('/dashboard/propietario/historial'),
+        pathname?.startsWith("/dashboard/propietario/reportes") ||
+        pathname?.startsWith("/dashboard/propietario/historial") ||
+        pathname?.startsWith("/dashboard/propietario/turnos"),
       submenu: [
         {
-          label: 'Resumen Financiero',
+          label: "Resumen Financiero",
           icon: TrendingUp,
-          href: '/dashboard/propietario/reportes/finanzas',
-          active: pathname === '/dashboard/propietario/reportes/finanzas',
+          href: "/dashboard/propietario/reportes/finanzas",
+          active: pathname === "/dashboard/propietario/reportes/finanzas",
         },
         {
-          label: 'Rendimiento de Servicios',
+          label: "Turnos",
+          icon: CalendarDays,
+          href: "/dashboard/propietario/turnos",
+          active: pathname?.startsWith("/dashboard/propietario/turnos"),
+        },
+        {
+          label: "Rendimiento de Servicios",
           icon: FileText,
-          href: '/dashboard/propietario/reportes/servicios',
-          active: pathname === '/dashboard/propietario/reportes/servicios',
+          href: "/dashboard/propietario/reportes/servicios",
+          active: pathname === "/dashboard/propietario/reportes/servicios",
         },
         {
-          label: 'Auditoría de Billetera',
+          label: "Auditoría de Billetera",
           icon: Wallet,
-          href: '/dashboard/propietario/reportes/billetera',
-          active: pathname === '/dashboard/propietario/reportes/billetera',
+          href: "/dashboard/propietario/reportes/billetera",
+          active: pathname === "/dashboard/propietario/reportes/billetera",
         },
         {
-          label: 'Historial',
+          label: "Auditoría",
           icon: History,
-          href: '/dashboard/propietario/historial',
-          active: pathname?.startsWith('/dashboard/propietario/historial'),
+          href: "/dashboard/propietario/historial",
+          active: pathname?.startsWith("/dashboard/propietario/historial"),
         },
       ],
     },
     {
-      label: 'Pruebas',
+      label: "Pruebas",
       icon: Settings,
       active: isPruebasActive,
       submenu: [
         {
-          label: 'Diagnóstico',
+          label: "Diagnóstico",
           icon: Settings,
-          href: '/dashboard/propietario/diagnostico',
-          active: pathname?.startsWith('/dashboard/propietario/diagnostico'),
+          href: "/dashboard/propietario/diagnostico",
+          active: pathname?.startsWith("/dashboard/propietario/diagnostico"),
         },
         {
-          label: 'Oportunidades',
+          label: "Oportunidades",
           icon: Target,
-          href: '/dashboard/propietario/oportunidades',
-          active: pathname?.startsWith('/dashboard/propietario/oportunidades'),
+          href: "/dashboard/propietario/oportunidades",
+          active: pathname?.startsWith("/dashboard/propietario/oportunidades"),
         },
       ],
     },
     {
-      label: 'Configuración',
+      label: "Configuración",
       icon: Settings,
-      href: '/dashboard/propietario/configuracion',
-      active: pathname?.startsWith('/dashboard/propietario/configuracion'),
+      href: "/dashboard/propietario/configuracion",
+      active: pathname?.startsWith("/dashboard/propietario/configuracion"),
     },
   ];
 
   const toggleMenu = (label: string) => {
-    setExpandedMenus(prev =>
+    setExpandedMenus((prev) =>
       prev.includes(label)
-        ? prev.filter(item => item !== label)
+        ? prev.filter((item) => item !== label)
         : [...prev, label]
     );
   };
@@ -295,7 +296,8 @@ export default function DashboardPropietarioLayout({
 
           {/* Sidebar Footer */}
           {sidebarOpen && (
-            <div className="p-4 border-t border-gray-800">
+            <div className="p-4 border-t border-gray-800 flex flex-col gap-3">
+              <ThemeToggle />
               <div className="text-xs text-gray-400">
                 <p>Beautiful Studio v1.0</p>
                 <p className="mt-1">© 2025 Todos los derechos reservados</p>
@@ -305,7 +307,7 @@ export default function DashboardPropietarioLayout({
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto bg-gray-50">
+        <main className="flex-1 overflow-y-auto bg-background">
           {children}
         </main>
 

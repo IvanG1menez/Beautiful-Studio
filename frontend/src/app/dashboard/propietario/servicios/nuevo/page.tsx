@@ -8,6 +8,12 @@ import { ArrowLeft, Loader2, Scissors } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+interface CategoriaApiItem {
+  id: number;
+  nombre: string;
+  is_active: boolean;
+}
+
 export default function NuevoServicioPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -24,8 +30,9 @@ export default function NuevoServicioPage() {
         });
 
         if (response.ok) {
-          const data = await response.json();
-          const categoriasActivas = (data.results || data).filter((cat: any) => cat.is_active);
+          const data = await response.json() as { results?: CategoriaApiItem[] } | CategoriaApiItem[];
+          const categoriasData = Array.isArray(data) ? data : (data.results || []);
+          const categoriasActivas = categoriasData.filter((cat) => cat.is_active);
           setCategorias(categoriasActivas);
         } else {
           console.error('Error al cargar categorías');
@@ -47,14 +54,23 @@ export default function NuevoServicioPage() {
       const duracion = parseInt(values.duracion_minutos, 10);
       const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseFloat(values.valor_descuento_adelanto);
       const tiempoEspera = values.tiempo_espera_respuesta === '' ? 15 : parseInt(values.tiempo_espera_respuesta, 10);
-      const porcentajeSena = values.porcentaje_sena === '' ? 25 : parseFloat(values.porcentaje_sena);
+      const porcentajeSena = 50;
+      const montoSenaFijo = values.monto_sena_fijo === '' ? 0 : parseFloat(values.monto_sena_fijo);
+      const horasMinimasCredito = values.horas_minimas_credito_cancelacion === ''
+        ? 24
+        : parseInt(values.horas_minimas_credito_cancelacion, 10);
+      const porcentajeDevolucionSena = 100;
+      const porcentajeDevolucionServicioCompleto = 100;
 
-      const valorFidelizacion = values.tipo_descuento_fidelizacion === 'PORCENTAJE'
-        ? (values.descuento_fidelizacion_pct === '' ? 0 : parseFloat(values.descuento_fidelizacion_pct))
-        : (values.descuento_fidelizacion_monto === '' ? 0 : parseFloat(values.descuento_fidelizacion_monto));
-
-      const descuentoFidelizacionPct = values.tipo_descuento_fidelizacion === 'PORCENTAJE' ? valorFidelizacion : 0;
-      const descuentoFidelizacionMonto = values.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? valorFidelizacion : 0;
+      const descuentoFidelizacionMonto = values.descuento_fidelizacion_monto === ''
+        ? 0
+        : parseFloat(values.descuento_fidelizacion_monto);
+      const bonoReacomodamientoSenia = values.bono_reacomodamiento_senia === ''
+        ? 0
+        : parseFloat(values.bono_reacomodamiento_senia);
+      const bonoReacomodamientoPagoCompleto = values.bono_reacomodamiento_pago_completo === ''
+        ? 0
+        : parseFloat(values.bono_reacomodamiento_pago_completo);
 
       const dataToSend = {
         nombre: values.nombre,
@@ -66,10 +82,16 @@ export default function NuevoServicioPage() {
         permite_reacomodamiento: values.permite_reacomodamiento,
         tipo_descuento_adelanto: values.tipo_descuento_adelanto,
         valor_descuento_adelanto: descuentoValor,
+        monto_sena_fijo: montoSenaFijo,
         tiempo_espera_respuesta: tiempoEspera,
         porcentaje_sena: porcentajeSena,
+        horas_minimas_credito_cancelacion: horasMinimasCredito,
+        porcentaje_devolucion_sena: porcentajeDevolucionSena,
+        porcentaje_devolucion_servicio_completo: porcentajeDevolucionServicioCompleto,
+        bono_reacomodamiento_senia: bonoReacomodamientoSenia,
+        bono_reacomodamiento_pago_completo: bonoReacomodamientoPagoCompleto,
         frecuencia_recurrencia_dias: parseInt(values.frecuencia_recurrencia_dias || '30', 10),
-        descuento_fidelizacion_pct: descuentoFidelizacionPct,
+        descuento_fidelizacion_pct: 0,
         descuento_fidelizacion_monto: descuentoFidelizacionMonto,
       };
 
@@ -163,12 +185,18 @@ export default function NuevoServicioPage() {
           descripcion: '',
           is_active: true,
           permite_reacomodamiento: false,
-          tipo_descuento_adelanto: 'PORCENTAJE',
+          tipo_descuento_adelanto: 'MONTO_FIJO',
           valor_descuento_adelanto: '',
+          bono_reacomodamiento_senia: '1000',
+          bono_reacomodamiento_pago_completo: '2000',
           tiempo_espera_respuesta: '15',
-          porcentaje_sena: '25.00',
+          porcentaje_sena: '',
+          monto_sena_fijo: '',
+          horas_minimas_credito_cancelacion: '24',
+          porcentaje_devolucion_sena: '100',
+          porcentaje_devolucion_servicio_completo: '100',
           frecuencia_recurrencia_dias: '30',
-          tipo_descuento_fidelizacion: 'PORCENTAJE',
+          tipo_descuento_fidelizacion: 'MONTO_FIJO',
           descuento_fidelizacion_pct: '0',
           descuento_fidelizacion_monto: '0',
         }}

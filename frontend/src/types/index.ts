@@ -56,6 +56,8 @@ export interface Billetera {
   cliente: number;
   cliente_nombre: string;
   saldo: string;
+  fecha_vencimiento?: string | null;
+  esta_por_vencer?: boolean;
   created_at: string;
   updated_at: string;
   movimientos?: MovimientoBilletera[];
@@ -144,6 +146,12 @@ export interface Turno {
   notas_cliente?: string;
   notas_empleado?: string;
   precio_final?: string;
+  senia_pagada?: string;
+  canal_reserva?: string | null;
+  metodo_pago?: 'mercadopago' | 'mercadopago_qr' | 'efectivo' | 'transferencia' | 'mixto' | null;
+  tipo_pago?: 'SIN_PAGO' | 'SENIA' | 'PAGO_COMPLETO' | null;
+  monto_pendiente?: string;
+  pagado_completo?: boolean;
   created_at: string;
   updated_at: string;
   fecha_hora_fin?: string;

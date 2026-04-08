@@ -225,13 +225,21 @@ export default function NuevoProfesionalPage() {
         }
       });
 
-      // Preparar datos para enviar
+      // Preparar datos para enviar (sin especialidades: la relación se guarda aparte)
       const dataToSend = {
-        ...formData,
-        password: formData.password || 'empleado123', // Password por defecto si no se especifica
+        username: formData.username,
+        email: formData.email,
+        dni: formData.dni,
+        password: formData.password || 'empleado123',
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        fecha_ingreso: formData.fecha_ingreso,
         horario_entrada: horaMinima,
         horario_salida: horaMaxima,
-        dias_trabajo: diasTrabajoArray.join(',')
+        dias_trabajo: diasTrabajoArray.join(','),
+        comision_porcentaje: formData.comision_porcentaje,
+        is_disponible: formData.is_disponible,
+        biografia: formData.biografia,
       };
 
       console.log('Enviando datos del empleado:', dataToSend);
@@ -246,6 +254,32 @@ export default function NuevoProfesionalPage() {
       if (response.ok) {
         const empleadoData = await response.json();
         const empleadoId = empleadoData.id;
+
+        // Guardar servicio principal asociado al profesional
+        const servicioResponse = await fetch(
+          `${baseUrl}/empleados/${empleadoId}/servicios/`,
+          {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              servicio: Number(formData.especialidades),
+              nivel_experiencia: 3,
+            }),
+          }
+        );
+
+        if (!servicioResponse.ok) {
+          const servicioError = await servicioResponse.json();
+          showNotification(
+            'Advertencia',
+            `El profesional fue creado, pero no se pudo asociar el servicio. ${JSON.stringify(servicioError)}`,
+            'error'
+          );
+          setTimeout(() => {
+            router.push('/dashboard/propietario/profesionales');
+          }, 2500);
+          return;
+        }
 
         // Guardar horarios detallados
         const horariosArray: any[] = [];

@@ -56,3 +56,6 @@ redis==5.2.0
 # Social Auth para Google OAuth
 social-auth-app-django==5.4.2
 social-auth-core==4.5.4
+
+# Generación de PDFs para comprobantes
+reportlab==4.2.0

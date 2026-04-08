@@ -1,5 +1,9 @@
 """Views para la app de turnos"""
 
+import logging
+import uuid
+from decimal import Decimal
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -21,6 +25,8 @@ from apps.turnos.services.reasignacion_service import (
     responder_oferta_reasignacion,
     obtener_detalles_oferta_reasignacion,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TurnoViewSet(viewsets.ModelViewSet):
@@ -68,7 +74,15 @@ class TurnoViewSet(viewsets.ModelViewSet):
     ]
 
     # Campos para filtrado
-    filterset_fields = ["estado", "empleado", "cliente", "servicio"]
+    filterset_fields = [
+        "estado",
+        "empleado",
+        "cliente",
+        "servicio",
+        "canal_reserva",
+        "metodo_pago",
+        "es_cliente_registrado",
+    ]
 
     # Campos para ordenamiento
     ordering_fields = ["fecha_hora", "created_at", "precio_final"]
@@ -141,6 +155,69 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def _obtener_o_crear_cliente_desde_datos(self, datos: dict):
+        """Obtiene o crea un cliente a partir de los datos básicos.
+
+        Devuelve una tupla (cliente, ya_registrado) donde ``ya_registrado``
+        indica si el cliente existía previamente en la base.
+        """
+
+        from apps.clientes.models import Cliente
+        from apps.users.models import User
+
+        cliente_id = datos.get("cliente_id") or datos.get("cliente")
+        if cliente_id:
+            try:
+                cliente = Cliente.objects.select_related("user").get(pk=cliente_id)
+                return cliente, True
+            except Cliente.DoesNotExist:
+                pass
+
+        dni = (datos.get("dni") or "").strip()
+        email = (datos.get("email") or "").strip()
+
+        if dni:
+            cliente = (
+                Cliente.objects.select_related("user").filter(user__dni=dni).first()
+            )
+            if cliente:
+                return cliente, True
+
+        if email:
+            cliente = (
+                Cliente.objects.select_related("user").filter(user__email=email).first()
+            )
+            if cliente:
+                return cliente, True
+
+        nombre = (datos.get("nombre") or "").strip() or "Cliente"
+        telefono = (datos.get("telefono") or "").strip() or None
+
+        partes_nombre = nombre.split(" ", 1)
+        first_name = partes_nombre[0]
+        last_name = partes_nombre[1] if len(partes_nombre) > 1 else ""
+
+        username_base = email or (dni and f"cliente-{dni}") or None
+        if not username_base:
+            username_base = f"cliente-{uuid.uuid4().hex[:8]}"
+
+        user_email = email or f"no-email-{uuid.uuid4().hex[:8]}@example.com"
+
+        user = User.objects.create_user(
+            username=username_base,
+            email=user_email,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        user.role = "cliente"
+        user.dni = dni or None
+        user.phone = telefono
+        user.set_unusable_password()
+        user.save()
+
+        cliente = Cliente.objects.create(user=user)
+        return cliente, False
+
     @action(detail=False, methods=["get"], url_path="historial")
     def historial(self, request):
         """
@@ -207,6 +284,17 @@ class TurnoViewSet(viewsets.ModelViewSet):
         """Cancelar turno en lugar de eliminar"""
         turno = self.get_object()
 
+        # Guardar estado previo para el historial
+        estado_anterior = turno.estado
+
+        # Motivo de cancelación (obligatorio para el flujo de cliente)
+        motivo = (request.data.get("motivo") or "").strip()
+        if not motivo:
+            return Response(
+                {"error": "Debes indicar un motivo de cancelación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if not turno.puede_cancelar():
             return Response(
                 {"error": "Este turno no puede ser cancelado."},
@@ -217,7 +305,12 @@ class TurnoViewSet(viewsets.ModelViewSet):
         from apps.authentication.models import ConfiguracionGlobal
 
         config_global = ConfiguracionGlobal.get_config()
-        min_horas_credito = config_global.min_horas_cancelacion_credito
+        min_horas_credito_global = config_global.min_horas_cancelacion_credito
+        min_horas_credito_servicio = max(
+            24,
+            int(getattr(turno.servicio, "horas_minimas_credito_cancelacion", 24) or 24),
+        )
+        min_horas_credito = max(min_horas_credito_global, min_horas_credito_servicio)
 
         # Calcular diferencia de horas entre ahora y el turno
         horas_diferencia = (turno.fecha_hora - timezone.now()).total_seconds() / 3600
@@ -226,7 +319,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
         credito_aplicado = False
         monto_credito_valor = 0
 
-        if horas_diferencia > min_horas_credito and turno.cliente:
+        if horas_diferencia >= min_horas_credito and turno.cliente:
             from apps.clientes.models import Billetera
             from decimal import Decimal
 
@@ -235,25 +328,41 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 cliente=turno.cliente, defaults={"saldo": Decimal("0.00")}
             )
 
-            # Calcular monto a acreditar: solo la seña pagada
-            monto_credito = turno.senia_pagada or Decimal("0.00")
+            # Calcular monto a acreditar con política fija:
+            # - Si pagó completo: devuelve 100% del servicio
+            # - Si pagó seña: devuelve 100% de la seña
+            precio_base = Decimal(turno.precio_final or turno.servicio.precio or 0)
+            senia_pagada = Decimal(turno.senia_pagada or 0)
+            pago_completo = turno.resolver_tipo_pago() == "PAGO_COMPLETO"
 
-            # Agregar crédito
-            billetera.agregar_saldo(
-                monto=monto_credito,
-                motivo=f"Cancelación anticipada del turno #{turno.id} - {turno.servicio.nombre}",
-            )
+            if pago_completo:
+                monto_credito = precio_base
+            else:
+                monto_credito = senia_pagada
 
-            # Actualizar el movimiento con referencia al turno
-            ultimo_movimiento = billetera.movimientos.first()
-            if ultimo_movimiento:
-                ultimo_movimiento.turno = turno
-                ultimo_movimiento.save()
+            monto_credito = monto_credito.quantize(Decimal("0.01"))
 
-            credito_aplicado = True
-            monto_credito_valor = float(monto_credito)
+            if monto_credito <= 0:
+                credito_aplicado = False
+                monto_credito_valor = 0
+            else:
+                # Agregar crédito
+                billetera.agregar_saldo(
+                    monto=monto_credito,
+                    motivo=f"Cancelación anticipada del turno #{turno.id} - {turno.servicio.nombre}",
+                )
+
+                # Actualizar el movimiento con referencia al turno
+                ultimo_movimiento = billetera.movimientos.first()
+                if ultimo_movimiento:
+                    ultimo_movimiento.turno = turno
+                    ultimo_movimiento.save()
+
+                credito_aplicado = True
+                monto_credito_valor = float(monto_credito)
 
         turno.estado = "cancelado"
+        turno.motivo_cancelacion = motivo
         turno.save()
 
         # Registrar en historial
@@ -261,10 +370,13 @@ class TurnoViewSet(viewsets.ModelViewSet):
             turno=turno,
             usuario=request.user,
             accion="Turno cancelado",
-            estado_anterior=turno.estado,
+            estado_anterior=estado_anterior,
             estado_nuevo="cancelado",
-            observaciones=f"Turno cancelado por {request.user.full_name}. "
-            f"Crédito {'aplicado' if credito_aplicado else f'no aplicado (menos de {min_horas_credito}hs)'}",
+            observaciones=(
+                f"Turno cancelado por {request.user.full_name}. "
+                f"Motivo: {motivo}. "
+                f"Crédito {'aplicado' if credito_aplicado else f'no aplicado (menos de {min_horas_credito}hs)'}"
+            ),
         )
 
         return Response(
@@ -313,6 +425,193 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         serializer = TurnoListSerializer(turnos, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["post"], url_path="reservar-staff")
+    def reservar_staff(self, request):
+        """Crear un turno desde el panel del profesional/propietario.
+
+        Permite reservar un turno en nombre de un cliente existente o crear
+        rápidamente un cliente nuevo (walk-in). En esta primera iteración,
+        sólo se registra pago directo (efectivo/transferencia); el flujo de
+        QR Mercado Pago se orquesta desde la app de Mercado Pago.
+        """
+
+        user = request.user
+        if not (
+            user.is_staff or user.role in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"error": "No tiene permisos para crear turnos desde panel"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data
+
+        from apps.servicios.models import Servicio
+        from apps.empleados.models import Empleado
+
+        try:
+            servicio_id = data.get("servicio") or data.get("servicio_id")
+            empleado_id = data.get("empleado") or data.get("empleado_id")
+            if not servicio_id or not empleado_id:
+                return Response(
+                    {"error": "Debe indicar servicio y empleado"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Compatibilidad: permitir enviar "me" desde frontend de profesional.
+            if str(empleado_id).lower() == "me":
+                if hasattr(user, "profesional_profile") and user.profesional_profile:
+                    empleado_id = user.profesional_profile.id
+                else:
+                    return Response(
+                        {"error": "El usuario no tiene perfil profesional asociado"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            try:
+                empleado_id = int(empleado_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "empleado debe ser un ID numérico válido"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            servicio = Servicio.objects.get(pk=servicio_id)
+            Empleado.objects.get(pk=empleado_id)  # sólo para validar existencia
+        except Servicio.DoesNotExist:
+            return Response(
+                {"error": "Servicio no encontrado"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Empleado.DoesNotExist:
+            return Response(
+                {"error": "Profesional no encontrado"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        metodo_pago = data.get("metodo_pago") or "efectivo"
+
+        metodos_validos = {opcion for opcion, _ in Turno.METODO_PAGO_CHOICES}
+        if metodo_pago not in metodos_validos:
+            return Response(
+                {"error": "Método de pago inválido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if metodo_pago == "mercadopago_qr":
+            return Response(
+                {
+                    "error": (
+                        "El flujo de pago por QR para profesionales se maneja "
+                        "a través de las vistas de Mercado Pago y se implementará "
+                        "en el siguiente paso del backend."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente_datos = {
+            "cliente_id": data.get("cliente") or data.get("cliente_id"),
+            "dni": data.get("dni"),
+            "email": data.get("email"),
+            "nombre": data.get("nombre"),
+            "telefono": data.get("telefono"),
+        }
+        cliente, ya_registrado = self._obtener_o_crear_cliente_desde_datos(
+            cliente_datos
+        )
+
+        tipo_pago_informado = (data.get("tipo_pago") or "").upper()
+        paga_servicio_completo = bool(data.get("paga_servicio_completo", False))
+
+        if tipo_pago_informado not in {"SENIA", "PAGO_COMPLETO", "SIN_PAGO"}:
+            tipo_pago_informado = "PAGO_COMPLETO" if paga_servicio_completo else "SENIA"
+
+        try:
+            monto_senia_input = Decimal(
+                str(data.get("monto_senia") or data.get("senia_pagada") or "0")
+            )
+        except Exception:
+            return Response(
+                {"error": "monto_senia inválido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        precio_servicio = Decimal(str(servicio.precio or 0))
+        monto_senia_fijo = Decimal(str(getattr(servicio, "monto_sena_fijo", 0) or 0))
+        if monto_senia_fijo <= 0 and precio_servicio > 0:
+            monto_senia_fijo = (precio_servicio / Decimal("2")).quantize(
+                Decimal("0.01")
+            )
+
+        if tipo_pago_informado == "PAGO_COMPLETO":
+            senia_pagada = max(Decimal("0"), precio_servicio)
+            tipo_pago_final = "PAGO_COMPLETO"
+        elif tipo_pago_informado == "SIN_PAGO":
+            senia_pagada = Decimal("0.00")
+            tipo_pago_final = "SIN_PAGO"
+        else:
+            senia_pagada = max(Decimal("0"), monto_senia_fijo or monto_senia_input)
+            tipo_pago_final = "SENIA"
+
+        # Si el pago cubre el total del servicio, el turno queda confirmado.
+        estado_inicial = (
+            "confirmado"
+            if senia_pagada >= precio_servicio and precio_servicio > 0
+            else "pendiente"
+        )
+
+        canal_reserva = (
+            "panel_profesional" if user.role == "profesional" else "panel_propietario"
+        )
+
+        serializer_data = {
+            "cliente": cliente.pk,
+            "empleado": empleado_id,
+            "servicio": servicio_id,
+            "fecha_hora": data.get("fecha_hora"),
+            "notas_cliente": data.get("notas_cliente") or "",
+            "precio_final": str(precio_servicio),
+            "senia_pagada": str(senia_pagada),
+            "estado": estado_inicial,
+            "canal_reserva": canal_reserva,
+            "metodo_pago": metodo_pago,
+            "tipo_pago": tipo_pago_final,
+            "es_cliente_registrado": ya_registrado,
+            "walkin_nombre": cliente_datos.get("nombre"),
+            "walkin_dni": cliente_datos.get("dni"),
+            "walkin_email": cliente_datos.get("email"),
+            "walkin_telefono": cliente_datos.get("telefono"),
+        }
+
+        serializer = TurnoCreateSerializer(data=serializer_data)
+        serializer.is_valid(raise_exception=True)
+        turno = serializer.save()
+
+        if senia_pagada > 0 and not turno.fecha_pago_registrado:
+            turno.fecha_pago_registrado = timezone.now()
+            turno.save(update_fields=["fecha_pago_registrado"])
+
+        HistorialTurno.objects.create(
+            turno=turno,
+            usuario=request.user,
+            accion="Turno creado por staff",
+            estado_anterior=None,
+            estado_nuevo=turno.estado,
+            observaciones=(
+                f"Turno creado desde panel por {request.user.full_name}. "
+                f"Método de pago: {metodo_pago}."
+            ),
+        )
+
+        return Response(
+            {
+                "message": "Turno creado exitosamente desde panel",
+                "turno": TurnoDetailSerializer(turno).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=False, methods=["get"], url_path="empleado/(?P<empleado_id>[^/.]+)")
     def turnos_empleado(self, request, empleado_id=None):
@@ -431,7 +730,8 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
             # Generar horarios disponibles para todos los rangos del día
             horarios_disponibles = []
-            incremento = timedelta(minutes=30)
+            # La UI del panel profesional trabaja en bloques de 15 minutos.
+            incremento = timedelta(minutes=15)
 
             # Obtener turnos existentes del empleado en ese día para chequear solapamientos
             turnos_dia = list(
@@ -513,6 +813,89 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 {"error": "Formato de fecha inválido. Use YYYY-MM-DD"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+    @action(detail=True, methods=["post"], url_path="registrar-pago")
+    def registrar_pago(self, request, pk=None):
+        """Registrar manualmente un pago asociado a un turno.
+
+        Pensado para pagos en efectivo/transferencia registrados desde el
+        panel del propietario o profesional.
+        """
+
+        user = request.user
+        if not (
+            user.is_staff or user.role in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"error": "No tiene permisos para registrar pagos"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        turno = self.get_object()
+
+        metodo_pago = (
+            request.data.get("metodo_pago")
+            or request.data.get("tipo_pago")
+            or "efectivo"
+        )
+
+        metodos_validos = {opcion for opcion, _ in Turno.METODO_PAGO_CHOICES}
+        if metodo_pago not in metodos_validos:
+            return Response(
+                {"error": "Método de pago inválido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            monto = Decimal(str(request.data.get("monto") or "0"))
+        except Exception:
+            return Response(
+                {"error": "Monto inválido"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if monto <= 0:
+            return Response(
+                {"error": "El monto debe ser mayor a cero"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        estado_anterior = turno.estado
+
+        senia_actual = Decimal(str(turno.senia_pagada or "0"))
+        turno.senia_pagada = senia_actual + monto
+
+        precio_final_override = request.data.get("precio_final")
+        if precio_final_override is not None:
+            try:
+                turno.precio_final = Decimal(str(precio_final_override))
+            except Exception:
+                pass
+
+        if not turno.canal_reserva:
+            turno.canal_reserva = (
+                "panel_profesional"
+                if user.role == "profesional"
+                else "panel_propietario"
+            )
+
+        turno.metodo_pago = metodo_pago
+        turno.fecha_pago_registrado = timezone.now()
+        turno.save()
+
+        HistorialTurno.objects.create(
+            turno=turno,
+            usuario=user,
+            accion="Pago registrado manualmente",
+            estado_anterior=estado_anterior,
+            estado_nuevo=turno.estado,
+            observaciones=(
+                f"Pago {metodo_pago} registrado por {user.full_name}. "
+                f"Monto: {monto}."
+            ),
+        )
+
+        return Response(TurnoDetailSerializer(turno).data)
 
     @action(detail=True, methods=["post"])
     def cambiar_estado(self, request, pk=None):
@@ -1019,6 +1402,68 @@ class TurnoViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=False, methods=["get", "post"], url_path="datos-prueba-completar")
+    def datos_prueba_completar(self, request):
+        """Activa o desactiva datos de prueba para completar turnos del profesional actual."""
+        user = request.user
+
+        if not hasattr(user, "profesional_profile"):
+            return Response(
+                {"error": "Solo los profesionales pueden gestionar datos de prueba"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        empleado = user.profesional_profile
+
+        from Scripts.completar_turnos import (
+            contar_turnos_prueba_para_empleado,
+            eliminar_turnos_prueba_para_empleado,
+            seed_turnos_prueba_para_empleado,
+        )
+
+        if request.method == "GET":
+            cantidad = contar_turnos_prueba_para_empleado(empleado)
+            return Response(
+                {
+                    "success": True,
+                    "activo": cantidad > 0,
+                    "turnos_prueba": cantidad,
+                }
+            )
+
+        activo = bool(request.data.get("activo", False))
+
+        if activo:
+            cantidad = int(request.data.get("cantidad", 18) or 18)
+            dias = int(request.data.get("dias", 30) or 30)
+
+            resultado = seed_turnos_prueba_para_empleado(
+                empleado=empleado,
+                cantidad=max(1, cantidad),
+                dias=max(1, dias),
+                limpiar_previos=True,
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "activo": True,
+                    "mensaje": "Datos de prueba activados",
+                    **resultado,
+                }
+            )
+
+        eliminados = eliminar_turnos_prueba_para_empleado(empleado)
+        return Response(
+            {
+                "success": True,
+                "activo": False,
+                "mensaje": "Datos de prueba desactivados",
+                "eliminados": eliminados,
+                "turnos_prueba": 0,
+            }
+        )
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -1063,43 +1508,54 @@ def responder_reasignacion(request, token):
     POST: Acepta o rechaza una oferta de reasignación
     """
 
-    # GET: Obtener detalles de la oferta
-    if request.method == "GET":
-        resultado = obtener_detalles_oferta_reasignacion(str(token))
+    try:
+        # GET: Obtener detalles de la oferta
+        if request.method == "GET":
+            resultado = obtener_detalles_oferta_reasignacion(str(token))
 
-        if resultado.get("status") == "activa":
+            if resultado.get("status") == "activa":
+                return Response(resultado, status=status.HTTP_200_OK)
+
+            if resultado.get("status") in ["ya_resuelta", "expirada"]:
+                return Response(resultado, status=status.HTTP_410_GONE)
+
+            if resultado.get("status") == "token_invalido":
+                return Response(resultado, status=status.HTTP_404_NOT_FOUND)
+
+            return Response(resultado, status=status.HTTP_400_BAD_REQUEST)
+
+        # POST: Procesar acción (aceptar/rechazar)
+        accion = request.data.get("accion") or request.query_params.get("accion")
+
+        if accion not in ["aceptar", "rechazar"]:
+            return Response(
+                {"error": "Acción inválida. Use 'aceptar' o 'rechazar'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        resultado = responder_oferta_reasignacion(str(token), accion)
+
+        estados_ok = ["aceptada", "rechazada", "expirada", "ya_resuelta"]
+        if resultado.get("status") in estados_ok:
             return Response(resultado, status=status.HTTP_200_OK)
 
-        if resultado.get("status") in ["ya_resuelta", "expirada"]:
-            return Response(resultado, status=status.HTTP_410_GONE)
+        if resultado.get("status") in ["token_invalido", "accion_invalida"]:
+            return Response(resultado, status=status.HTTP_400_BAD_REQUEST)
 
-        if resultado.get("status") == "token_invalido":
-            return Response(resultado, status=status.HTTP_404_NOT_FOUND)
+        if resultado.get("status") in [
+            "hueco_no_disponible",
+            "turno_ofrecido_no_disponible",
+        ]:
+            return Response(resultado, status=status.HTTP_409_CONFLICT)
 
         return Response(resultado, status=status.HTTP_400_BAD_REQUEST)
-
-    # POST: Procesar acción (aceptar/rechazar)
-    accion = request.data.get("accion") or request.query_params.get("accion")
-
-    if accion not in ["aceptar", "rechazar"]:
+    except Exception as e:
+        logger.exception("Error en responder_reasignacion token=%s", token)
         return Response(
-            {"error": "Acción inválida. Use 'aceptar' o 'rechazar'."},
-            status=status.HTTP_400_BAD_REQUEST,
+            {
+                "status": "error_interno",
+                "error": "Error interno procesando la oferta",
+                "detalle": str(e),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-    resultado = responder_oferta_reasignacion(str(token), accion)
-
-    estados_ok = ["aceptada", "rechazada", "expirada", "ya_resuelta"]
-    if resultado.get("status") in estados_ok:
-        return Response(resultado, status=status.HTTP_200_OK)
-
-    if resultado.get("status") in ["token_invalido", "accion_invalida"]:
-        return Response(resultado, status=status.HTTP_400_BAD_REQUEST)
-
-    if resultado.get("status") in [
-        "hueco_no_disponible",
-        "turno_ofrecido_no_disponible",
-    ]:
-        return Response(resultado, status=status.HTTP_409_CONFLICT)
-
-    return Response(resultado, status=status.HTTP_400_BAD_REQUEST)

@@ -1,11 +1,12 @@
 ﻿'use client';
 
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Label } from '@/components/ui/label';
 import { getAuthHeaders } from '@/lib/auth-headers';
-import { Calendar, Loader2, TrendingUp } from 'lucide-react';
+import { Calendar, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -81,18 +82,18 @@ export default function ReportesServiciosPage() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-6 space-y-6 bg-background">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">📊 Rendimiento de Servicios</h1>
-        <p className="text-gray-600 mt-1">Análisis detallado de servicios y empleados</p>
+        <h1 className="text-3xl font-bold text-foreground">📊 Rendimiento de Servicios</h1>
+        <p className="text-muted-foreground mt-1">Análisis detallado de servicios y empleados</p>
       </div>
 
       {/* Filtros de fecha */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
+            <Calendar className="w-5 h-5 text-primary" />
             Rango de Fechas
           </CardTitle>
           <CardDescription>Selecciona el período que deseas analizar</CardDescription>
@@ -119,14 +120,7 @@ export default function ReportesServiciosPage() {
               />
             </div>
             <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Cargando...
-                </>
-              ) : (
-                'Actualizar'
-              )}
+              {loading ? 'Actualizando...' : 'Actualizar'}
             </Button>
           </div>
         </CardContent>
@@ -134,16 +128,18 @@ export default function ReportesServiciosPage() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <BeautifulSpinner label="Cargando reportes de servicios..." />
         </div>
       ) : data ? (
         <>
-          {/* Gráfico de Top Servicios */}
+          {/* Gráfico de Top Servicios (más frecuentes y rentables) */}
           {data.top_servicios.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>🏆 Top Servicios por Ingresos</CardTitle>
-                <CardDescription>Los 5 servicios más rentables del período</CardDescription>
+                <CardTitle>🏆 Servicios más frecuentes y rentables</CardTitle>
+                <CardDescription>
+                  Los servicios con más turnos realizados (frecuencia) y mayor ingreso total en el período.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={400}>
@@ -175,32 +171,32 @@ export default function ReportesServiciosPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">#</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Servicio</th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">Cantidad</th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">Ingresos</th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">Promedio</th>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-3 px-4 font-medium text-muted-foreground">#</th>
+                        <th className="text-left py-3 px-4 font-medium text-muted-foreground">Servicio</th>
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">Cantidad</th>
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">Ingresos</th>
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">Promedio</th>
                       </tr>
                     </thead>
                     <tbody>
                       {data.top_servicios.map((servicio, index) => (
-                        <tr key={servicio.servicio_id} className="border-b hover:bg-gray-50">
+                        <tr key={servicio.servicio_id} className="border-b border-border hover:bg-accent/40">
                           <td className="py-3 px-4">
-                            <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 font-bold">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center bg-primary/10 text-primary font-bold">
                               {index + 1}
                             </div>
                           </td>
-                          <td className="py-3 px-4 font-medium text-gray-900">
+                          <td className="py-3 px-4 font-medium text-foreground">
                             {servicio.servicio_nombre}
                           </td>
-                          <td className="py-3 px-4 text-right text-gray-700">
+                          <td className="py-3 px-4 text-right text-muted-foreground">
                             {servicio.cantidad} turnos
                           </td>
-                          <td className="py-3 px-4 text-right font-bold text-green-600">
+                          <td className="py-3 px-4 text-right font-bold text-emerald-500">
                             {formatCurrency(servicio.total)}
                           </td>
-                          <td className="py-3 px-4 text-right text-gray-700">
+                          <td className="py-3 px-4 text-right text-muted-foreground">
                             {formatCurrency(servicio.total / servicio.cantidad)}
                           </td>
                         </tr>
@@ -223,18 +219,18 @@ export default function ReportesServiciosPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Empleado</th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">
+                      <tr className="border-b border-border">
+                        <th className="text-left py-3 px-4 font-medium text-muted-foreground">Empleado</th>
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">
                           Total Turnos
                         </th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">
                           Completados
                         </th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">
                           Tasa Éxito
                         </th>
-                        <th className="text-right py-3 px-4 font-medium text-gray-700">Ingresos</th>
+                        <th className="text-right py-3 px-4 font-medium text-muted-foreground">Ingresos</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -246,24 +242,24 @@ export default function ReportesServiciosPage() {
                             )
                             : '0';
                         return (
-                          <tr key={empleado.empleado_id} className="border-b hover:bg-gray-50">
+                          <tr key={empleado.empleado_id} className="border-b border-border hover:bg-accent/40">
                             <td className="py-3 px-4">
-                              <div className="font-medium text-gray-900">
+                              <div className="font-medium text-foreground">
                                 {empleado.empleado_nombre}
                               </div>
                             </td>
-                            <td className="py-3 px-4 text-right text-gray-700">
+                            <td className="py-3 px-4 text-right text-muted-foreground">
                               {empleado.total_turnos}
                             </td>
-                            <td className="py-3 px-4 text-right text-gray-700">
+                            <td className="py-3 px-4 text-right text-muted-foreground">
                               {empleado.turnos_completados}
                             </td>
                             <td className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 <TrendingUp
                                   className={`w-4 h-4 ${parseFloat(tasaExito) >= 80
-                                      ? 'text-green-600'
-                                      : 'text-orange-600'
+                                    ? 'text-green-600'
+                                    : 'text-orange-600'
                                     }`}
                                 />
                                 <span

@@ -98,6 +98,23 @@ export const turnosService = {
     return await patch<Turno>(`/turnos/${id}/`, updateData);
   },
 
+  // Registrar pago manual asociado a un turno (efectivo, transferencia, MP QR, etc.)
+  registrarPago: async (
+    id: number,
+    payload: { monto: number; metodo_pago: string; precio_final?: number }
+  ): Promise<Turno> => {
+    const body: any = {
+      monto: payload.monto,
+      metodo_pago: payload.metodo_pago,
+    };
+
+    if (typeof payload.precio_final === 'number') {
+      body.precio_final = payload.precio_final;
+    }
+
+    return await post<Turno>(`/turnos/${id}/registrar-pago/`, body);
+  },
+
   // Cancelar turno
   cancel: async (id: number, motivo?: string): Promise<Turno> => {
     return await turnosService.changeStatus(id, 'cancelado', motivo);

@@ -93,6 +93,13 @@ class Servicio(models.Model):
         default=0,
         verbose_name="Valor del descuento por adelanto",
     )
+    monto_sena_fijo = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        verbose_name="Monto fijo de seña",
+        help_text="Monto fijo que se cobra como seña. Se normaliza a la mitad del precio del servicio.",
+    )
     tiempo_espera_respuesta = models.PositiveIntegerField(
         default=15,
         verbose_name="Tiempo de espera de respuesta (minutos)",
@@ -104,6 +111,30 @@ class Servicio(models.Model):
         default=25.00,
         verbose_name="Porcentaje de seña",
         help_text="Porcentaje que se cobrará por Mercado Pago",
+    )
+    horas_minimas_credito_cancelacion = models.PositiveIntegerField(
+        default=24,
+        verbose_name="Horas mínimas para crédito por cancelación",
+        help_text=(
+            "Cantidad mínima de horas de anticipación para generar crédito al cancelar. "
+            "No puede ser menor a 24 horas."
+        ),
+    )
+    porcentaje_devolucion_sena = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=100,
+        verbose_name="Devolución sobre seña (%)",
+        help_text="Porcentaje de la seña pagada que se acredita al cancelar en término.",
+    )
+    porcentaje_devolucion_servicio_completo = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=100,
+        verbose_name="Devolución sobre servicio completo (%)",
+        help_text=(
+            "Porcentaje del valor total del servicio que se acredita cuando el cliente ya pagó el servicio completo."
+        ),
     )
     descuento_fidelizacion_pct = models.DecimalField(
         max_digits=5,
@@ -124,6 +155,20 @@ class Servicio(models.Model):
             "Monto fijo de descuento para campañas de fidelización. "
             "Si es mayor a 0, tendrá prioridad sobre el porcentaje."
         ),
+    )
+    bono_reacomodamiento_senia = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=1000,
+        verbose_name="Bono reacomodamiento (cliente con seña)",
+        help_text="Monto fijo de bono para clientes que pagaron seña.",
+    )
+    bono_reacomodamiento_pago_completo = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=2000,
+        verbose_name="Bono reacomodamiento (cliente con pago completo)",
+        help_text="Monto fijo de bono para clientes que pagaron el servicio completo.",
     )
     frecuencia_recurrencia_dias = models.PositiveIntegerField(
         default=30,

@@ -118,5 +118,33 @@
   }
   body {
     @apply bg-background text-foreground;
+    background:
+      radial-gradient(circle at top left, rgba(139, 92, 246, 0.16), transparent 60%),
+      radial-gradient(circle at bottom right, rgba(236, 72, 153, 0.14), transparent 55%),
+      var(--background);
+    background-attachment: fixed;
+  }
+
+  body::before {
+    content: "Beautiful Studio";
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-geist-sans);
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    font-size: clamp(3rem, 10vw, 5.5rem);
+    color: rgba(148, 163, 184, 0.9);
+    opacity: 0.04;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .dark body::before {
+    color: rgba(15, 23, 42, 0.9);
+    opacity: 0.06;
   }
 }

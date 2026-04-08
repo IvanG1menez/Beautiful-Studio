@@ -146,7 +146,7 @@ export default function HomePage() {
                   <div className="flex items-start gap-3">
                     <Clock className="w-5 h-5 text-blue-600 mt-0.5" />
                     <div>
-                      <p className="font-semibold text-gray-900">Agenda y historial siempre a mano</p>
+                      <p className="font-semibold text-gray-900">Agenda y auditoría siempre a mano</p>
                       <p className="text-sm text-gray-600">
                         Podés ver tus próximos turnos y todo lo que te hiciste en el estudio, con fecha, horario y profesional.
                       </p>

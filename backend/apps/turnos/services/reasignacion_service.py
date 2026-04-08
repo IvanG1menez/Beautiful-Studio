@@ -17,9 +17,73 @@ logger = logging.getLogger(__name__)
 ESTADOS_ACTIVOS = ["pendiente", "confirmado", "en_proceso", "oferta_enviada"]
 
 
+def _cancelacion_en_termino(turno_cancelado: Turno) -> bool:
+    """True si la cancelación ocurrió con al menos el mínimo de horas requerido."""
+
+    from apps.authentication.models import ConfiguracionGlobal
+
+    config_global = ConfiguracionGlobal.get_config()
+    min_horas_credito_global = config_global.min_horas_cancelacion_credito
+    min_horas_credito_servicio = max(
+        24,
+        int(
+            getattr(turno_cancelado.servicio, "horas_minimas_credito_cancelacion", 24)
+            or 24
+        ),
+    )
+    min_horas_credito = max(min_horas_credito_global, min_horas_credito_servicio)
+
+    horas_diferencia = (
+        turno_cancelado.fecha_hora - timezone.now()
+    ).total_seconds() / 3600
+    return horas_diferencia >= min_horas_credito
+
+
+def _calcular_descuento_para_candidato(
+    turno_cancelado: Turno, turno_candidato: Turno
+) -> tuple[Decimal, str, str]:
+    """Determina descuento y regla según ventana de cancelación y tipo de pago.
+
+    Reglas:
+    - Cancelación en término (>= mínimo): adelanto SIN descuento adicional.
+        - Cancelación fuera de término: bono SOLO para clientes con seña.
+            * candidato con seña => bono_reacomodamiento_senia
+            * candidato con pago completo => sin descuento promocional
+            * sin pago => sin descuento
+    """
+
+    servicio = turno_cancelado.servicio
+
+    if _cancelacion_en_termino(turno_cancelado):
+        return Decimal("0.00"), "CANCELACION_EN_TERMINO_SIN_DESCUENTO", "SIN_DESCUENTO"
+
+    tipo_pago_candidato = turno_candidato.resolver_tipo_pago()
+    if tipo_pago_candidato == "SENIA":
+        bono = Decimal(str(getattr(servicio, "bono_reacomodamiento_senia", 0) or 0))
+        return bono, "FUERA_DE_TERMINO_BONO_SENIA", tipo_pago_candidato
+
+    if tipo_pago_candidato == "PAGO_COMPLETO":
+        return (
+            Decimal("0.00"),
+            "FUERA_DE_TERMINO_PAGO_COMPLETO_SIN_PROMO",
+            tipo_pago_candidato,
+        )
+
+    return (
+        Decimal("0.00"),
+        "FUERA_DE_TERMINO_SIN_PAGO_SIN_DESCUENTO",
+        tipo_pago_candidato,
+    )
+
+
 def _save_turno_with_history(turno: Turno, reason: str, update_fields=None) -> None:
     """Guarda el turno y registra el motivo del cambio en el historial"""
-    update_change_reason(turno, reason)
+    try:
+        update_change_reason(turno, reason)
+    except Exception:
+        # Fallback compatible con entornos donde simple_history no puede
+        # adjuntar el motivo previo al save (evita cortar el flujo).
+        turno._change_reason = reason
     if update_fields:
         turno.save(update_fields=update_fields)
     else:
@@ -38,8 +102,13 @@ def _slot_libre(turno_cancelado: Turno) -> bool:
 def _calcular_monto_final(
     precio_total: Decimal, descuento: Decimal, senia: Decimal
 ) -> Decimal:
-    monto = precio_total - descuento - senia
-    return max(Decimal("0.00"), monto)
+    """Wrapper interno que usa la lógica de Turno.calcular_pago_final.
+
+    Se mantiene como helper local para no cambiar todas las firmas,
+    pero delega el cálculo real al modelo de dominio.
+    """
+
+    return Turno.calcular_pago_final(precio_total, descuento, senia)
 
 
 def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
@@ -61,6 +130,12 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
     if not _slot_libre(turno_cancelado):
         return {"status": "hueco_no_disponible"}
 
+    clientes_ya_notificados = list(
+        LogReasignacion.objects.filter(turno_cancelado=turno_cancelado).values_list(
+            "cliente_notificado_id", flat=True
+        )
+    )
+
     candidato = (
         Turno.objects.filter(
             servicio=turno_cancelado.servicio,
@@ -68,6 +143,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
             estado="confirmado",
             fecha_hora__gt=turno_cancelado.fecha_hora,
         )
+        .exclude(cliente_id__in=clientes_ya_notificados)
         .select_related("cliente__user", "servicio")
         .order_by("-fecha_hora")
         .first()
@@ -76,17 +152,30 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
     if not candidato:
         return {"status": "sin_candidatos"}
 
-    descuento = Decimal(turno_cancelado.servicio.descuento_reasignacion or 0)
+    servicio = turno_cancelado.servicio
+
+    # Calcular descuento según reglas de negocio de Proceso 2.
+    # Si la cancelación fue en término, el adelanto se ofrece sin bono.
+    # Si fue fuera de término, el bono depende del tipo de pago del candidato.
+    precio_total = Decimal(servicio.precio)
+    descuento, regla_descuento, tipo_pago_candidato = (
+        _calcular_descuento_para_candidato(turno_cancelado, candidato)
+    )
+
     senia_pagada = Decimal(candidato.senia_pagada or 0)
-    precio_total = Decimal(turno_cancelado.servicio.precio)
     monto_final = _calcular_monto_final(precio_total, descuento, senia_pagada)
+
+    # Tiempo de espera configurable por servicio (en minutos)
+    tiempo_espera_min = getattr(servicio, "tiempo_espera_respuesta", 15) or 15
 
     log_reasignacion = LogReasignacion.objects.create(
         turno_cancelado=turno_cancelado,
         turno_ofrecido=candidato,
         cliente_notificado=candidato.cliente,
         monto_descuento=descuento,
-        expires_at=timezone.now() + timedelta(minutes=15),
+        tipo_pago_cliente_ofertado=tipo_pago_candidato,
+        regla_descuento_aplicada=regla_descuento,
+        expires_at=timezone.now() + timedelta(minutes=tiempo_espera_min),
     )
 
     candidato.estado = "oferta_enviada"
@@ -124,7 +213,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
         from apps.turnos.tasks import expirar_oferta_reasignacion
 
         expirar_oferta_reasignacion.apply_async(
-            args=[log_reasignacion.id], countdown=15 * 60
+            args=[log_reasignacion.id], countdown=tiempo_espera_min * 60
         )
         logger.info(f"Tarea de expiración encolada para log {log_reasignacion.id}")
     except Exception as e:  # pragma: no cover - fallo opcional de Celery
@@ -194,7 +283,27 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
     if log_reasignacion.expires_at <= timezone.now():
         log_reasignacion.estado_final = "expirada"
         log_reasignacion.save(update_fields=["estado_final"])
-        return {"status": "expirada"}
+
+        # Si la oferta seguia marcada como enviada, se revierte a confirmado
+        # y se intenta continuar con el siguiente candidato.
+        if (
+            log_reasignacion.turno_ofrecido
+            and log_reasignacion.turno_ofrecido.estado == "oferta_enviada"
+        ):
+            turno_ofrecido = log_reasignacion.turno_ofrecido
+            turno_ofrecido.estado = "confirmado"
+            _save_turno_with_history(
+                turno_ofrecido,
+                "Oferta expirada (respuesta fuera de tiempo)",
+                update_fields=["estado"],
+            )
+
+        # Fallback cuando no corrio Celery de expiracion: continuar cadena ahora.
+        iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
+        return {
+            "status": "expirada",
+            "mensaje": "Lo sentimos, tu tiempo se acabo para responder esta oferta.",
+        }
 
     turno_cancelado = log_reasignacion.turno_cancelado
     turno_ofrecido = log_reasignacion.turno_ofrecido
@@ -310,6 +419,8 @@ def obtener_detalles_oferta_reasignacion(token: str) -> dict:
         "status": "activa",
         "token": str(log_reasignacion.token),
         "expires_at": log_reasignacion.expires_at.isoformat(),
+        "regla_descuento_aplicada": log_reasignacion.regla_descuento_aplicada,
+        "tipo_pago_cliente_ofertado": log_reasignacion.tipo_pago_cliente_ofertado,
         "cliente": {
             "nombre": log_reasignacion.cliente_notificado.nombre_completo,
             "email": log_reasignacion.cliente_notificado.user.email,

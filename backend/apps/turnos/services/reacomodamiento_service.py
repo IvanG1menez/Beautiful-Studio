@@ -1,61 +1,32 @@
-"""
-Servicio para el proceso de reacomodamiento (Proceso 2)
-"""
+"""Compatibilidad para Proceso 2 usando el flujo moderno de reasignacion."""
 
 import logging
 
-from django.utils import timezone
-
-from apps.turnos.models import Turno
-from apps.servicios.utils import enviar_propuesta_reacomodamiento
+from apps.turnos.models import LogReasignacion
+from apps.turnos.services.reasignacion_service import iniciar_reasignacion_turno
 
 logger = logging.getLogger(__name__)
 
 
-ESTADOS_CANDIDATOS = ["pendiente", "confirmado"]
-
-
 def iniciar_reacomodamiento(turno_cancelado_id: int) -> dict:
-    try:
-        turno_cancelado = Turno.objects.select_related("servicio").get(
-            id=turno_cancelado_id
-        )
-    except Turno.DoesNotExist:
-        logger.warning(f"Turno cancelado {turno_cancelado_id} no existe")
-        return {"status": "turno_no_encontrado"}
+    """Mantiene API vieja, pero delega al servicio nuevo basado en token."""
+    resultado = iniciar_reasignacion_turno(turno_cancelado_id)
+    status_nuevo = resultado.get("status")
 
-    if turno_cancelado.estado != "cancelado":
-        return {"status": "turno_no_cancelado"}
+    if status_nuevo == "oferta_enviada":
+        turno_id = None
+        log_id = resultado.get("log_id")
+        if log_id:
+            log = (
+                LogReasignacion.objects.filter(id=log_id)
+                .only("turno_ofrecido_id")
+                .first()
+            )
+            turno_id = log.turno_ofrecido_id if log else None
 
-    if (
-        not turno_cancelado.servicio
-        or not turno_cancelado.servicio.permite_reacomodamiento
-    ):
-        return {"status": "servicio_sin_reacomodamiento"}
+        return {"status": "propuesta_enviada", "turno_id": turno_id, "log_id": log_id}
 
-    if turno_cancelado.fecha_hora and turno_cancelado.fecha_hora <= timezone.now():
-        return {"status": "turno_fuera_de_ventana"}
-
-    candidato = (
-        Turno.objects.filter(
-            servicio=turno_cancelado.servicio,
-            estado__in=ESTADOS_CANDIDATOS,
-            fecha_hora__gt=turno_cancelado.fecha_hora,
-        )
-        .select_related("cliente__user", "servicio")
-        .order_by("-fecha_hora")
-        .first()
-    )
-
-    if not candidato:
-        return {"status": "sin_candidatos"}
-
-    enviado = enviar_propuesta_reacomodamiento(
-        turno_candidato=candidato, servicio=turno_cancelado.servicio
-    )
-
-    if not enviado:
-        return {"status": "email_fallido"}
-
-    logger.info(f"Propuesta de reacomodamiento enviada al turno {candidato.id}")
-    return {"status": "propuesta_enviada", "turno_id": candidato.id}
+    status_map = {
+        "hueco_no_disponible": "sin_candidatos",
+    }
+    return {"status": status_map.get(status_nuevo, status_nuevo)}

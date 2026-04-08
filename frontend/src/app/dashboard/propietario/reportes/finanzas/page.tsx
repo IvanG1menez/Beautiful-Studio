@@ -1,11 +1,12 @@
 ﻿'use client';
 
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Label } from '@/components/ui/label';
 import { getAuthHeaders } from '@/lib/auth-headers';
-import { ArrowDownRight, ArrowUpRight, Calendar, DollarSign, Loader2, TrendingUp, Users } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Calendar, DollarSign, TrendingUp, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -119,18 +120,18 @@ export default function ReportesFinanzasPage() {
   ].filter(item => item.value > 0) : [];
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-6 space-y-6 bg-background">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">📊 Resumen Financiero</h1>
-        <p className="text-gray-600 mt-1">Análisis de ingresos y rendimiento del negocio</p>
+        <h1 className="text-3xl font-bold text-foreground">📊 Resumen Financiero</h1>
+        <p className="text-muted-foreground mt-1">Análisis de ingresos y rendimiento del negocio</p>
       </div>
 
       {/* Filtros de fecha */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
+            <Calendar className="w-5 h-5 text-primary" />
             Rango de Fechas
           </CardTitle>
           <CardDescription>Selecciona el período que deseas analizar</CardDescription>
@@ -157,14 +158,7 @@ export default function ReportesFinanzasPage() {
               />
             </div>
             <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Cargando...
-                </>
-              ) : (
-                'Actualizar'
-              )}
+              {loading ? 'Actualizando...' : 'Actualizar'}
             </Button>
           </div>
         </CardContent>
@@ -172,7 +166,7 @@ export default function ReportesFinanzasPage() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <BeautifulSpinner label="Cargando resumen financiero..." />
         </div>
       ) : data ? (
         <>
@@ -182,18 +176,18 @@ export default function ReportesFinanzasPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Ingresos Totales</p>
-                    <p className="text-2xl font-bold text-gray-900">
+                    <p className="text-sm text-muted-foreground">Ingresos Totales</p>
+                    <p className="text-2xl font-bold text-foreground">
                       {formatCurrency(data.resumen.total_ingresos)}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                    <DollarSign className="w-6 h-6 text-green-600" />
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-emerald-500/10 text-emerald-500">
+                    <DollarSign className="w-6 h-6" />
                   </div>
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-sm">
-                  <TrendingUp className="w-4 h-4 text-green-600" />
-                  <span className="text-green-600 font-medium">
+                  <TrendingUp className="w-4 h-4 text-emerald-500" />
+                  <span className="text-emerald-500 font-medium">
                     {data.resumen.turnos_completados} turnos completados
                   </span>
                 </div>
@@ -204,16 +198,16 @@ export default function ReportesFinanzasPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Promedio por Turno</p>
-                    <p className="text-2xl font-bold text-gray-900">
+                    <p className="text-sm text-muted-foreground">Promedio por Turno</p>
+                    <p className="text-2xl font-bold text-foreground">
                       {formatCurrency(data.resumen.promedio_por_turno)}
                     </p>
                   </div>
-                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                    <TrendingUp className="w-6 h-6 text-blue-600" />
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-blue-500/10 text-blue-500">
+                    <TrendingUp className="w-6 h-6" />
                   </div>
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                   <span>Ingreso promedio por servicio</span>
                 </div>
               </CardContent>
@@ -223,14 +217,14 @@ export default function ReportesFinanzasPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Total de Turnos</p>
-                    <p className="text-2xl font-bold text-gray-900">{data.resumen.total_turnos}</p>
+                    <p className="text-sm text-muted-foreground">Total de Turnos</p>
+                    <p className="text-2xl font-bold text-foreground">{data.resumen.total_turnos}</p>
                   </div>
-                  <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                    <Users className="w-6 h-6 text-purple-600" />
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-purple-500/10 text-purple-500">
+                    <Users className="w-6 h-6" />
                   </div>
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                   <span>En el período seleccionado</span>
                 </div>
               </CardContent>
@@ -240,18 +234,18 @@ export default function ReportesFinanzasPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Tasa de Conversión</p>
-                    <p className="text-2xl font-bold text-gray-900">{data.resumen.tasa_conversion}%</p>
+                    <p className="text-sm text-muted-foreground">Tasa de Conversión</p>
+                    <p className="text-2xl font-bold text-foreground">{data.resumen.tasa_conversion}%</p>
                   </div>
-                  <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-orange-500/10">
                     {data.resumen.tasa_conversion >= 75 ? (
-                      <ArrowUpRight className="w-6 h-6 text-green-600" />
+                      <ArrowUpRight className="w-6 h-6 text-emerald-500" />
                     ) : (
-                      <ArrowDownRight className="w-6 h-6 text-orange-600" />
+                      <ArrowDownRight className="w-6 h-6 text-orange-500" />
                     )}
                   </div>
                 </div>
-                <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                   <span>Turnos completados / Total</span>
                 </div>
               </CardContent>

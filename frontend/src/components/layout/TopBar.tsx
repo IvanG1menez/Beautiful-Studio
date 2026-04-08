@@ -1,6 +1,7 @@
 'use client';
 
 import { NotificationBell } from '@/components/NotificationBell';
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -156,7 +157,7 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
 
   return (
     <>
-      <div className={`bg-white border-b border-gray-200 px-4 py-3 ${className}`}>
+      <div className={`bg-card/80 backdrop-blur border-b border-border px-4 py-3 ${className}`}>
         <div className="flex items-center justify-between">
           {/* Lado izquierdo - Botón menú móvil (opcional) */}
           <div className="flex items-center gap-4">
@@ -177,7 +178,7 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
 
             {/* Logo o Título */}
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-gray-800">
+              <h2 className="text-lg font-semibold text-foreground">
                 Beautiful Studio
               </h2>
             </div>
@@ -194,26 +195,26 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
             )}
 
             {/* Separador */}
-            <div className="h-6 w-px bg-gray-300"></div>
+            <div className="h-6 w-px bg-border"></div>
 
             {/* Menú de usuario */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-2 hover:bg-gray-100">
+                <Button variant="ghost" className="flex items-center gap-2 hover:bg-accent">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-linear-to-br from-blue-500 to-purple-600 text-white font-semibold">
                       {getUserInitials()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="hidden md:flex flex-col items-start">
-                    <span className="text-sm font-medium text-gray-900">
+                    <span className="text-sm font-medium text-foreground">
                       {getUserFullName()}
                     </span>
                     <div className="flex items-center gap-1">
                       {getRoleBadge()}
                     </div>
                   </div>
-                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
 
@@ -335,11 +336,32 @@ function ClientWalletQuickAccess() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
+  useEffect(() => {
+    if (role !== 'cliente') return;
+
+    const handleWalletUpdated = () => {
+      loadBilletera();
+    };
+
+    window.addEventListener('wallet-updated', handleWalletUpdated);
+    return () => {
+      window.removeEventListener('wallet-updated', handleWalletUpdated);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
   if (role !== 'cliente') {
     return null;
   }
 
   const saldoNumber = billetera ? parseFloat(billetera.saldo) : 0;
+  const fechaVencimientoTexto = billetera?.fecha_vencimiento
+    ? new Date(billetera.fecha_vencimiento).toLocaleDateString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    })
+    : null;
 
   const handleOpen = async () => {
     setDialogOpen(true);
@@ -367,12 +389,12 @@ function ClientWalletQuickAccess() {
           <DialogHeader>
             <DialogTitle>Tu Billetera</DialogTitle>
             <DialogDescription>
-              Historial de movimientos y crédito disponible para tus próximas reservas
+              Auditoría de movimientos y crédito disponible para tus próximas reservas
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 mt-4">
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-700/60 rounded-lg p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-green-500">
                   <Wallet className="w-5 h-5 text-white" />
@@ -382,6 +404,14 @@ function ClientWalletQuickAccess() {
                   <p className="text-2xl font-bold text-green-700">
                     {formatCurrency(saldoNumber)}
                   </p>
+                  {fechaVencimientoTexto && (
+                    <p className="text-xs text-green-800 mt-1">
+                      Credito vigente hasta el {fechaVencimientoTexto}
+                      {billetera?.esta_por_vencer && (
+                        <span className="ml-1 font-semibold text-amber-600">(próximo a vencer)</span>
+                      )}
+                    </p>
+                  )}
                 </div>
               </div>
               <p className="text-sm text-green-800 max-w-xs text-right">
@@ -390,8 +420,8 @@ function ClientWalletQuickAccess() {
             </div>
 
             {loadingMovimientos ? (
-              <div className="flex items-center justify-center py-8 text-gray-500 text-sm">
-                Cargando movimientos...
+              <div className="flex items-center justify-center py-8">
+                <BeautifulSpinner label="Cargando movimientos de tu billetera..." />
               </div>
             ) : movimientos.length === 0 ? (
               <div className="text-center py-8 text-gray-500 text-sm">
@@ -405,7 +435,7 @@ function ClientWalletQuickAccess() {
                 {movimientos.map((mov) => (
                   <div
                     key={mov.id}
-                    className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                    className="border rounded-lg p-4 hover:bg-accent transition-colors"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -422,8 +452,8 @@ function ClientWalletQuickAccess() {
                           <span className="font-semibold">{mov.tipo_display}</span>
                           <span
                             className={`text-sm font-semibold px-2 py-0.5 rounded-full ${mov.tipo === 'credito'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-red-100 text-red-700'
                               }`}
                           >
                             {mov.tipo === 'credito' ? '+' : '-'}
@@ -431,11 +461,11 @@ function ClientWalletQuickAccess() {
                           </span>
                         </div>
 
-                        <p className="text-sm text-gray-600 mb-2">
+                        <p className="text-sm text-muted-foreground mb-2">
                           {mov.descripcion || 'Sin descripción'}
                         </p>
 
-                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                           <span>
                             Saldo anterior: {formatCurrency(parseFloat(mov.saldo_anterior))}
                           </span>
@@ -446,7 +476,7 @@ function ClientWalletQuickAccess() {
                         </div>
                       </div>
 
-                      <div className="text-right text-xs text-gray-500 ml-4">
+                      <div className="text-right text-xs text-muted-foreground ml-4">
                         <p>{new Date(mov.created_at).toLocaleDateString('es-ES', {
                           day: '2-digit',
                           month: 'short',

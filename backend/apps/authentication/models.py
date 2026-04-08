@@ -2,6 +2,7 @@ from typing import Any
 import json
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.core.validators import MinValueValidator
 
 
 # Obtener el modelo de usuario personalizado
@@ -220,6 +221,13 @@ class ConfiguracionGlobal(models.Model):
         help_text="Horas de antelación requeridas para que una cancelación genere crédito en billetera",
     )
 
+    dias_vencimiento_credito = models.IntegerField(
+        default=90,
+        validators=[MinValueValidator(30)],
+        verbose_name="Días de vigencia del crédito",
+        help_text="Cantidad de días que dura vigente el crédito en billetera (mínimo 30)",
+    )
+
     # Parámetros de Reincorporación
     margen_fidelizacion_dias = models.IntegerField(
         default=60,
@@ -299,6 +307,7 @@ class ConfiguracionGlobal(models.Model):
             pk=1,
             defaults={
                 "min_horas_cancelacion_credito": 24,
+                "dias_vencimiento_credito": 90,
                 "margen_fidelizacion_dias": 60,
                 "descuento_fidelizacion_pct": 15.00,
                 "capacidad_maxima_global": 0,

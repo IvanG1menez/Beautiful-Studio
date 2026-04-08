@@ -11,15 +11,25 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatTime } from '@/lib/dateUtils';
 import { Turno } from '@/types';
 import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
@@ -42,6 +52,7 @@ const ESTADO_LABELS: { [key: string]: string } = {
 
 export default function AgendaEmpleadoPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +62,9 @@ export default function AgendaEmpleadoPage() {
   const [diasTrabajo, setDiasTrabajo] = useState<number[]>([]);
   const [turnosMes, setTurnosMes] = useState<Turno[]>([]);
   const [loadingMes, setLoadingMes] = useState(false);
+  const [tableScope, setTableScope] = useState<'dia' | 'semana' | 'mes'>('dia');
+  const [tableTurnos, setTableTurnos] = useState<Turno[]>([]);
+  const [loadingTabla, setLoadingTabla] = useState(false);
   const [modoCompletar, setModoCompletar] = useState(false);
   const [loadingPendientes, setLoadingPendientes] = useState(false);
   const [errorPendientes, setErrorPendientes] = useState<string | null>(null);
@@ -69,6 +83,19 @@ export default function AgendaEmpleadoPage() {
   const [resumenHoy, setResumenHoy] = useState<number | null>(null);
   const [resumenSemana, setResumenSemana] = useState<number | null>(null);
   const [procesandoPendientes, setProcesandoPendientes] = useState(false);
+  const [datosPruebaActivos, setDatosPruebaActivos] = useState(false);
+  const [cantidadDatosPrueba, setCantidadDatosPrueba] = useState(0);
+  const [procesandoDatosPrueba, setProcesandoDatosPrueba] = useState(false);
+
+  useEffect(() => {
+    const fechaParam = searchParams.get('fecha');
+    if (!fechaParam) return;
+
+    const parsed = new Date(`${fechaParam}T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      setSelectedDate(parsed);
+    }
+  }, [searchParams]);
 
   // Función para obtener el token de autenticación
   const getAuthToken = () => localStorage.getItem('auth_token');
@@ -259,6 +286,56 @@ export default function AgendaEmpleadoPage() {
     }
   };
 
+  const loadEstadoDatosPrueba = async () => {
+    try {
+      const response = await authenticatedFetch('/turnos/datos-prueba-completar/');
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      setDatosPruebaActivos(Boolean(data.activo));
+      setCantidadDatosPrueba(Number(data.turnos_prueba || 0));
+    } catch (err) {
+      console.error('Error consultando datos de prueba:', err);
+    }
+  };
+
+  const toggleDatosPrueba = async () => {
+    try {
+      setProcesandoDatosPrueba(true);
+      const activar = !datosPruebaActivos;
+
+      const response = await authenticatedFetch('/turnos/datos-prueba-completar/', {
+        method: 'POST',
+        body: JSON.stringify({
+          activo: activar,
+          cantidad: 2,
+          dias: 30,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || 'No se pudieron actualizar los datos de prueba');
+      }
+
+      const data = await response.json();
+      setDatosPruebaActivos(Boolean(data.activo));
+      setCantidadDatosPrueba(Number(data.turnos_prueba || data.total_prueba_activos || 0));
+      setSelectedPendientesIds([]);
+
+      await Promise.all([loadTurnosPendientes(), loadTurnos(selectedDate)]);
+      if (viewMode === 'mes') {
+        await loadTurnosMes(selectedDate);
+      }
+    } catch (err: any) {
+      console.error('Error al alternar datos de prueba:', err);
+      alert(err.message || 'No se pudieron alternar los datos de prueba');
+    } finally {
+      setProcesandoDatosPrueba(false);
+    }
+  };
+
   const completarTurnosSeleccionados = async () => {
     if (selectedPendientesIds.length === 0) {
       return;
@@ -295,6 +372,7 @@ export default function AgendaEmpleadoPage() {
   useEffect(() => {
     if (empleadoId) {
       loadTurnosPendientes();
+      loadEstadoDatosPrueba();
     }
   }, [empleadoId]);
 
@@ -387,11 +465,61 @@ export default function AgendaEmpleadoPage() {
     setSelectedDate(new Date());
   };
 
-  // Filtrar turnos
-  const turnosFiltrados = turnos.filter(turno => {
+  const filtrarPorEstado = (lista: Turno[]) => lista.filter(turno => {
     if (filtroEstado === 'todos') return true;
     return turno.estado === filtroEstado;
   });
+
+  // Filtrar turnos
+  const turnosFiltrados = filtrarPorEstado(turnos);
+
+  const loadTurnosTabla = async (fechaReferencia: Date, scope: 'dia' | 'semana' | 'mes') => {
+    if (!empleadoId) return;
+
+    try {
+      setLoadingTabla(true);
+
+      let fechaDesde: string;
+      let fechaHasta: string;
+
+      if (scope === 'dia') {
+        const fecha = new Date(fechaReferencia);
+        fechaDesde = fecha.toISOString().split('T')[0];
+        fechaHasta = fechaDesde;
+      } else if (scope === 'semana') {
+        const inicioSemana = new Date(fechaReferencia);
+        const day = inicioSemana.getDay();
+        const diff = (day === 0 ? -6 : 1) - day; // lunes como inicio
+        inicioSemana.setDate(inicioSemana.getDate() + diff);
+        const finSemana = new Date(inicioSemana);
+        finSemana.setDate(inicioSemana.getDate() + 6);
+        fechaDesde = inicioSemana.toISOString().split('T')[0];
+        fechaHasta = finSemana.toISOString().split('T')[0];
+      } else {
+        const inicioMes = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth(), 1);
+        const finMes = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth() + 1, 0);
+        fechaDesde = inicioMes.toISOString().split('T')[0];
+        fechaHasta = finMes.toISOString().split('T')[0];
+      }
+
+      const response = await authenticatedFetch(
+        `/turnos/empleado/${empleadoId}?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}&page_size=1000`
+      );
+
+      if (!response.ok) {
+        throw new Error('No se pudieron cargar los turnos para la tabla');
+      }
+
+      const data = await response.json();
+      const turnosArray: Turno[] = Array.isArray(data) ? data : data.results || [];
+      setTableTurnos(turnosArray);
+    } catch (err) {
+      console.error('Error cargando turnos de tabla:', err);
+      setTableTurnos([]);
+    } finally {
+      setLoadingTabla(false);
+    }
+  };
 
   // Validar fecha del turno
   const validarFechaTurno = (turno: Turno): { valido: boolean; mensaje: string } => {
@@ -464,6 +592,11 @@ export default function AgendaEmpleadoPage() {
   // Confirmar cambio de estado
   const confirmarCambioEstado = async () => {
     if (!turnoActual || !nuevoEstado) return;
+
+    if (nuevoEstado === 'en_proceso' && !puedeIniciarTurno(turnoActual)) {
+      alert(getMotivoNoIniciable(turnoActual));
+      return;
+    }
 
     // Confirmación final usando dialog
     if (nuevoEstado === 'completado') {
@@ -587,7 +720,7 @@ export default function AgendaEmpleadoPage() {
 
   // Formatear hora
   // Formatear hora (convertir de UTC a hora local)
-  const [viewMode, setViewMode] = useState<'dia' | 'semana' | 'mes'>('semana');
+  const [viewMode, setViewMode] = useState<'dia' | 'semana' | 'mes' | 'tabla'>('semana');
 
   const horasDia = Array.from({ length: 14 }, (_, i) => i + 8); // 08:00 a 21:00
 
@@ -632,6 +765,46 @@ export default function AgendaEmpleadoPage() {
     return mapa;
   })();
 
+  const puedeIniciarTurno = (turno: Turno): boolean => {
+    const ahora = new Date();
+    const inicioTurno = new Date(turno.fecha_hora);
+    return inicioTurno.toDateString() === ahora.toDateString() && ahora >= inicioTurno;
+  };
+
+  const getMotivoNoIniciable = (turno: Turno): string => {
+    const ahora = new Date();
+    const inicioTurno = new Date(turno.fecha_hora);
+
+    if (inicioTurno.toDateString() !== ahora.toDateString()) {
+      return 'Solo se puede iniciar el turno en su fecha programada';
+    }
+
+    if (ahora < inicioTurno) {
+      return 'No se puede iniciar antes de la hora programada';
+    }
+
+    return '';
+  };
+
+  const getMontoPendienteTurno = (turno: Turno): number => {
+    const montoPendienteApi = Number((turno as any).monto_pendiente || 0);
+    if (!Number.isNaN(montoPendienteApi) && montoPendienteApi >= 0) {
+      return montoPendienteApi;
+    }
+
+    const precio = Number(
+      turno.precio_final || (turno as any).servicio_precio || turno.servicio?.precio || 0
+    );
+    const senia = Number(turno.senia_pagada || 0);
+    const pendiente = precio - senia;
+    return pendiente > 0 ? pendiente : 0;
+  };
+
+  const getPagoLabelTurno = (turno: Turno): string => {
+    const pagadoCompleto = Boolean((turno as any).pagado_completo);
+    return pagadoCompleto ? 'Servicio completo' : 'Seña';
+  };
+
   // Cuando entro a vista mensual o cambia el mes, cargo turnos del mes
   useEffect(() => {
     if (empleadoId && viewMode === 'mes') {
@@ -639,10 +812,16 @@ export default function AgendaEmpleadoPage() {
     }
   }, [empleadoId, viewMode, selectedDate]);
 
+  useEffect(() => {
+    if (empleadoId && viewMode === 'tabla') {
+      void loadTurnosTabla(selectedDate, tableScope);
+    }
+  }, [empleadoId, viewMode, selectedDate, tableScope]);
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Encabezado principal */}
-      <div className="border-b bg-white">
+      <div className="border-b bg-card">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-center justify-between">
           <div>
             <p className="text-sm text-gray-500 mb-1">
@@ -663,6 +842,12 @@ export default function AgendaEmpleadoPage() {
                   {totalTurnosPendientes}
                 </span>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => window.location.assign('/dashboard/profesional/reservar-turno')}
+            >
+              Reservar turno
             </Button>
             <Button variant="outline" onClick={() => window.print()} disabled={modoCompletar}>
               <Printer className="w-4 h-4 mr-2" />
@@ -759,11 +944,12 @@ export default function AgendaEmpleadoPage() {
                 <Card>
                   <CardHeader className="space-y-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <Tabs value={viewMode} onValueChange={(val) => setViewMode(val as 'dia' | 'semana' | 'mes')}>
-                        <TabsList className="grid grid-cols-3 w-full max-w-xs">
+                      <Tabs value={viewMode} onValueChange={(val) => setViewMode(val as 'dia' | 'semana' | 'mes' | 'tabla')}>
+                        <TabsList className="grid grid-cols-4 w-full max-w-sm">
                           <TabsTrigger value="dia">Día</TabsTrigger>
                           <TabsTrigger value="semana">Semana</TabsTrigger>
                           <TabsTrigger value="mes">Mes</TabsTrigger>
+                          <TabsTrigger value="tabla">Tabla</TabsTrigger>
                         </TabsList>
                       </Tabs>
 
@@ -812,8 +998,7 @@ export default function AgendaEmpleadoPage() {
 
                         {loading ? (
                           <div className="flex items-center justify-center flex-1">
-                            <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-                            <span className="ml-2 text-sm text-gray-500">Cargando turnos...</span>
+                            <BeautifulSpinner label="Cargando turnos del día..." />
                           </div>
                         ) : turnosOrdenados.length === 0 ? (
                           <div className="flex-1 flex flex-col items-center justify-center text-sm text-muted-foreground">
@@ -893,8 +1078,8 @@ export default function AgendaEmpleadoPage() {
                               type="button"
                               onClick={() => setSelectedDate(day)}
                               className={`flex flex-col items-center rounded-lg border px-2 py-2 transition-colors ${isSelected
-                                  ? 'bg-purple-600 text-white border-purple-600'
-                                  : 'bg-white text-gray-800 hover:bg-gray-50'
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'bg-white text-gray-800 hover:bg-gray-50'
                                 }`}
                             >
                               <span className="font-medium">{label.split(' ')[0]}</span>
@@ -963,8 +1148,8 @@ export default function AgendaEmpleadoPage() {
                                 type="button"
                                 onClick={() => setSelectedDate(cellDate)}
                                 className={`flex flex-col rounded-xl border px-2 py-1.5 text-left text-xs transition-colors ${isSelected
-                                    ? 'border-indigo-500 bg-indigo-50'
-                                    : 'border-transparent hover:border-indigo-200 hover:bg-indigo-50/40'
+                                  ? 'border-indigo-500 bg-indigo-50'
+                                  : 'border-transparent hover:border-indigo-200 hover:bg-indigo-50/40'
                                   } ${!isCurrentMonth ? 'opacity-40' : ''}`}
                               >
                                 <div className="flex items-center justify-between mb-1">
@@ -1015,6 +1200,91 @@ export default function AgendaEmpleadoPage() {
                         })()}
                       </div>
                     )}
+
+                    {viewMode === 'tabla' && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm text-gray-600">
+                            Rango de tabla
+                          </div>
+                          <Select
+                            value={tableScope}
+                            onValueChange={(val) => setTableScope(val as 'dia' | 'semana' | 'mes')}
+                          >
+                            <SelectTrigger className="w-[180px]">
+                              <SelectValue placeholder="Seleccionar rango" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="dia">Día</SelectItem>
+                              <SelectItem value="semana">Semana</SelectItem>
+                              <SelectItem value="mes">Mes</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="rounded-lg border bg-white overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Fecha</TableHead>
+                                <TableHead>Hora</TableHead>
+                                <TableHead>Cliente</TableHead>
+                                <TableHead>Estado</TableHead>
+                                <TableHead>Pago</TableHead>
+                                <TableHead>Método</TableHead>
+                                <TableHead className="text-right">Resta pagar</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {loadingTabla ? (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+                                    Cargando turnos...
+                                  </TableCell>
+                                </TableRow>
+                              ) : filtrarPorEstado(tableTurnos).length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+                                    No hay turnos para mostrar en formato tabla.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                [...filtrarPorEstado(tableTurnos)]
+                                  .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime())
+                                  .map((turno) => (
+                                    <TableRow key={turno.id}>
+                                      <TableCell>
+                                        {new Date(turno.fecha_hora).toLocaleDateString('es-AR', {
+                                          day: '2-digit',
+                                          month: '2-digit',
+                                          year: 'numeric',
+                                        })}
+                                      </TableCell>
+                                      <TableCell>{formatTime(turno.fecha_hora)}</TableCell>
+                                      <TableCell>
+                                        {(turno as any).cliente_nombre ||
+                                          turno.cliente?.nombre_completo ||
+                                          (turno as any).cliente_email ||
+                                          'Cliente'}
+                                      </TableCell>
+                                      <TableCell>
+                                        <Badge className={ESTADO_COLORS[turno.estado]}>
+                                          {ESTADO_LABELS[turno.estado]}
+                                        </Badge>
+                                      </TableCell>
+                                      <TableCell>{getPagoLabelTurno(turno)}</TableCell>
+                                      <TableCell>{(turno as any).metodo_pago || '—'}</TableCell>
+                                      <TableCell className="text-right font-medium">
+                                        ${getMontoPendienteTurno(turno).toFixed(2)}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -1039,8 +1309,7 @@ export default function AgendaEmpleadoPage() {
                   <CardContent>
                     {loading ? (
                       <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-                        <span className="ml-2 text-gray-500">Cargando turnos...</span>
+                        <BeautifulSpinner label="Cargando turnos del día..." />
                       </div>
                     ) : error ? (
                       <div className="text-center py-8">
@@ -1127,8 +1396,8 @@ export default function AgendaEmpleadoPage() {
 
                                   <div
                                     className={`text-sm p-3 rounded-lg border ${turno.notas_cliente
-                                        ? 'bg-blue-50 border-blue-200'
-                                        : 'bg-gray-50 border-gray-200'
+                                      ? 'bg-blue-50 border-blue-200'
+                                      : 'bg-gray-50 border-gray-200'
                                       }`}
                                   >
                                     <div className="flex items-start gap-2">
@@ -1208,7 +1477,13 @@ export default function AgendaEmpleadoPage() {
                                   <Button
                                     size="sm"
                                     variant="default"
+                                    disabled={!puedeIniciarTurno(turno)}
+                                    title={!puedeIniciarTurno(turno) ? getMotivoNoIniciable(turno) : ''}
                                     onClick={() => {
+                                      if (!puedeIniciarTurno(turno)) {
+                                        alert(getMotivoNoIniciable(turno));
+                                        return;
+                                      }
                                       setTurnoActual(turno);
                                       setNuevoEstado('en_proceso');
                                       setNotasEmpleado('');
@@ -1290,7 +1565,7 @@ export default function AgendaEmpleadoPage() {
 
         {modoCompletar && (
           <div className="space-y-6">
-            <Card className="bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white border-none shadow-lg">
+            <Card className="bg-linear-to-r from-indigo-500 to-fuchsia-500 text-white border-none shadow-lg">
               <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <CardTitle className="text-2xl font-semibold">Completar Turnos Pendientes</CardTitle>
@@ -1305,6 +1580,43 @@ export default function AgendaEmpleadoPage() {
                   <span className="text-sm font-medium text-indigo-100">
                     Turnos pendientes
                   </span>
+                </div>
+              </CardHeader>
+            </Card>
+
+            <Card className="border-slate-200">
+              <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="text-base font-semibold text-slate-900">Modo prueba de completar turnos</CardTitle>
+                  <CardDescription>
+                    Activa datos de prueba para generar turnos viejos en esta seccion. Al desactivar, se borran.
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${datosPruebaActivos ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                      }`}
+                  >
+                    {datosPruebaActivos
+                      ? `Activo (${cantidadDatosPrueba})`
+                      : 'Inactivo'}
+                  </span>
+                  <Button
+                    variant={datosPruebaActivos ? 'destructive' : 'default'}
+                    onClick={toggleDatosPrueba}
+                    disabled={procesandoDatosPrueba}
+                  >
+                    {procesandoDatosPrueba ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Procesando...
+                      </>
+                    ) : datosPruebaActivos ? (
+                      'Desactivar prueba'
+                    ) : (
+                      'Activar prueba'
+                    )}
+                  </Button>
                 </div>
               </CardHeader>
             </Card>
@@ -1501,7 +1813,9 @@ export default function AgendaEmpleadoPage() {
                   )}
                   {turnoActual?.estado === 'confirmado' && (
                     <>
-                      <SelectItem value="en_proceso">En Proceso</SelectItem>
+                      {turnoActual && puedeIniciarTurno(turnoActual) && (
+                        <SelectItem value="en_proceso">En Proceso</SelectItem>
+                      )}
                       <SelectItem value="cancelado">Cancelado</SelectItem>
                       <SelectItem value="no_asistio">No Asistio</SelectItem>
                     </>

@@ -4,7 +4,17 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getAuthHeaders } from "@/lib/auth-headers";
-import { AlertCircle, Calendar as CalendarIcon, Check, Loader2, Scissors, User } from "lucide-react";
+import {
+  AlertCircle,
+  Building2,
+  Calendar as CalendarIcon,
+  Check,
+  Download,
+  Loader2,
+  Printer,
+  Scissors,
+  User,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -25,13 +35,30 @@ interface Empleado {
 }
 
 interface ComprobanteTurno {
+  empresa?: {
+    nombre_empresa?: string;
+    nombre_comercial?: string;
+    razon_social?: string;
+    cuit?: string;
+    fecha_fundacion?: string | null;
+  };
   turno: {
     id: number;
     servicio_nombre: string;
     profesional_nombre: string;
     cliente_nombre: string;
+    cliente_email?: string;
     fecha_hora: string | null;
     precio_final: string;
+    senia_pagada?: string;
+    duracion_minutos?: number | null;
+  };
+  pago?: {
+    monto?: string;
+    moneda?: string;
+    payment_id?: string;
+    estado?: string;
+    creado_en?: string;
   };
 }
 
@@ -60,6 +87,7 @@ export default function PagoFidelizacionPage() {
   const mpTabCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [mpTabClosed, setMpTabClosed] = useState(false);
   const [success, setSuccess] = useState(false);
+  const comprobanteRef = useRef<HTMLDivElement | null>(null);
 
   // Cargar datos de servicio y profesional
   useEffect(() => {
@@ -302,9 +330,102 @@ export default function PagoFidelizacionPage() {
     setPreferenceId("");
   };
 
+  const formatearMoneda = (valor?: string) => {
+    const numero = Number(valor ?? "0");
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+      minimumFractionDigits: 2,
+    }).format(Number.isNaN(numero) ? 0 : numero);
+  };
+
+  const handleImprimirComprobante = () => {
+    window.print();
+  };
+
+  const handleDescargarPDF = async () => {
+    if (!comprobante?.turno) return;
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+      const turno = comprobante.turno;
+      const empresa = comprobante.empresa;
+      const pago = comprobante.pago;
+      const fechaTurno = turno.fecha_hora ? new Date(turno.fecha_hora) : null;
+      const fechaPago = pago?.creado_en ? new Date(pago.creado_en) : null;
+
+      let y = 56;
+      doc.setFillColor(107, 70, 193);
+      doc.rect(40, 32, 515, 64, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("Comprobante de pago", 56, y);
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+      doc.text(empresa?.nombre_comercial || empresa?.nombre_empresa || "Beautiful Studio", 56, y + 20);
+
+      doc.setTextColor(33, 33, 33);
+      y = 132;
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("Datos del turno", 40, y);
+      y += 22;
+      doc.setFont("helvetica", "normal");
+      doc.text(`Nro. de turno: #${turno.id}`, 40, y);
+      y += 18;
+      doc.text(`Servicio: ${turno.servicio_nombre}`, 40, y);
+      y += 18;
+      doc.text(`Profesional: ${turno.profesional_nombre}`, 40, y);
+      y += 18;
+      doc.text(`Cliente: ${turno.cliente_nombre}`, 40, y);
+      y += 18;
+      if (turno.cliente_email) {
+        doc.text(`Email: ${turno.cliente_email}`, 40, y);
+        y += 18;
+      }
+      if (fechaTurno) {
+        doc.text(`Fecha y hora: ${fechaTurno.toLocaleString("es-AR")}`, 40, y);
+        y += 18;
+      }
+
+      y += 8;
+      doc.setFont("helvetica", "bold");
+      doc.text("Datos del pago", 40, y);
+      y += 22;
+      doc.setFont("helvetica", "normal");
+      doc.text(`Monto pagado: ${formatearMoneda(pago?.monto || turno.precio_final)}`, 40, y);
+      y += 18;
+      doc.text(`Estado: ${pago?.estado || "approved"}`, 40, y);
+      y += 18;
+      doc.text(`Referencia: ${pago?.payment_id || "N/D"}`, 40, y);
+      y += 18;
+      if (fechaPago) {
+        doc.text(`Fecha de pago: ${fechaPago.toLocaleString("es-AR")}`, 40, y);
+        y += 18;
+      }
+
+      y += 8;
+      doc.setDrawColor(224, 224, 224);
+      doc.line(40, y, 555, y);
+      y += 20;
+      doc.setFontSize(10);
+      doc.setTextColor(90, 90, 90);
+      doc.text("Comprobante emitido digitalmente por Beautiful Studio.", 40, y);
+
+      doc.save(`comprobante-turno-${turno.id}.pdf`);
+    } catch (e) {
+      console.error("Error al generar PDF:", e);
+      setError("No se pudo generar el PDF del comprobante.");
+    }
+  };
+
   if (loading && !servicio) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50">
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-50 to-pink-50">
         <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
       </div>
     );
@@ -315,57 +436,157 @@ export default function PagoFidelizacionPage() {
     const fechaTurno = turno?.fecha_hora
       ? new Date(turno.fecha_hora)
       : null;
+    const fechaPago = comprobante?.pago?.creado_en
+      ? new Date(comprobante.pago.creado_en)
+      : null;
 
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50 p-4">
-        <Card className="w-full max-w-md text-center">
-          <CardContent className="pt-10 pb-8">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Check className="w-10 h-10 text-green-600" />
+      <div className="min-h-screen bg-linear-to-br from-violet-50 via-fuchsia-50 to-rose-50 p-4 sm:p-8">
+        <div className="mx-auto w-full max-w-3xl space-y-4">
+          <div className="no-print rounded-2xl border border-violet-200 bg-white/80 p-4 text-center shadow-sm backdrop-blur">
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+              <Check className="h-9 w-9 text-emerald-600" />
             </div>
-            <h2 className="text-2xl font-bold mb-2">¡Listo! Tu turno quedó reservado</h2>
-            <p className="text-gray-600 mb-4">
-              El pago se registró correctamente. Vas a recibir la confirmación del salón.
+            <h2 className="text-2xl font-bold text-gray-900">Pago confirmado y turno reservado</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Ya tenés tu comprobante listo. Podés imprimirlo o descargarlo en PDF.
             </p>
+          </div>
 
-            {turno && (
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4 text-left text-sm">
-                <p className="font-semibold text-purple-900 mb-2">Detalles de tu turno</p>
-                <div className="space-y-1 text-purple-900">
+          <Card id="comprobante-print" ref={comprobanteRef} className="overflow-hidden border-violet-200 shadow-lg">
+            <div className="bg-linear-to-r from-violet-700 to-fuchsia-600 px-6 py-5 text-white">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-violet-100">Comprobante</p>
+                  <h3 className="text-xl font-semibold">Detalle de pago y reserva</h3>
+                </div>
+                <div className="rounded-full bg-white/20 px-3 py-1 text-xs font-medium">
+                  Turno #{turno?.id ?? "-"}
+                </div>
+              </div>
+            </div>
+
+            <CardContent className="space-y-6 p-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="mb-3 flex items-center gap-2 text-violet-700">
+                    <Building2 className="h-4 w-4" />
+                    <p className="text-sm font-semibold">Datos del negocio</p>
+                  </div>
+                  <div className="space-y-1 text-sm text-gray-700">
+                    <p className="font-medium text-gray-900">
+                      {comprobante?.empresa?.nombre_comercial || comprobante?.empresa?.nombre_empresa || "Beautiful Studio"}
+                    </p>
+                    {comprobante?.empresa?.razon_social && <p>Razón social: {comprobante.empresa.razon_social}</p>}
+                    {comprobante?.empresa?.cuit && <p>CUIT: {comprobante.empresa.cuit}</p>}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="mb-3 flex items-center gap-2 text-violet-700">
+                    <User className="h-4 w-4" />
+                    <p className="text-sm font-semibold">Cliente</p>
+                  </div>
+                  <div className="space-y-1 text-sm text-gray-700">
+                    <p className="font-medium text-gray-900">{turno?.cliente_nombre || "-"}</p>
+                    {turno?.cliente_email && <p>{turno.cliente_email}</p>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-4">
+                <p className="mb-3 text-sm font-semibold text-violet-900">Resumen del turno</p>
+                <div className="grid gap-3 text-sm md:grid-cols-2">
                   <p>
-                    <span className="font-medium">Servicio:</span> {turno.servicio_nombre}
+                    <span className="font-medium text-gray-900">Servicio:</span> {turno?.servicio_nombre || "-"}
                   </p>
                   <p>
-                    <span className="font-medium">Profesional:</span> {turno.profesional_nombre}
+                    <span className="font-medium text-gray-900">Profesional:</span> {turno?.profesional_nombre || "-"}
                   </p>
-                  {fechaTurno && (
-                    <p>
-                      <span className="font-medium">Fecha y hora:</span> {fechaTurno.toLocaleString("es-AR", {
+                  <p>
+                    <span className="font-medium text-gray-900">Fecha:</span>{" "}
+                    {fechaTurno
+                      ? fechaTurno.toLocaleString("es-AR", {
                         weekday: "long",
                         day: "numeric",
                         month: "long",
+                        year: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
-                      })}
-                    </p>
-                  )}
+                      })
+                      : "A confirmar"}
+                  </p>
                   <p>
-                    <span className="font-medium">Monto pagado:</span> ${turno.precio_final}
+                    <span className="font-medium text-gray-900">Duración:</span>{" "}
+                    {turno?.duracion_minutos ? `${turno.duracion_minutos} min` : "-"}
                   </p>
                 </div>
               </div>
-            )}
 
-            <Button onClick={handleVolver}>Ver mis turnos</Button>
-          </CardContent>
-        </Card>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-emerald-900">Pago</p>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                    {comprobante?.pago?.estado || "approved"}
+                  </span>
+                </div>
+                <div className="space-y-1 text-sm text-emerald-900">
+                  <p>
+                    <span className="font-medium">Monto:</span>{" "}
+                    {formatearMoneda(comprobante?.pago?.monto || turno?.precio_final || "0")}
+                  </p>
+                  <p>
+                    <span className="font-medium">Referencia:</span> {comprobante?.pago?.payment_id || "N/D"}
+                  </p>
+                  <p>
+                    <span className="font-medium">Fecha de pago:</span>{" "}
+                    {fechaPago ? fechaPago.toLocaleString("es-AR") : "-"}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="no-print flex flex-wrap items-center justify-center gap-3">
+            <Button variant="outline" onClick={handleImprimirComprobante}>
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
+            </Button>
+            <Button onClick={handleDescargarPDF} className="bg-violet-600 hover:bg-violet-700">
+              <Download className="mr-2 h-4 w-4" />
+              Descargar PDF
+            </Button>
+            <Button variant="secondary" onClick={handleVolver}>
+              Ver mis turnos
+            </Button>
+          </div>
+        </div>
+
+        <style jsx global>{`
+          @media print {
+            body {
+              background: #ffffff !important;
+            }
+
+            .no-print {
+              display: none !important;
+            }
+
+            #comprobante-print {
+              box-shadow: none !important;
+              border: 1px solid #d4d4d4 !important;
+              margin: 0 auto;
+              max-width: 100% !important;
+            }
+          }
+        `}</style>
       </div>
     );
   }
 
   if (isWaitingPayment) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50 p-4">
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-50 to-pink-50 p-4">
         <Card className="w-full max-w-md text-center">
           <CardContent className="pt-10 pb-8 flex flex-col items-center gap-4">
             {mpTabClosed ? (
@@ -405,7 +626,7 @@ export default function PagoFidelizacionPage() {
   const precioConDescuento = calcularPrecioConDescuento();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-50 to-pink-50 p-4">
       <Card className="w-full max-w-lg">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Confirmá tu turno con descuento</CardTitle>

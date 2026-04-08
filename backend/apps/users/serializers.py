@@ -33,23 +33,36 @@ class UserSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     cliente_profile = serializers.SerializerMethodField()
     profesional_profile = serializers.SerializerMethodField()
-    
+    empleado_id = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = "__all__"
-    
+
     def get_cliente_profile(self, obj):
         """Obtener perfil de cliente si existe"""
-        if hasattr(obj, 'cliente_profile'):
+        if hasattr(obj, "cliente_profile"):
             from apps.clientes.serializers import ClienteDetailSerializer
+
             return ClienteDetailSerializer(obj.cliente_profile).data
         return None
-    
+
     def get_profesional_profile(self, obj):
         """Obtener perfil de profesional si existe"""
-        if hasattr(obj, 'profesional_profile'):
+        if hasattr(obj, "profesional_profile"):
             from apps.empleados.serializers import EmpleadoListSerializer
+
             return EmpleadoListSerializer(obj.profesional_profile).data
+        return None
+
+    def get_empleado_id(self, obj):
+        """Devolver el ID del perfil de empleado/profesional si existe.
+
+        Esto permite que el frontend use user.empleado_id directamente
+        sin tener que volver a consultar /empleados/me/ al recargar.
+        """
+        if hasattr(obj, "profesional_profile") and obj.profesional_profile:
+            return obj.profesional_profile.id
         return None
 
 

@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -83,6 +84,11 @@ export default function TurnosHoyPage() {
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [notas, setNotas] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Pago al finalizar turno
+  const [showPagoDialog, setShowPagoDialog] = useState(false);
+  const [selectedMetodoPago, setSelectedMetodoPago] = useState<'efectivo' | 'mercadopago_qr' | 'transferencia'>('efectivo');
+  const [isRegistrandoPago, setIsRegistrandoPago] = useState(false);
 
   // Filtros
   const [filtroEstado, setFiltroEstado] = useState<string>('todos');
@@ -279,39 +285,11 @@ export default function TurnosHoyPage() {
 
   const handleCompletarTurno = async () => {
     if (!selectedTurno) return;
-
-    // Mostrar dialog de confirmación
+    // Mostrar dialog de confirmación antes de completar (sin pagos pendientes)
     setConfirmMessage('¿Estás seguro de que deseas finalizar este turno?');
     setConfirmAction(() => async () => {
-      try {
-        setLoadingAction(selectedTurno.id);
-        setShowConfirmDialog(false);
-
-        const response = await authenticatedFetch(`/turnos/${selectedTurno.id}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            estado: 'completado',
-            notas_empleado: notas || undefined,
-          }),
-        });
-
-        if (response.ok) {
-          setShowNotasDialog(false);
-          setNotas('');
-          setSelectedTurno(null);
-          await loadTurnosHoy();
-        } else {
-          const errorData = await response.json();
-          console.error('Error del servidor:', errorData);
-          const errorMessage = errorData.estado?.[0] || errorData.detail || 'Error al completar el turno';
-          throw new Error(errorMessage);
-        }
-      } catch (error: any) {
-        console.error('Error completando turno:', error);
-        alert(error.message || 'No se pudo completar el turno. Por favor, intenta de nuevo.');
-      } finally {
-        setLoadingAction(null);
-      }
+      await completarTurnoEnBackend(selectedTurno.id, notas || '');
+      setShowConfirmDialog(false);
     });
     setShowConfirmDialog(true);
   };
@@ -417,8 +395,32 @@ export default function TurnosHoyPage() {
     // Validar horario
     const validacionHorario = validarHorarioTurno(turno);
 
+    const montoPendiente = getMontoPendiente(turno);
+    const tieneSaldoPendiente = montoPendiente > 0.01;
+
+    // Si hay saldo pendiente, ir primero al flujo de pago
+    if (tieneSaldoPendiente) {
+      if (validacionHorario.esAdvertencia) {
+        setConfirmMessage(validacionHorario.mensaje);
+        setConfirmAction(() => () => {
+          setSelectedTurno(turno);
+          setNotas(turno.notas_empleado || '');
+          setSelectedMetodoPago('efectivo');
+          setShowPagoDialog(true);
+          setShowConfirmDialog(false);
+        });
+        setShowConfirmDialog(true);
+      } else {
+        setSelectedTurno(turno);
+        setNotas(turno.notas_empleado || '');
+        setSelectedMetodoPago('efectivo');
+        setShowPagoDialog(true);
+      }
+      return;
+    }
+
+    // Si no hay saldo pendiente, mantener flujo actual de notas
     if (validacionHorario.esAdvertencia) {
-      // Mostrar advertencia pero permitir continuar
       setConfirmMessage(validacionHorario.mensaje);
       setConfirmAction(() => () => {
         setSelectedTurno(turno);
@@ -428,7 +430,6 @@ export default function TurnosHoyPage() {
       });
       setShowConfirmDialog(true);
     } else {
-      // Todo OK, abrir diálogo directamente
       setSelectedTurno(turno);
       setNotas(turno.notas_empleado || '');
       setShowNotasDialog(true);
@@ -498,6 +499,61 @@ export default function TurnosHoyPage() {
   const reproducirNotificacion = () => {
     const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGGS56+ijUBELTKXh8LdkHQU2jdXxy3ksBSV3yPDej0ALE1y06+qnVRQLRp/h8r5sIQYsgc7y2Yk2Chhju+vnpVISC0yl4fC3ZR0FNo3V8ct5LAYld8jw3o9ACxNctOvqp1UVC0af4fK+bCEGLIHO8tmJNgoZY7vr56VSEgtMpeHwt2UdBTaN1fHLeSw');
     audio.play().catch(e => console.log('No se pudo reproducir el sonido'));
+  };
+
+  const getMontoPendiente = (turno: Turno): number => {
+    try {
+      const pendienteRaw = (turno as any).monto_pendiente ?? turno.monto_pendiente;
+      if (pendienteRaw !== undefined && pendienteRaw !== null) {
+        const num = Number(pendienteRaw);
+        if (!isNaN(num)) return Math.max(0, num);
+      }
+
+      const precioBase = Number(
+        turno.precio_final || (turno as any).servicio_precio || turno.servicio?.precio || 0
+      );
+      const senia = Number((turno as any).senia_pagada || turno.senia_pagada || 0);
+      const calculado = precioBase - senia;
+      if (!isNaN(calculado)) {
+        return Math.max(0, calculado);
+      }
+    } catch (e) {
+      console.error('Error calculando monto pendiente del turno', e);
+    }
+
+    return 0;
+  };
+
+  const completarTurnoEnBackend = async (turnoId: number, notasEmpleado: string) => {
+    try {
+      setLoadingAction(turnoId);
+
+      const response = await authenticatedFetch(`/turnos/${turnoId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          estado: 'completado',
+          notas_empleado: notasEmpleado || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error del servidor:', errorData);
+        const errorMessage = errorData.estado?.[0] || errorData.detail || 'Error al completar el turno';
+        throw new Error(errorMessage);
+      }
+
+      setShowNotasDialog(false);
+      setShowPagoDialog(false);
+      setNotas('');
+      setSelectedTurno(null);
+      await loadTurnosHoy();
+    } catch (error: any) {
+      console.error('Error completando turno:', error);
+      alert(error.message || 'No se pudo completar el turno. Por favor, intenta de nuevo.');
+    } finally {
+      setLoadingAction(null);
+    }
   };
 
   const renderTurnoCard = (turno: Turno, isPasado: boolean = false) => {
@@ -711,19 +767,220 @@ export default function TurnosHoyPage() {
     );
   };
 
+  const montoPendienteSeleccionado = selectedTurno ? getMontoPendiente(selectedTurno) : 0;
+
+  const handleRegistrarPagoYCompletar = async () => {
+    if (!selectedTurno) return;
+
+    try {
+      setIsRegistrandoPago(true);
+      setLoadingAction(selectedTurno.id);
+
+      const montoPendiente = getMontoPendiente(selectedTurno);
+
+      // Si por alguna razón ya no hay saldo pendiente, solo completar
+      if (montoPendiente <= 0.01) {
+        await completarTurnoEnBackend(selectedTurno.id, notas || '');
+        return;
+      }
+
+      const responsePago = await authenticatedFetch(`/turnos/${selectedTurno.id}/registrar-pago/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          monto: montoPendiente,
+          metodo_pago: selectedMetodoPago,
+        }),
+      });
+
+      if (!responsePago.ok) {
+        const errorData = await responsePago.json();
+        console.error('Error registrando pago:', errorData);
+        const errorMessage = errorData.error || errorData.detail || 'Error al registrar el pago';
+        throw new Error(errorMessage);
+      }
+
+      await completarTurnoEnBackend(selectedTurno.id, notas || '');
+    } catch (error: any) {
+      console.error('Error en flujo de pago + finalización:', error);
+      alert(error.message || 'No se pudo registrar el pago. Por favor, intenta de nuevo.');
+    } finally {
+      setIsRegistrandoPago(false);
+      setLoadingAction(null);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* ...contenido existente de la página, incluyendo headers, filtros y cards de turnos ... */}
+
+      {/* Diálogo para notas al finalizar turno (flujo clásico sin pagos pendientes) */}
+      <Dialog open={showNotasDialog} onOpenChange={setShowNotasDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Finalizar turno</DialogTitle>
+            <DialogDescription>
+              Podés dejar una nota interna y luego confirmar la finalización del turno.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Textarea
+              placeholder="Notas internas sobre el turno (opcional)"
+              value={notas}
+              onChange={e => setNotas(e.target.value)}
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setShowNotasDialog(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleCompletarTurno}
+              disabled={loadingAction === (selectedTurno?.id ?? null)}
+            >
+              {loadingAction === (selectedTurno?.id ?? null) ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Finalizando...
+                </>
+              ) : (
+                'Finalizar turno'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo para registrar pago y finalizar turno cuando hay saldo pendiente */}
+      <Dialog open={showPagoDialog} onOpenChange={setShowPagoDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Registrar pago pendiente</DialogTitle>
+            <DialogDescription>
+              Este turno tiene un saldo pendiente. Elegí el método de cobro y se registrará el pago antes de finalizarlo.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedTurno && (
+            <div className="space-y-4">
+              <div className="rounded-md bg-card/60 border border-border px-4 py-3 text-sm">
+                <p className="font-medium text-foreground">
+                  {(selectedTurno as any).cliente_nombre || selectedTurno.cliente?.nombre_completo}{' '}
+                  – {(selectedTurno as any).servicio_nombre || selectedTurno.servicio?.nombre}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Turno del {formatDate(selectedTurno.fecha_hora)} a las {formatTime(selectedTurno.fecha_hora)}
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-md bg-background/60 border border-border px-2 py-1.5">
+                    <p className="text-muted-foreground">Precio</p>
+                    <p className="font-semibold text-foreground">
+                      ${' '}
+                      {Number(
+                        selectedTurno.precio_final ||
+                        (selectedTurno as any).servicio_precio ||
+                        selectedTurno.servicio?.precio ||
+                        0
+                      ).toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="rounded-md bg-background/60 border border-border px-2 py-1.5">
+                    <p className="text-muted-foreground">Seña pagada</p>
+                    <p className="font-semibold text-foreground">
+                      ${' '}
+                      {Number((selectedTurno as any).senia_pagada || selectedTurno.senia_pagada || 0).toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-700/60 px-2 py-1.5">
+                    <p className="text-emerald-700 dark:text-emerald-200 text-xs">Saldo pendiente</p>
+                    <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                      ${' '}
+                      {montoPendienteSeleccionado.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-primary" />
+                  Método de pago
+                </p>
+                <Select
+                  value={selectedMetodoPago}
+                  onValueChange={value => setSelectedMetodoPago(value as any)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Elegí cómo vas a cobrar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="efectivo">Efectivo / Caja</SelectItem>
+                    <SelectItem value="mercadopago_qr">Mercado Pago / QR</SelectItem>
+                    <SelectItem value="transferencia">Transferencia bancaria</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(selectedMetodoPago === 'mercadopago_qr' || selectedMetodoPago === 'transferencia') && (
+                  <p className="text-xs text-muted-foreground">
+                    Se registrará el pago como {selectedMetodoPago === 'mercadopago_qr' ? 'Mercado Pago QR' : 'Transferencia'} en el sistema.
+                    Podés usar tu app de cobros habitual para generar el QR real o los datos de transferencia.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Notas internas (opcional)</p>
+                <Textarea
+                  placeholder="Notas sobre el servicio, resultados, productos utilizados, etc."
+                  value={notas}
+                  onChange={e => setNotas(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-end gap-2 mt-4">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setShowPagoDialog(false)}
+              disabled={isRegistrandoPago}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRegistrarPagoYCompletar}
+              disabled={isRegistrandoPago || !selectedTurno}
+            >
+              {isRegistrandoPago ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Registrando pago...
+                </>
+              ) : (
+                'Registrar pago y finalizar'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Cargando turnos de hoy...</p>
-        </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <BeautifulSpinner label="Cargando turnos de hoy..." />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Header */}
         <div className="mb-8">
@@ -738,11 +995,11 @@ export default function TurnosHoyPage() {
 
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-4xl font-bold text-gray-900 mb-2 flex items-center gap-3">
-                <Calendar className="w-10 h-10 text-blue-600" />
+              <h1 className="text-4xl font-bold text-foreground mb-2 flex items-center gap-3">
+                <Calendar className="w-10 h-10 text-primary" />
                 Turnos de Hoy
               </h1>
-              <p className="text-gray-600 text-lg">
+              <p className="text-muted-foreground text-lg">
                 {formatDate(new Date().toISOString())}
               </p>
             </div>
@@ -843,7 +1100,7 @@ export default function TurnosHoyPage() {
 
             {/* Contador de resultados filtrados */}
             {(filtroEstado !== 'todos' || busquedaCliente) && (
-              <div className="mt-3 text-sm text-gray-600">
+              <div className="mt-3 text-sm text-muted-foreground">
                 Mostrando {turnosFiltrados.length} de {turnos.length} turnos
               </div>
             )}
@@ -855,8 +1112,8 @@ export default function TurnosHoyPage() {
           <Card>
             <CardContent className="p-4">
               <div className="text-center">
-                <div className="text-3xl font-bold text-blue-600">{turnosFiltrados.length}</div>
-                <div className="text-sm text-gray-600">
+                <div className="text-3xl font-bold text-primary">{turnosFiltrados.length}</div>
+                <div className="text-sm text-muted-foreground">
                   {filtroEstado !== 'todos' || busquedaCliente ? 'Filtrados' : 'Total Turnos'}
                 </div>
               </div>
@@ -869,7 +1126,7 @@ export default function TurnosHoyPage() {
                 <div className="text-3xl font-bold text-yellow-600">
                   {turnos.filter(t => t.estado === 'pendiente').length}
                 </div>
-                <div className="text-sm text-gray-600">Pendientes</div>
+                <div className="text-sm text-muted-foreground">Pendientes</div>
               </div>
             </CardContent>
           </Card>
@@ -880,7 +1137,7 @@ export default function TurnosHoyPage() {
                 <div className="text-3xl font-bold text-green-600">
                   {turnos.filter(t => t.estado === 'confirmado').length}
                 </div>
-                <div className="text-sm text-gray-600">Confirmados</div>
+                <div className="text-sm text-muted-foreground">Confirmados</div>
               </div>
             </CardContent>
           </Card>
@@ -891,7 +1148,7 @@ export default function TurnosHoyPage() {
                 <div className="text-3xl font-bold text-emerald-600">
                   {turnos.filter(t => t.estado === 'completado').length}
                 </div>
-                <div className="text-sm text-gray-600">Completados</div>
+                <div className="text-sm text-muted-foreground">Completados</div>
               </div>
             </CardContent>
           </Card>
@@ -899,9 +1156,9 @@ export default function TurnosHoyPage() {
 
         {/* Mensaje de error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center gap-2">
+          <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-700/60 rounded-lg p-4 mb-6 flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-red-600" />
-            <span className="text-red-800">{error}</span>
+            <span className="text-red-800 dark:text-red-100">{error}</span>
           </div>
         )}
 
@@ -910,11 +1167,11 @@ export default function TurnosHoyPage() {
           <Card>
             <CardContent className="p-12">
               <div className="text-center">
-                <Search className="w-20 h-20 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                <Search className="w-20 h-20 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-foreground mb-2">
                   No se encontraron turnos
                 </h3>
-                <p className="text-gray-500 mb-6">
+                <p className="text-muted-foreground mb-6">
                   No hay turnos que coincidan con los filtros aplicados
                 </p>
                 <Button
@@ -932,11 +1189,11 @@ export default function TurnosHoyPage() {
           <Card>
             <CardContent className="p-12">
               <div className="text-center">
-                <Calendar className="w-20 h-20 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                <Calendar className="w-20 h-20 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-foreground mb-2">
                   No tienes turnos para hoy
                 </h3>
-                <p className="text-gray-500 mb-6">
+                <p className="text-muted-foreground mb-6">
                   ¡Disfruta tu día libre o aprovecha para otras tareas!
                 </p>
                 <Button onClick={() => router.push('/dashboard/profesional/agenda')}>
@@ -1062,36 +1319,6 @@ export default function TurnosHoyPage() {
                   <XCircle className="w-4 h-4 mr-2" />
                 )}
                 Sí, cancelar turno
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Dialog de Confirmación */}
-        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Confirmación Requerida</DialogTitle>
-              <DialogDescription className="text-base">
-                {confirmMessage}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setShowConfirmDialog(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={() => {
-                  if (confirmAction) {
-                    confirmAction();
-                  }
-                }}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                Sí, continuar
               </Button>
             </DialogFooter>
           </DialogContent>

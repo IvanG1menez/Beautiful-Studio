@@ -331,6 +331,7 @@ class BilleteraSerializer(serializers.ModelSerializer):
     )
     movimientos = MovimientoBilleteraSerializer(many=True, read_only=True)
     ultimos_movimientos = serializers.SerializerMethodField()
+    esta_por_vencer = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = None  # Será importado dinámicamente
@@ -339,12 +340,22 @@ class BilleteraSerializer(serializers.ModelSerializer):
             "cliente",
             "cliente_nombre",
             "saldo",
+            "fecha_vencimiento",
+            "esta_por_vencer",
             "created_at",
             "updated_at",
             "movimientos",
             "ultimos_movimientos",
         ]
-        read_only_fields = ["id", "cliente", "saldo", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "cliente",
+            "saldo",
+            "fecha_vencimiento",
+            "esta_por_vencer",
+            "created_at",
+            "updated_at",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

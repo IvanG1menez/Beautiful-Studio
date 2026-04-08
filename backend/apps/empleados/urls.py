@@ -16,6 +16,11 @@ urlpatterns = [
         views.dias_trabajo_empleado,
         name="dias-trabajo-empleado",
     ),
+    path(
+        "<int:empleado_id>/servicios/",
+        views.EmpleadoServicioListView.as_view(),
+        name="empleado-servicios",
+    ),
     # Horarios de empleados
     path(
         "horarios/",

@@ -139,7 +139,7 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   }; return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-background py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         {/* Logo y título */}
         <div className="text-center">
@@ -148,10 +148,10 @@ export default function LoginPage() {
               <Scissors className="w-8 h-8 text-white" />
             </div>
           </div>
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
+          <h2 className="mt-6 text-3xl font-extrabold text-foreground">
             Beautiful Studio
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
+          <p className="mt-2 text-sm text-muted-foreground">
             Ingresa a tu cuenta para continuar
           </p>
         </div>
@@ -168,9 +168,9 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Mensaje de sesión expirada */}
               {sessionExpired && (
-                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
+                <Alert variant="default" className="bg-yellow-50 border-yellow-200 dark:bg-yellow-950/40 dark:border-yellow-700/60">
                   <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  <AlertDescription className="text-yellow-800">
+                  <AlertDescription className="text-yellow-800 dark:text-yellow-100">
                     Tu sesión ha expirado por inactividad. Por favor, inicia sesión nuevamente.
                   </AlertDescription>
                 </Alert>
@@ -247,7 +247,7 @@ export default function LoginPage() {
             {/* Divisor para Google SSO */}
             <div className="relative my-6">
               <Separator />
-              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-2 text-xs text-gray-500">
+              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
                 O continúa con
               </span>
             </div>
@@ -268,9 +268,9 @@ export default function LoginPage() {
             </div>
 
             {/* Credenciales de prueba */}
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-              <p className="text-xs font-medium text-gray-900 mb-2">Credenciales de prueba:</p>
-              <div className="space-y-1 text-xs text-gray-600">
+            <div className="mt-6 p-4 bg-card/80 border border-border rounded-lg">
+              <p className="text-xs font-medium text-foreground mb-2">Credenciales de prueba:</p>
+              <div className="space-y-1 text-xs text-muted-foreground">
                 <p><strong>Admin:</strong> admin@test.com / password1.2.3</p>
                 <p><strong>Profesional:</strong> profesional@test.com / password1.2.3</p>
                 <p><strong>Cliente:</strong> cliente@test.com / password1.2.3</p>
@@ -278,9 +278,9 @@ export default function LoginPage() {
 
               {/* Debug info */}
               {process.env.NODE_ENV === 'development' && (
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  <p className="text-xs font-medium text-gray-700 mb-1">Debug Mode:</p>
-                  <p className="text-xs text-gray-500">
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs font-medium text-foreground mb-1">Debug Mode:</p>
+                  <p className="text-xs text-muted-foreground">
                     Revisa la consola del navegador para información detallada de errores
                   </p>
                 </div>

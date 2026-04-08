@@ -221,54 +221,84 @@ def diagnostico_optimizacion_agenda(request):
     # PASO 3: Ejecutar proceso_2 (reacomodamiento)
     try:
         if turno.servicio and turno.servicio.permite_reacomodamiento:
-            resultado_proceso2 = iniciar_reacomodamiento(turno.id)
+            # Evitar doble disparo: al cancelar ya se dispara la signal automática.
+            log_pendiente = (
+                LogReasignacion.objects.select_related("turno_ofrecido__cliente")
+                .filter(turno_cancelado=turno, estado_final__isnull=True)
+                .order_by("-fecha_envio")
+                .first()
+            )
 
-            if resultado_proceso2.get("status") == "propuesta_enviada":
-                turno_candidato_id = resultado_proceso2.get("turno_id")
-                turno_candidato = Turno.objects.select_related("cliente").get(
-                    id=turno_candidato_id
-                )
-
+            if log_pendiente:
+                turno_candidato = log_pendiente.turno_ofrecido
                 resultado["logs"].append(
                     {
                         "paso": 3,
                         "accion": "Proceso 2 - Optimización de agenda",
                         "resultado": "exitoso",
-                        "detalle": f"Propuesta enviada al turno #{turno_candidato_id} (cliente: {turno_candidato.cliente.nombre_completo if turno_candidato.cliente else 'N/A'})",
+                        "detalle": f"Oferta ya generada automáticamente para turno #{turno_candidato.id if turno_candidato else 'N/A'}",
                     }
                 )
                 resultado["proceso_2"] = {
                     "status": "propuesta_enviada",
-                    "turno_candidato_id": turno_candidato_id,
+                    "turno_candidato_id": (
+                        turno_candidato.id if turno_candidato else None
+                    ),
                     "cliente_contactado": (
                         turno_candidato.cliente.nombre_completo
-                        if turno_candidato.cliente
+                        if turno_candidato and turno_candidato.cliente
                         else None
                     ),
                 }
             else:
-                status_map = {
-                    "sin_candidatos": "No se encontraron candidatos para rellenar el hueco",
-                    "turno_fuera_de_ventana": "Turno ya pasó o está muy cerca",
-                    "email_fallido": "Error al enviar email al candidato",
-                    "servicio_sin_reacomodamiento": "Servicio no permite reacomodamiento",
-                }
-                motivo = status_map.get(
-                    resultado_proceso2.get("status"), "Motivo desconocido"
-                )
+                resultado_proceso2 = iniciar_reacomodamiento(turno.id)
 
-                resultado["logs"].append(
-                    {
-                        "paso": 3,
-                        "accion": "Proceso 2 - Optimización de agenda",
-                        "resultado": "no_aplica",
-                        "detalle": motivo,
+                if resultado_proceso2.get("status") == "propuesta_enviada":
+                    turno_candidato_id = resultado_proceso2.get("turno_id")
+                    turno_candidato = Turno.objects.select_related("cliente").get(
+                        id=turno_candidato_id
+                    )
+
+                    resultado["logs"].append(
+                        {
+                            "paso": 3,
+                            "accion": "Proceso 2 - Optimización de agenda",
+                            "resultado": "exitoso",
+                            "detalle": f"Propuesta enviada al turno #{turno_candidato_id} (cliente: {turno_candidato.cliente.nombre_completo if turno_candidato.cliente else 'N/A'})",
+                        }
+                    )
+                    resultado["proceso_2"] = {
+                        "status": "propuesta_enviada",
+                        "turno_candidato_id": turno_candidato_id,
+                        "cliente_contactado": (
+                            turno_candidato.cliente.nombre_completo
+                            if turno_candidato.cliente
+                            else None
+                        ),
                     }
-                )
-                resultado["proceso_2"] = {
-                    "status": resultado_proceso2.get("status"),
-                    "motivo": motivo,
-                }
+                else:
+                    status_map = {
+                        "sin_candidatos": "No se encontraron candidatos para rellenar el hueco",
+                        "turno_fuera_de_ventana": "Turno ya pasó o está muy cerca",
+                        "email_fallido": "Error al enviar email al candidato",
+                        "servicio_sin_reacomodamiento": "Servicio no permite reacomodamiento",
+                    }
+                    motivo = status_map.get(
+                        resultado_proceso2.get("status"), "Motivo desconocido"
+                    )
+
+                    resultado["logs"].append(
+                        {
+                            "paso": 3,
+                            "accion": "Proceso 2 - Optimización de agenda",
+                            "resultado": "no_aplica",
+                            "detalle": motivo,
+                        }
+                    )
+                    resultado["proceso_2"] = {
+                        "status": resultado_proceso2.get("status"),
+                        "motivo": motivo,
+                    }
         else:
             resultado["logs"].append(
                 {
@@ -312,7 +342,6 @@ def diagnostico_fidelizacion_clientes(request):
 
     Body params (opcionales):
     - dias_inactividad: Filtro manual de días de inactividad (sobrescribe lógica automática)
-    - enviar_emails: Boolean, si se deben enviar realmente los emails (default: false para testing)
 
     Returns:
     - Lista de clientes contactados y resultado
@@ -332,12 +361,12 @@ def diagnostico_fidelizacion_clientes(request):
 
     # Obtener parámetros
     dias_inactividad_filtro = request.data.get("dias_inactividad")
-    enviar_emails = request.data.get("enviar_emails", False)
+    # En diagnóstico siempre enviamos los emails reales, sin modo simulación manual
+    enviar_emails = True
 
     logger.info(
-        "[DIAGNÓSTICO FIDELIZACIÓN] llamado con dias_inactividad=%s, enviar_emails=%s",
+        "[DIAGNÓSTICO FIDELIZACIÓN] llamado con dias_inactividad=%s (emails SIEMPRE enviados)",
         dias_inactividad_filtro,
-        enviar_emails,
     )
 
     if dias_inactividad_filtro:
@@ -420,6 +449,16 @@ def diagnostico_fidelizacion_clientes(request):
         cliente = candidato["cliente"]
         servicio = candidato["servicio"]
 
+        # Obtener saldo de billetera para mostrar en diagnóstico
+        saldo = Decimal("0.00")
+        tiene_saldo = False
+        try:
+            billetera = Billetera.objects.get(cliente=cliente)
+            saldo = billetera.saldo
+            tiene_saldo = saldo > 0
+        except Billetera.DoesNotExist:
+            tiene_saldo = False
+
         resultado_cliente = {
             "cliente_id": cliente.id,
             "nombre": cliente.nombre_completo,
@@ -437,6 +476,8 @@ def diagnostico_fidelizacion_clientes(request):
                 if servicio
                 else None
             ),
+            "saldo_billetera": float(saldo),
+            "tiene_saldo": tiene_saldo,
         }
 
         if enviar_emails:

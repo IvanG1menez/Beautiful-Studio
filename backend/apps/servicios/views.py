@@ -2,6 +2,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.utils import timezone
+from django.db.models import ProtectedError
 from .models import CategoriaServicio, Servicio, Sala
 from .serializers import (
     CategoriaServicioSerializer,
@@ -81,6 +82,38 @@ class ServicioDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Servicio.objects.all()
     serializer_class = ServicioSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def destroy(self, request, *args, **kwargs):
+        """Dar de baja lógica al servicio en lugar de eliminarlo.
+
+        Si un borrado físico violara integridad referencial (ProtectedError),
+        se devuelve 400 con un mensaje indicando que se recomienda desactivar.
+        """
+        servicio = self.get_object()
+
+        try:
+            servicio.is_active = False
+            servicio.save()
+
+            serializer = self.get_serializer(servicio)
+            return Response(
+                {
+                    "message": "Servicio desactivado exitosamente",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except ProtectedError:
+            return Response(
+                {
+                    "error": (
+                        "No es posible eliminar este registro porque cuenta con "
+                        "historial asociado. Se recomienda dar de baja (desactivar) "
+                        "en su lugar."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class SalaListView(generics.ListCreateAPIView):

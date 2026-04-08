@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -14,7 +15,6 @@ import {
   DollarSign,
   Edit,
   Eye,
-  Loader2,
   Plus,
   Scissors,
   Shield,
@@ -355,19 +355,16 @@ export default function DashboardAdminPage() {
   // Mostrar loading mientras se verifica autenticación
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Verificando autenticación...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <BeautifulSpinner label="Verificando autenticación del propietario..." />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Header del Dashboard */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-card/90 backdrop-blur shadow-sm border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-4">
@@ -375,10 +372,10 @@ export default function DashboardAdminPage() {
                 <Shield className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">
+                <h1 className="text-2xl font-bold text-foreground">
                   Panel de Administración
                 </h1>
-                <p className="text-gray-600">
+                <p className="text-muted-foreground">
                   ¡Hola, {user?.first_name}! Bienvenido al dashboard administrativo
                 </p>
               </div>
@@ -391,8 +388,8 @@ export default function DashboardAdminPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Mostrar error si existe */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-red-700">{error}</p>
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-700/60 rounded-lg">
+            <p className="text-red-700 dark:text-red-100">{error}</p>
             <Button
               variant="outline"
               size="sm"
@@ -413,33 +410,33 @@ export default function DashboardAdminPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-green-600">
-                  {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.ingresos_mes?.toFixed(2) || 0}`}
+                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : `$${stats?.ingresos_mes?.toFixed(2) || 0}`}
                 </div>
                 {renderDelta(stats?.ingresos_mes_variacion, 'vs mes pasado')}
               </CardContent>
             </Card>
 
-            <Card className="border-orange-200 bg-orange-50">
+            <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/40 dark:border-orange-700/60">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-orange-900">Comisión Pendiente</CardTitle>
                 <DollarSign className="h-4 w-4 text-orange-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-orange-700">
-                  {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
+                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
                 </div>
                 {renderDelta(stats?.comision_pendiente_variacion, 'vs mes pasado')}
               </CardContent>
             </Card>
 
-            <Card className="border-blue-200 bg-blue-50">
+            <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-700/60">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-blue-900">Dinero Recuperado</CardTitle>
                 <Sparkles className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-blue-700">
-                  {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : `$${stats?.dinero_recuperado?.toFixed(2) || 0}`}
+                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : `$${stats?.dinero_recuperado?.toFixed(2) || 0}`}
                 </div>
                 {renderDelta(stats?.dinero_recuperado_variacion, 'vs mes pasado')}
               </CardContent>
@@ -448,7 +445,7 @@ export default function DashboardAdminPage() {
 
           {/* Acciones rápidas */}
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-gray-900">Acciones rápidas</h2>
+            <h2 className="text-lg font-semibold text-foreground">Acciones rápidas</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -459,7 +456,7 @@ export default function DashboardAdminPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold">
-                        {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_clientes || 0}
+                        {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : stats?.total_clientes || 0}
                       </div>
                       <p className="text-xs text-muted-foreground">Clientes registrados</p>
                     </div>
@@ -483,7 +480,7 @@ export default function DashboardAdminPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold">
-                        {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_empleados || 0}
+                        {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : stats?.total_empleados || 0}
                       </div>
                       <p className="text-xs text-muted-foreground">Profesionales activos</p>
                     </div>
@@ -507,7 +504,7 @@ export default function DashboardAdminPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold">
-                        {loadingData ? <Loader2 className="w-6 h-6 animate-spin" /> : stats?.total_servicios || 0}
+                        {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : stats?.total_servicios || 0}
                       </div>
                       <p className="text-xs text-muted-foreground">Servicios configurados</p>
                     </div>
@@ -560,9 +557,8 @@ export default function DashboardAdminPage() {
 
                 <TabsContent value="proximos_48h">
                   {loadingData ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                      <span className="ml-2">Cargando turnos...</span>
+                    <div className="flex flex-col items-center justify-center py-8 gap-3">
+                      <BeautifulSpinner label="Cargando turnos..." />
                     </div>
                   ) : turnosAccion.length > 0 ? (
                     <div className="space-y-4">
@@ -586,10 +582,10 @@ export default function DashboardAdminPage() {
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm text-muted-foreground">
                                   {getClienteNombre(turno)} • {getEmpleadoNombre(turno)}
                                 </p>
-                                <p className="text-sm text-gray-500">
+                                <p className="text-sm text-muted-foreground">
                                   {dateFormatted} - {timeFormatted}
                                 </p>
                               </div>
@@ -613,17 +609,16 @@ export default function DashboardAdminPage() {
                     </div>
                   ) : (
                     <div className="text-center py-8">
-                      <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-500">No hay turnos próximos en las siguientes 48 horas</p>
+                      <Calendar className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-muted-foreground">No hay turnos próximos en las siguientes 48 horas</p>
                     </div>
                   )}
                 </TabsContent>
 
                 <TabsContent value="pendientes_pago">
                   {loadingData ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                      <span className="ml-2">Cargando turnos...</span>
+                    <div className="flex flex-col items-center justify-center py-8 gap-3">
+                      <BeautifulSpinner label="Cargando turnos pendientes de pago..." />
                     </div>
                   ) : turnosAccion.length > 0 ? (
                     <div className="space-y-4">
@@ -645,10 +640,10 @@ export default function DashboardAdminPage() {
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-700">
+                                <p className="text-sm text-muted-foreground">
                                   Profesional: {getEmpleadoNombre(turno)}
                                 </p>
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm text-muted-foreground">
                                   Completado: {dateFormatted} - {timeFormatted}
                                 </p>
                               </div>
@@ -668,17 +663,16 @@ export default function DashboardAdminPage() {
                   ) : (
                     <div className="text-center py-8">
                       <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
-                      <p className="text-gray-500">No hay turnos pendientes de pago</p>
-                      <p className="text-sm text-gray-400 mt-2">¡Todos los pagos están al día!</p>
+                      <p className="text-muted-foreground">No hay turnos pendientes de pago</p>
+                      <p className="text-sm text-muted-foreground mt-2">¡Todos los pagos están al día!</p>
                     </div>
                   )}
                 </TabsContent>
 
                 <TabsContent value="pendientes_aceptacion">
                   {loadingData ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                      <span className="ml-2">Cargando turnos...</span>
+                    <div className="flex flex-col items-center justify-center py-8 gap-3">
+                      <BeautifulSpinner label="Cargando turnos pendientes de aceptación..." />
                     </div>
                   ) : turnosAccion.length > 0 ? (
                     <div className="space-y-4">
@@ -700,10 +694,10 @@ export default function DashboardAdminPage() {
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-700">
+                                <p className="text-sm text-muted-foreground">
                                   {getClienteNombre(turno)} → {getEmpleadoNombre(turno)}
                                 </p>
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm text-muted-foreground">
                                   Solicitado para: {dateFormatted} - {timeFormatted}
                                 </p>
                               </div>
@@ -739,8 +733,8 @@ export default function DashboardAdminPage() {
                   ) : (
                     <div className="text-center py-8">
                       <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-4" />
-                      <p className="text-gray-500">No hay solicitudes pendientes</p>
-                      <p className="text-sm text-gray-400 mt-2">Todas las solicitudes han sido procesadas</p>
+                      <p className="text-muted-foreground">No hay solicitudes pendientes</p>
+                      <p className="text-sm text-muted-foreground mt-2">Todas las solicitudes han sido procesadas</p>
                     </div>
                   )}
                 </TabsContent>

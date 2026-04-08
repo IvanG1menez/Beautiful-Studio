@@ -231,6 +231,24 @@ export default function EditarProfesionalPage() {
             biografia: empleado.biografia || ''
           });
 
+          // Cargar servicio asociado actual del profesional
+          const serviciosResponse = await fetch(
+            `/api/empleados/${empleadoId}/servicios/?page_size=1000`,
+            { headers: getAuthHeaders() }
+          );
+
+          if (serviciosResponse.ok) {
+            const serviciosData = await serviciosResponse.json();
+            const relaciones = serviciosData.results || serviciosData;
+            const servicioActual = relaciones[0]?.servicio?.id;
+            if (servicioActual) {
+              setFormData(prev => ({
+                ...prev,
+                especialidades: String(servicioActual)
+              }));
+            }
+          }
+
           // Cargar horarios detallados
           const horariosResponse = await fetch(
             `/api/empleados/horarios/?empleado=${empleadoId}&page_size=1000`,
@@ -335,7 +353,6 @@ export default function EditarProfesionalPage() {
 
       // Preparar datos para enviar (solo datos de empleado, no de usuario)
       const dataToSend = {
-        especialidades: formData.especialidades,
         fecha_ingreso: formData.fecha_ingreso,
         horario_entrada: horarioEntrada,
         horario_salida: horarioSalida,
@@ -360,6 +377,30 @@ export default function EditarProfesionalPage() {
         showNotification(
           'Error al actualizar profesional',
           errorMessage || 'No se pudo actualizar el profesional. Por favor, verifica los datos e intenta nuevamente.',
+          'error'
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Guardar/actualizar servicio principal asociado
+      const servicioResponse = await fetch(
+        `/api/empleados/${empleadoId}/servicios/`,
+        {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            servicio: Number(formData.especialidades),
+            nivel_experiencia: 3,
+          })
+        }
+      );
+
+      if (!servicioResponse.ok) {
+        const servicioError = await servicioResponse.json();
+        showNotification(
+          'Error al guardar servicio',
+          `Se actualizaron los datos del profesional, pero falló la asociación del servicio: ${JSON.stringify(servicioError)}`,
           'error'
         );
         setLoading(false);

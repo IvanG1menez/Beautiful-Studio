@@ -234,26 +234,43 @@ def crear_usuarios_base():
         categoria.sala = sala
         categoria.save(update_fields=["sala"])
 
-    servicio, _ = Servicio.objects.get_or_create(
+    servicio_defaults = {
+        "descripcion": "Servicio integral de color, lavado y brushing.",
+        "precio": Decimal("1000.00"),
+        "descuento_reasignacion": Decimal("0.00"),
+        "permite_reacomodamiento": True,
+        "tipo_descuento_adelanto": "PORCENTAJE",
+        "valor_descuento_adelanto": Decimal("90.00"),
+        "tiempo_espera_respuesta": 20,
+        "porcentaje_sena": Decimal("10.00"),
+        "frecuencia_recurrencia_dias": 45,
+        "descuento_fidelizacion_pct": Decimal("90.00"),
+        "descuento_fidelizacion_monto": Decimal("0.00"),
+        "duracion_minutos": 120,
+        "is_active": True,
+    }
+
+    servicio, created = Servicio.objects.get_or_create(
         nombre="Color completo + Brushing",
         categoria=categoria,
-        defaults={
-            "descripcion": "Servicio integral de color, lavado y brushing.",
-            "precio": Decimal("25000.00"),
-            "descuento_reasignacion": Decimal("2000.00"),
-            "permite_reacomodamiento": True,
-            "tipo_descuento_adelanto": "PORCENTAJE",
-            "valor_descuento_adelanto": Decimal("10.00"),
-            "tiempo_espera_respuesta": 20,
-            "porcentaje_sena": Decimal("30.00"),
-            "frecuencia_recurrencia_dias": 45,
-            # Descuentos de fidelización de ejemplo
-            "descuento_fidelizacion_pct": Decimal("15.00"),
-            "descuento_fidelizacion_monto": Decimal("0.00"),
-            "duracion_minutos": 120,
-            "is_active": True,
-        },
+        defaults=servicio_defaults,
     )
+
+    # Dejar los números del servicio demo siempre fijos,
+    # aunque el servicio ya exista en la base.
+    update_fields = []
+    for field, value in servicio_defaults.items():
+        if getattr(servicio, field) != value:
+            setattr(servicio, field, value)
+            update_fields.append(field)
+
+    if update_fields:
+        servicio.save(update_fields=update_fields)
+
+    if created:
+        print("✅ Servicio demo creado con configuración fija")
+    else:
+        print("ℹ️ Servicio demo existente: configuración numérica actualizada")
 
     # Asegurar que el profesional tenga al menos un servicio asociado
     EmpleadoServicio.objects.get_or_create(
@@ -434,6 +451,182 @@ def crear_usuarios_base():
     billetera3, _ = Billetera.objects.get_or_create(cliente=cliente3)
     billetera3.saldo = Decimal("0.00")
     billetera3.save()
+
+    # Crear algunos turnos y pagos de ejemplo para que la base
+    # tenga datos "reales" que se vean en los paneles.
+    crear_turnos_demo(
+        owner_user=owner_user,
+        profesional_user=profesional_user,
+    )
+
+
+def crear_turnos_demo(owner_user, profesional_user):
+    """Crea turnos y pagos de ejemplo para clientes y profesional.
+
+    - Turno futuro reservado desde la web del cliente con pago MP aprobado.
+    - Turno futuro reservado desde el panel profesional con seña en efectivo.
+    - Turno pasado completado con pago por QR.
+    """
+
+    from decimal import Decimal
+    from datetime import timedelta
+
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone
+
+    from apps.clientes.models import Cliente
+    from apps.empleados.models import Empleado
+    from apps.mercadopago.models import PagoMercadoPago
+    from apps.servicios.models import Servicio
+    from apps.turnos.models import HistorialTurno, Turno
+
+    User = get_user_model()
+
+    now = timezone.now()
+
+    # Obtener objetos base
+    try:
+        empleado = Empleado.objects.get(user__email="profesional@beautifulstudio.com")
+    except Empleado.DoesNotExist:
+        print(
+            "⚠️ No se encontró el perfil Empleado del profesional demo; no se crean turnos."
+        )
+        return
+
+    servicio = (
+        Servicio.objects.filter(nombre="Color completo + Brushing").first()
+        or Servicio.objects.filter(is_active=True).first()
+    )
+    if not servicio:
+        print("⚠️ No se encontró un servicio activo para crear turnos demo.")
+        return
+
+    cliente1 = Cliente.objects.filter(
+        user__email="cliente1@beautifulstudio.com"
+    ).first()
+    cliente2 = Cliente.objects.filter(
+        user__email="cliente2@beautifulstudio.com"
+    ).first()
+    cliente3 = Cliente.objects.filter(
+        user__email="cliente3@beautifulstudio.com"
+    ).first()
+
+    if not cliente1 or not cliente2:
+        print("⚠️ No se encontraron clientes demo suficientes para crear turnos.")
+        return
+
+    # 1) Turno futuro confirmado con pago completo por Mercado Pago (web cliente)
+    fecha_turno1 = now + timedelta(days=1, hours=1)
+    turno1 = Turno.objects.create(
+        cliente=cliente1,
+        empleado=empleado,
+        servicio=servicio,
+        fecha_hora=fecha_turno1,
+        estado="confirmado",
+        precio_final=Decimal("1000.00"),
+        senia_pagada=Decimal("1000.00"),
+        canal_reserva="web_cliente",
+        metodo_pago="mercadopago",
+        es_cliente_registrado=True,
+        notas_cliente="Turno demo generado desde script de reset.",
+        fecha_pago_registrado=now,
+    )
+
+    HistorialTurno.objects.create(
+        turno=turno1,
+        usuario=cliente1.user,
+        accion="creacion",
+        estado_anterior=None,
+        estado_nuevo="confirmado",
+        observaciones="Turno creado automáticamente para demo.",
+    )
+
+    HistorialTurno.objects.create(
+        turno=turno1,
+        usuario=owner_user,
+        accion="pago_registrado",
+        estado_anterior="pendiente",
+        estado_nuevo="confirmado",
+        observaciones="Pago completo registrado (demo).",
+    )
+
+    PagoMercadoPago.objects.create(
+        turno=turno1,
+        cliente=cliente1,
+        preference_id="DEMO-PREF-1",
+        payment_id="DEMO-PAY-1",
+        init_point="https://www.mercadopago.com.ar/checkout/v1/demo",
+        monto=Decimal("1000.00"),
+        moneda="ARS",
+        descripcion="Turno demo pago completo",
+        estado="approved",
+    )
+
+    # 2) Turno futuro pendiente con seña en efectivo (panel profesional)
+    fecha_turno2 = now + timedelta(days=2, hours=3)
+    turno2 = Turno.objects.create(
+        cliente=cliente2,
+        empleado=empleado,
+        servicio=servicio,
+        fecha_hora=fecha_turno2,
+        estado="pendiente",
+        precio_final=Decimal("1000.00"),
+        senia_pagada=Decimal("100.00"),
+        canal_reserva="panel_profesional",
+        metodo_pago="efectivo",
+        es_cliente_registrado=True,
+        notas_cliente="Turno demo reservado desde panel profesional.",
+    )
+
+    HistorialTurno.objects.create(
+        turno=turno2,
+        usuario=profesional_user,
+        accion="creacion",
+        estado_anterior=None,
+        estado_nuevo="pendiente",
+        observaciones="Turno creado por el profesional (demo).",
+    )
+
+    # 3) Turno pasado completado con pago por QR (panel profesional)
+    fecha_turno3 = now - timedelta(days=3, hours=2)
+    turno3 = Turno.objects.create(
+        cliente=cliente1,
+        empleado=empleado,
+        servicio=servicio,
+        fecha_hora=fecha_turno3,
+        estado="completado",
+        precio_final=Decimal("1000.00"),
+        senia_pagada=Decimal("1000.00"),
+        canal_reserva="panel_profesional",
+        metodo_pago="mercadopago_qr",
+        es_cliente_registrado=True,
+        notas_cliente="Turno demo completado y cobrado por QR.",
+        fecha_pago_registrado=fecha_turno3,
+        fecha_hora_completado=fecha_turno3 + timedelta(hours=2),
+    )
+
+    HistorialTurno.objects.create(
+        turno=turno3,
+        usuario=profesional_user,
+        accion="completado",
+        estado_anterior="confirmado",
+        estado_nuevo="completado",
+        observaciones="Turno marcado como completado (demo).",
+    )
+
+    PagoMercadoPago.objects.create(
+        turno=turno3,
+        cliente=cliente1,
+        preference_id="DEMO-PREF-3",
+        payment_id="DEMO-PAY-3",
+        init_point="https://www.mercadopago.com.ar/checkout/v1/demo",
+        monto=Decimal("1000.00"),
+        moneda="ARS",
+        descripcion="Turno demo QR completado",
+        estado="approved",
+    )
+
+    print("✅ Turnos y pagos demo creados correctamente.")
 
 
 def run():

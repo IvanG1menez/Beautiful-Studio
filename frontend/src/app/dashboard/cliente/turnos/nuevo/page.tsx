@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -112,12 +113,12 @@ export default function NuevoTurnoPage() {
 
   // Estados para billetera
   const [billetera, setBilletera] = useState<Billetera | null>(null);
-  const [usarSaldo, setUsarSaldo] = useState(false);
   const [loadingBilletera, setLoadingBilletera] = useState(false);
 
   // Estados para dialog de confirmación
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [usarSaldoEnSena, setUsarSaldoEnSena] = useState(false);
+  const [pagarServicioCompleto, setPagarServicioCompleto] = useState(false);
 
   // Estados para el flujo de pago con Mercado Pago
   const [isWaitingPayment, setIsWaitingPayment] = useState(false);
@@ -319,57 +320,40 @@ export default function NuevoTurnoPage() {
     return precioServicio;
   };
 
-  // Calcular precio final con descuento de saldo
-  const calcularPrecioFinal = () => {
-    if (!servicioSeleccionado) return 0;
-
-    let precioServicio = getPrecioServicioConFidelizacion();
-
-    if (usarSaldo && billetera) {
-      const saldoDisponible = parseFloat(billetera.saldo);
-      const descuento = Math.min(precioServicio, saldoDisponible);
-      return Math.max(0, precioServicio - descuento);
-    }
-
-    return precioServicio;
-  };
-
-  const getSaldoUtilizado = () => {
-    if (!servicioSeleccionado || !billetera || !usarSaldo) return 0;
-
-    const precioServicio = getPrecioServicioConFidelizacion();
-    const saldoDisponible = parseFloat(billetera.saldo);
-
-    return Math.min(precioServicio, saldoDisponible);
-  };
-
   // Calcular monto de seña
   const calcularMontoSena = () => {
     if (!servicioSeleccionado) return 0;
     const precioServicio = getPrecioServicioConFidelizacion();
-    const porcentajeSena = parseFloat(servicioSeleccionado.porcentaje_sena || '0');
-    return (precioServicio * porcentajeSena) / 100;
+    return precioServicio * 0.5;
   };
 
-  // Calcular monto final de seña con descuento de billetera
-  const calcularSenaFinal = () => {
+  // Monto base a pagar ahora: seña o servicio completo
+  const calcularMontoBasePago = () => {
+    if (!servicioSeleccionado) return 0;
+    const precioServicio = getPrecioServicioConFidelizacion();
     const montoSena = calcularMontoSena();
+    return pagarServicioCompleto ? precioServicio : montoSena;
+  };
+
+  // Calcular monto final a pagar ahora con descuento de billetera
+  const calcularPagoFinalAhora = () => {
+    const montoBase = calcularMontoBasePago();
 
     if (usarSaldoEnSena && billetera) {
       const saldoDisponible = parseFloat(billetera.saldo);
-      const descuento = Math.min(montoSena, saldoDisponible);
-      return Math.max(0, montoSena - descuento);
+      const descuento = Math.min(montoBase, saldoDisponible);
+      return Math.max(0, montoBase - descuento);
     }
 
-    return montoSena;
+    return montoBase;
   };
 
-  // Calcular saldo utilizado en seña
-  const getSaldoUtilizadoEnSena = () => {
+  // Calcular saldo utilizado en el pago actual
+  const getSaldoUtilizadoEnPago = () => {
     if (!servicioSeleccionado || !billetera || !usarSaldoEnSena) return 0;
-    const montoSena = calcularMontoSena();
+    const montoBase = calcularMontoBasePago();
     const saldoDisponible = parseFloat(billetera.saldo);
-    return Math.min(montoSena, saldoDisponible);
+    return Math.min(montoBase, saldoDisponible);
   };
 
   // Cargar servicios cuando se selecciona categoría
@@ -623,8 +607,8 @@ export default function NuevoTurnoPage() {
     try {
       const fechaHora = `${fechaSeleccionada}T${horarioSeleccionado}:00`;
 
-      // Créditos de billetera a aplicar sobre la seña
-      const creditosAplicar = usarSaldoEnSena ? getSaldoUtilizadoEnSena() : 0;
+      // Créditos de billetera a aplicar sobre el pago actual (seña o total)
+      const creditosAplicar = usarSaldoEnSena ? getSaldoUtilizadoEnPago() : 0;
 
       const response = await fetch(`${API_BASE_URL}/mercadopago/preferencia-sin-turno/`, {
         method: 'POST',
@@ -634,7 +618,8 @@ export default function NuevoTurnoPage() {
           empleado_id: empleadoSeleccionado.id,
           fecha_hora: fechaHora,
           notas_cliente: notasCliente.trim() || '',
-          usar_sena: true,
+          usar_sena: !pagarServicioCompleto,
+          tipo_pago: pagarServicioCompleto ? 'PAGO_COMPLETO' : 'SENIA',
           creditos_a_aplicar: creditosAplicar,
           // Indicar al backend que aplique el descuento de fidelización
           aplicar_descuento_fidelizacion: isFromFidelizacion && beneficioFromQuery === 'descuento',
@@ -871,7 +856,7 @@ export default function NuevoTurnoPage() {
     };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-50 dark:from-background dark:to-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md shadow-xl border-0 text-center">
           <CardContent className="pt-12 pb-10 px-8 flex flex-col items-center gap-6">
 
@@ -1135,8 +1120,7 @@ export default function NuevoTurnoPage() {
                 <Label>Servicio</Label>
                 {loadingServicios ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                    <span className="text-gray-600">Cargando servicios...</span>
+                    <BeautifulSpinner label="Cargando servicios disponibles..." />
                   </div>
                 ) : serviciosFiltrados.length === 0 ? (
                   <p className="text-sm text-gray-600 text-center py-8">
@@ -1188,12 +1172,9 @@ export default function NuevoTurnoPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {loadingEmpleados ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin mr-3 text-primary" />
-                <div>
-                  <p className="font-medium text-gray-900">Buscando profesionales...</p>
-                  <p className="text-sm text-gray-600">Esto solo tomará un momento</p>
-                </div>
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <BeautifulSpinner label="Buscando profesionales disponibles..." />
+                <p className="text-xs text-muted-foreground">Esto solo tomará un momento.</p>
               </div>
             ) : empleados.length === 0 ? (
               <div className="text-center py-12">
@@ -1527,10 +1508,9 @@ export default function NuevoTurnoPage() {
               <div>
                 <Label className="mb-2 block">Horarios disponibles</Label>
                 {loadingHorarios ? (
-                  <div className="flex flex-col items-center justify-center py-12 bg-gray-50 rounded-lg">
-                    <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
-                    <p className="font-medium text-gray-900">Consultando disponibilidad...</p>
-                    <p className="text-sm text-gray-600">
+                  <div className="flex flex-col items-center justify-center py-12 bg-gray-50 dark:bg-secondary/20 rounded-lg gap-3">
+                    <BeautifulSpinner label="Consultando disponibilidad..." />
+                    <p className="text-xs text-muted-foreground text-center">
                       Verificando horarios para {new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
                         weekday: 'long',
                         day: 'numeric',
@@ -1689,84 +1669,6 @@ export default function NuevoTurnoPage() {
                   </div>
                 </div>
 
-                <div className="border-t border-gray-100"></div>
-
-                {/* Precio */}
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase mb-1">Precio</p>
-
-                  {isFromFidelizacion && !billetera && (
-                    <div className="mb-3 rounded-md bg-purple-50 border border-purple-200 px-3 py-2 text-sm text-purple-800">
-                      Estás aprovechando una <strong>promoción de fidelización</strong>. Este turno fue sugerido
-                      automáticamente según tu historial para que puedas ir directo al pago.
-                    </div>
-                  )}
-
-                  {/* Precio original */}
-                  <div className="flex items-baseline gap-1">
-                    <span className={`text-3xl font-bold ${usarSaldo && billetera ? 'text-gray-400 line-through' : 'text-primary'}`}>
-                      ${servicioSeleccionado?.precio}
-                    </span>
-                    <span className="text-sm text-gray-600">ARS</span>
-                  </div>
-
-                  {/* Selector de usar saldo */}
-                  {billetera && parseFloat(billetera.saldo) > 0 && (
-                    <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Wallet className="w-5 h-5 text-green-600" />
-                          <div>
-                            <p className="font-semibold text-green-900">Usar saldo disponible</p>
-                            <p className="text-sm text-green-700">
-                              Tienes {formatCurrency(parseFloat(billetera.saldo))} disponible
-                            </p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={usarSaldo}
-                          onCheckedChange={setUsarSaldo}
-                          className="data-[state=checked]:bg-green-600"
-                        />
-                      </div>
-
-                      {usarSaldo && (
-                        <div className="pt-3 border-t border-green-200">
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="text-green-700">Precio original:</span>
-                            <span className="font-medium">{formatCurrency(parseFloat(servicioSeleccionado?.precio || '0'))}</span>
-                          </div>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="text-green-700">Saldo utilizado:</span>
-                            <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizado())}</span>
-                          </div>
-                          <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
-                            <span className="text-green-900">Total a pagar:</span>
-                            <span className={calcularPrecioFinal() === 0 ? 'text-green-600' : 'text-green-900'}>
-                              {formatCurrency(calcularPrecioFinal())}
-                            </span>
-                          </div>
-                          {calcularPrecioFinal() === 0 && (
-                            <p className="text-xs text-green-600 mt-2 text-center">
-                              🎉 ¡Tu saldo cubre el 100% del servicio!
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Precio final cuando se usa saldo */}
-                  {usarSaldo && billetera && parseFloat(billetera.saldo) > 0 && calcularPrecioFinal() !== 0 && (
-                    <div className="mt-3 flex items-baseline gap-1">
-                      <span className="text-sm text-gray-600">Total a pagar:</span>
-                      <span className="text-3xl font-bold text-primary">
-                        {formatCurrency(calcularPrecioFinal())}
-                      </span>
-                      <span className="text-sm text-gray-600">ARS</span>
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
 
@@ -1836,36 +1738,64 @@ export default function NuevoTurnoPage() {
               <p className="text-sm text-gray-600">{servicioSeleccionado?.nombre}</p>
               <div className="flex justify-between items-center mt-2">
                 <span className="text-sm text-gray-600">Precio total:</span>
-                <span className="text-lg font-bold text-gray-900">{formatCurrency(parseFloat(servicioSeleccionado?.precio || '0'))}</span>
+                <span className="text-lg font-bold text-gray-900">{formatCurrency(getPrecioServicioConFidelizacion())}</span>
               </div>
             </div>
 
-            {/* Cálculo de seña */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <div className="flex items-start gap-2 mb-3">
-                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            {/* Cálculo de monto a pagar ahora (seña o servicio completo) */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="font-semibold text-blue-900 mb-1">Monto de Seña Requerido</h4>
+                  <h4 className="font-semibold text-blue-900 mb-1">
+                    {pagarServicioCompleto ? 'Pagar servicio completo ahora' : 'Monto de seña requerido'}
+                  </h4>
                   <p className="text-sm text-blue-700">
-                    Para reservar tu turno debes abonar el <strong>{servicioSeleccionado?.porcentaje_sena}%</strong> del precio total como seña
+                    {pagarServicioCompleto ? (
+                      'Vas a dejar el servicio completamente abonado. El día del turno no tendrás que pagar la diferencia.'
+                    ) : (
+                      <>
+                        Para reservar tu turno debés abonar el <strong>50%</strong> del precio total como seña.
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
 
-              <div className="flex justify-between items-center pt-3 border-t border-blue-200">
-                <span className="font-medium text-blue-900">Monto de seña:</span>
-                <span className="text-xl font-bold text-blue-900">{formatCurrency(calcularMontoSena())}</span>
+              <div className="flex items-center justify-between pt-3 border-t border-blue-200">
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-blue-800 uppercase">Modalidad de pago</span>
+                  <span className="text-sm text-blue-900">
+                    {pagarServicioCompleto ? 'Servicio completo' : 'Solo seña'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-blue-800">Solo seña</span>
+                  <Switch
+                    checked={pagarServicioCompleto}
+                    onCheckedChange={setPagarServicioCompleto}
+                    className="data-[state=checked]:bg-blue-600"
+                  />
+                  <span className="text-xs text-blue-800">Servicio completo</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-blue-900">
+                  {pagarServicioCompleto ? 'Monto a pagar ahora:' : 'Monto de seña:'}
+                </span>
+                <span className="text-xl font-bold text-blue-900">{formatCurrency(calcularMontoBasePago())}</span>
               </div>
             </div>
 
-            {/* Selector de usar saldo en seña */}
+            {/* Selector de usar saldo en el pago actual */}
             {billetera && parseFloat(billetera.saldo) > 0 && (
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Wallet className="w-5 h-5 text-green-600" />
                     <div>
-                      <p className="font-semibold text-green-900">Usar saldo de billetera</p>
+                      <p className="font-semibold text-green-900">Usar saldo de billetera en este pago</p>
                       <p className="text-sm text-green-700">
                         Saldo disponible: {formatCurrency(parseFloat(billetera.saldo))}
                       </p>
@@ -1881,22 +1811,24 @@ export default function NuevoTurnoPage() {
                 {usarSaldoEnSena && (
                   <div className="pt-3 border-t border-green-200 space-y-1">
                     <div className="flex justify-between text-sm">
-                      <span className="text-green-700">Seña requerida:</span>
-                      <span className="font-medium">{formatCurrency(calcularMontoSena())}</span>
+                      <span className="text-green-700">
+                        {pagarServicioCompleto ? 'Monto a pagar:' : 'Seña requerida:'}
+                      </span>
+                      <span className="font-medium">{formatCurrency(calcularMontoBasePago())}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-green-700">Saldo aplicado:</span>
-                      <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizadoEnSena())}</span>
+                      <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizadoEnPago())}</span>
                     </div>
                     <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
                       <span className="text-green-900">Total a pagar ahora:</span>
-                      <span className={calcularSenaFinal() === 0 ? 'text-green-600' : 'text-green-900'}>
-                        {formatCurrency(calcularSenaFinal())}
+                      <span className={calcularPagoFinalAhora() === 0 ? 'text-green-600' : 'text-green-900'}>
+                        {formatCurrency(calcularPagoFinalAhora())}
                       </span>
                     </div>
-                    {calcularSenaFinal() === 0 && (
+                    {calcularPagoFinalAhora() === 0 && (
                       <p className="text-xs text-green-600 mt-2 text-center">
-                        🎉 ¡Tu saldo cubre el 100% de la seña!
+                        🎉 ¡Tu saldo cubre el 100% de este pago!
                       </p>
                     )}
                   </div>
@@ -1909,11 +1841,13 @@ export default function NuevoTurnoPage() {
               <div className="flex justify-between items-center">
                 <span className="text-lg font-semibold text-gray-900">Pagarás ahora:</span>
                 <span className="text-2xl font-bold text-primary">
-                  {formatCurrency(usarSaldoEnSena ? calcularSenaFinal() : calcularMontoSena())}
+                  {formatCurrency(calcularPagoFinalAhora())}
                 </span>
               </div>
               <p className="text-xs text-gray-600 mt-2">
-                El resto se abona al finalizar el servicio
+                {pagarServicioCompleto
+                  ? 'Estarás pagando el servicio completo por adelantado.'
+                  : 'El resto se abona al finalizar el servicio.'}
               </p>
             </div>
           </div>
@@ -1932,7 +1866,7 @@ export default function NuevoTurnoPage() {
             <Button
               onClick={handleSubmit}
               disabled={loading}
-              className={usarSaldoEnSena && calcularSenaFinal() === 0 ? 'bg-green-600 hover:bg-green-700' : ''}
+              className={usarSaldoEnSena && calcularPagoFinalAhora() === 0 ? 'bg-green-600 hover:bg-green-700' : ''}
             >
               {loading ? (
                 <>

@@ -4,15 +4,18 @@ from rest_framework.response import Response
 from django.db.models import Count, Avg, Sum, Q
 from django.utils import timezone
 from datetime import timedelta
-from .models import Empleado, HorarioEmpleado
+from django.db.models import ProtectedError
+from .models import Empleado, HorarioEmpleado, EmpleadoServicio
 from .serializers import (
     EmpleadoSerializer,
     EmpleadoListSerializer,
     HorarioEmpleadoSerializer,
+    EmpleadoServicioSerializer,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.viewsets import ReadOnlyModelViewSet
+from django.shortcuts import get_object_or_404
 
 
 class IsPropietarioOrAdmin(permissions.BasePermission):
@@ -38,17 +41,13 @@ class EmpleadoListView(generics.ListCreateAPIView):
     Parámetros de consulta opcionales:
     - servicio: ID del servicio para filtrar profesionales que pueden realizarlo
     - disponible: true/false para filtrar por disponibilidad
-    - ordering: Campo para ordenar (por defecto: -promedio_calificacion)
-    
-    Módulo Inteligente:
-    - Por defecto ordena por promedio_calificacion descendente (ranking)
-    - Permite ordenar por: promedio_calificacion, total_encuestas, nombre
+    - ordering: Campo para ordenar (por defecto: nombre)
     """
 
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPageNumberPagination
-    ordering_fields = ['promedio_calificacion', 'total_encuestas', 'user__first_name']
-    ordering = ['-promedio_calificacion']  # Ranking por defecto
+    ordering_fields = ["user__first_name"]
+    ordering = ["user__first_name"]
 
     def get_queryset(self):
         queryset = Empleado.objects.select_related("user")
@@ -64,19 +63,17 @@ class EmpleadoListView(generics.ListCreateAPIView):
         if disponible is not None:
             is_disponible = disponible.lower() == "true"
             queryset = queryset.filter(is_disponible=is_disponible)
-        
-        # Aplicar ordenamiento (por defecto: ranking descendente)
-        ordering_param = self.request.query_params.get('ordering', '-promedio_calificacion')
+
+        # Aplicar ordenamiento (por defecto: nombre del usuario)
+        ordering_param = self.request.query_params.get("ordering", "user__first_name")
         if ordering_param:
-            # Validar que el campo sea permitido
-            field = ordering_param.lstrip('-')
-            if field in self.ordering_fields or ordering_param in ['-promedio_calificacion', 'promedio_calificacion']:
+            field = ordering_param.lstrip("-")
+            if field in self.ordering_fields:
                 queryset = queryset.order_by(ordering_param)
             else:
-                # Usar ordenamiento por defecto si el campo no es válido
-                queryset = queryset.order_by('-promedio_calificacion')
+                queryset = queryset.order_by("user__first_name")
         else:
-            queryset = queryset.order_by('-promedio_calificacion')
+            queryset = queryset.order_by("user__first_name")
 
         return queryset.distinct()
 
@@ -108,6 +105,43 @@ class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Empleado.objects.select_related("user")
     serializer_class = EmpleadoSerializer
     permission_classes = [IsPropietarioOrAdmin]
+
+    def destroy(self, request, *args, **kwargs):
+        """Dar de baja lógica al profesional en lugar de eliminarlo.
+
+        Si un borrado físico llegara a violar integridad referencial
+        (ProtectedError), se responde con 400 y un mensaje descriptivo.
+        """
+        empleado = self.get_object()
+        user = empleado.user
+
+        try:
+            empleado.is_active = False
+            empleado.save()
+
+            if user:
+                user.is_active = False
+                user.save()
+
+            serializer = self.get_serializer(empleado)
+            return Response(
+                {
+                    "message": "Profesional desactivado exitosamente",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except ProtectedError:
+            return Response(
+                {
+                    "error": (
+                        "No es posible eliminar este registro porque cuenta con "
+                        "historial asociado. Se recomienda dar de baja (desactivar) "
+                        "en su lugar."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 @api_view(["GET", "PATCH"])
@@ -209,6 +243,80 @@ class HorarioEmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = HorarioEmpleado.objects.select_related("empleado", "empleado__user")
     serializer_class = HorarioEmpleadoSerializer
     permission_classes = [IsPropietarioOrAdmin]
+
+
+class EmpleadoServicioListView(generics.ListCreateAPIView):
+    """Lista los servicios asociados a un profesional concreto.
+
+    Endpoint esperado por el frontend:
+    GET /empleados/<empleado_id>/servicios/
+
+    Devuelve un listado paginado de EmpleadoServicio para ese profesional.
+    """
+
+    serializer_class = EmpleadoServicioSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = CustomPageNumberPagination
+
+    def get_queryset(self):
+        empleado_id = self.kwargs.get("empleado_id")
+        return (
+            EmpleadoServicio.objects.filter(empleado_id=empleado_id)
+            .select_related("empleado", "servicio", "servicio__categoria")
+            .order_by("servicio__categoria__nombre", "servicio__nombre")
+        )
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsPropietarioOrAdmin()]
+        return [permissions.IsAuthenticated()]
+
+    def create(self, request, *args, **kwargs):
+        """Asociar/actualizar el servicio principal de un profesional.
+
+        Acepta cualquiera de estas claves en el body:
+        - servicio (int)
+        - servicio_id (int)
+        - especialidades (string/int)
+        """
+        empleado_id = self.kwargs.get("empleado_id")
+        empleado = get_object_or_404(Empleado, id=empleado_id)
+
+        servicio_id = (
+            request.data.get("servicio")
+            or request.data.get("servicio_id")
+            or request.data.get("especialidades")
+        )
+        nivel_experiencia = request.data.get("nivel_experiencia", 3)
+
+        if not servicio_id:
+            return Response(
+                {"error": "Debe enviar el servicio a asociar"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            servicio_id = int(servicio_id)
+            nivel_experiencia = int(nivel_experiencia)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "servicio y nivel_experiencia deben ser numéricos"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Esta UI maneja un servicio principal: limpiamos asociaciones previas.
+        EmpleadoServicio.objects.filter(empleado=empleado).exclude(
+            servicio_id=servicio_id
+        ).delete()
+
+        relacion, _ = EmpleadoServicio.objects.update_or_create(
+            empleado=empleado,
+            servicio_id=servicio_id,
+            defaults={"nivel_experiencia": nivel_experiencia},
+        )
+
+        serializer = self.get_serializer(relacion)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 @api_view(["POST"])
@@ -329,14 +437,7 @@ def dias_trabajo_empleado(request, empleado_id):
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def empleado_stats(request, empleado_id):
-    """
-    Obtener estadísticas del profesional:
-    - Turnos de hoy
-    - Turnos de esta semana
-    - Turnos completados del mes
-    - Ingresos del mes
-    - Calificación promedio
-    """
+    """Obtener estadísticas del profesional (turnos e ingresos)."""
     try:
         empleado = Empleado.objects.get(id=empleado_id)
     except Empleado.DoesNotExist:
@@ -345,10 +446,7 @@ def empleado_stats(request, empleado_id):
         )
 
     # Verificar que el usuario es el profesional o tiene permisos de propietario
-    if (
-        request.user.role == "profesional"
-        and empleado.user != request.user
-    ):
+    if request.user.role == "profesional" and empleado.user != request.user:
         return Response(
             {"error": "No tiene permisos para ver estas estadísticas"},
             status=status.HTTP_403_FORBIDDEN,
@@ -356,55 +454,61 @@ def empleado_stats(request, empleado_id):
 
     now = timezone.now()
     today = now.date()
-    
+
     # Inicio de la semana (lunes)
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=6)
-    
+
     # Inicio del mes
     start_of_month = today.replace(day=1)
-    
+
     # Importar Turno aquí para evitar importación circular
     from apps.turnos.models import Turno
-    
+
     # Turnos de hoy
-    turnos_hoy = Turno.objects.filter(
-        empleado=empleado,
-        fecha_hora__date=today,
-    ).exclude(estado='cancelado').count()
-    
+    turnos_hoy = (
+        Turno.objects.filter(
+            empleado=empleado,
+            fecha_hora__date=today,
+        )
+        .exclude(estado="cancelado")
+        .count()
+    )
+
     # Turnos de esta semana
-    turnos_semana = Turno.objects.filter(
-        empleado=empleado,
-        fecha_hora__date__gte=start_of_week,
-        fecha_hora__date__lte=end_of_week,
-    ).exclude(estado='cancelado').count()
-    
+    turnos_semana = (
+        Turno.objects.filter(
+            empleado=empleado,
+            fecha_hora__date__gte=start_of_week,
+            fecha_hora__date__lte=end_of_week,
+        )
+        .exclude(estado="cancelado")
+        .count()
+    )
+
     # Turnos completados del mes
     turnos_completados = Turno.objects.filter(
         empleado=empleado,
-        estado='completado',
+        estado="completado",
         fecha_hora__date__gte=start_of_month,
     ).count()
-    
+
     # Ingresos del mes
-    ingresos_mes = Turno.objects.filter(
-        empleado=empleado,
-        estado='completado',
-        fecha_hora__date__gte=start_of_month,
-    ).aggregate(total=Sum('precio_final'))['total'] or 0
-    
-    # Calificación promedio (simulada por ahora - puede implementarse con un modelo de reviews)
-    # Por ahora retornamos un valor fijo, pero puede calcularse de una tabla de calificaciones
-    calificacion_promedio = 4.5
-    
+    ingresos_mes = (
+        Turno.objects.filter(
+            empleado=empleado,
+            estado="completado",
+            fecha_hora__date__gte=start_of_month,
+        ).aggregate(total=Sum("precio_final"))["total"]
+        or 0
+    )
+
     return Response(
         {
             "turnos_hoy": turnos_hoy,
             "turnos_semana": turnos_semana,
             "turnos_completados": turnos_completados,
             "ingresos_mes": float(ingresos_mes),
-            "calificacion_promedio": calificacion_promedio,
         },
         status=status.HTTP_200_OK,
     )

@@ -1,6 +1,7 @@
 """Modelos para la app de turnos"""
 
 import uuid
+from decimal import Decimal
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -9,9 +10,7 @@ from simple_history.models import HistoricalRecords
 
 
 class Turno(models.Model):
-    """
-    Sistema de gestión de turnos/citas
-    """
+    """Sistema de gestión de turnos/citas"""
 
     ESTADO_CHOICES = [
         ("pendiente", "Pendiente"),
@@ -23,22 +22,42 @@ class Turno(models.Model):
         ("oferta_enviada", "Oferta enviada"),
         ("expirada", "Expirada"),
     ]
+
+    CANAL_RESERVA_CHOICES = [
+        ("web_cliente", "Web cliente"),
+        ("panel_profesional", "Panel profesional"),
+        ("panel_propietario", "Panel propietario"),
+    ]
+
+    METODO_PAGO_CHOICES = [
+        ("mercadopago", "Mercado Pago"),
+        ("mercadopago_qr", "Mercado Pago QR"),
+        ("efectivo", "Efectivo"),
+        ("transferencia", "Transferencia"),
+        ("mixto", "Mixto"),
+    ]
+
+    TIPO_PAGO_CHOICES = [
+        ("SIN_PAGO", "Sin pago"),
+        ("SENIA", "Seña"),
+        ("PAGO_COMPLETO", "Pago completo"),
+    ]
     """ Relación con otros modelos """
     cliente = models.ForeignKey(
         "clientes.Cliente",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="turnos",
         verbose_name="Cliente",
     )
     empleado = models.ForeignKey(
         "empleados.Empleado",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="turnos",
         verbose_name="Empleado",
     )
     servicio = models.ForeignKey(
         "servicios.Servicio",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="turnos",
         verbose_name="Servicio",
     )
@@ -63,6 +82,12 @@ class Turno(models.Model):
     notas_empleado = models.TextField(
         blank=True, null=True, verbose_name="Notas del empleado"
     )
+    motivo_cancelacion = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name="Motivo de cancelación",
+        help_text="Motivo ingresado por el cliente o el staff al cancelar el turno.",
+    )
     precio_final = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -76,6 +101,63 @@ class Turno(models.Model):
         default=0,
         verbose_name="Seña pagada",
         help_text="Monto de seña ya abonada por el cliente",
+    )
+    canal_reserva = models.CharField(
+        max_length=30,
+        choices=CANAL_RESERVA_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name="Canal de reserva",
+        help_text="Origen del turno (web cliente, panel profesional, panel propietario)",
+    )
+    metodo_pago = models.CharField(
+        max_length=30,
+        choices=METODO_PAGO_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name="Método de pago principal",
+        help_text="Método de pago utilizado para la seña o el pago total",
+    )
+    tipo_pago = models.CharField(
+        max_length=20,
+        choices=TIPO_PAGO_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name="Tipo de pago",
+        help_text="Indica si el turno fue abonado con seña o pago completo.",
+    )
+    es_cliente_registrado = models.BooleanField(
+        default=True,
+        verbose_name="Cliente ya registrado",
+        help_text="Indica si el cliente ya existía en la base al crear el turno",
+    )
+    walkin_nombre = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name="Nombre cliente walk-in",
+    )
+    walkin_dni = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        verbose_name="DNI cliente walk-in",
+    )
+    walkin_email = models.EmailField(
+        blank=True,
+        null=True,
+        verbose_name="Email cliente walk-in",
+    )
+    walkin_telefono = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        verbose_name="Teléfono cliente walk-in",
+    )
+    fecha_pago_registrado = models.DateTimeField(
+        blank=True,
+        null=True,
+        verbose_name="Fecha y hora de registro de pago",
     )
     fecha_hora_completado = models.DateTimeField(
         blank=True,
@@ -210,13 +292,50 @@ class Turno(models.Model):
         limite_cancelacion = self.fecha_hora - timedelta(hours=2)
         return timezone.now() < limite_cancelacion
 
+    def resolver_tipo_pago(self):
+        """Resuelve el tipo de pago del turno con fallback por inferencia.
+
+        Prioriza el campo persistido `tipo_pago`. Si no está definido,
+        infiere según el monto abonado versus el precio del servicio.
+        """
+
+        if self.tipo_pago in {"SIN_PAGO", "SENIA", "PAGO_COMPLETO"}:
+            return self.tipo_pago
+
+        precio_base = Decimal(self.precio_final or self.servicio.precio or 0)
+        monto_abonado = Decimal(self.senia_pagada or 0)
+
+        if monto_abonado <= Decimal("0.00"):
+            return "SIN_PAGO"
+
+        if precio_base > Decimal("0.00") and monto_abonado >= precio_base:
+            return "PAGO_COMPLETO"
+
+        return "SENIA"
+
+    @staticmethod
+    def calcular_pago_final(precio_total, monto_descuento=0, senia_pagada=0):
+        """Calcula el pago final restando seña y bono de Proceso 2.
+
+        Se usa como helper genérico para cualquier flujo que necesite
+        obtener el monto a cobrar luego de aplicar un descuento fijo
+        (bono de reacomodamiento) y la seña ya abonada.
+        """
+
+        precio = Decimal(precio_total or 0)
+        descuento = Decimal(monto_descuento or 0)
+        senia = Decimal(senia_pagada or 0)
+
+        monto = precio - descuento - senia
+        return max(Decimal("0.00"), monto)
+
 
 class HistorialTurno(models.Model):
     """
     Historial de cambios en los turnos
     """
 
-    turno = models.ForeignKey(Turno, on_delete=models.CASCADE, related_name="historial")
+    turno = models.ForeignKey(Turno, on_delete=models.PROTECT, related_name="historial")
     usuario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -282,6 +401,19 @@ class LogReasignacion(models.Model):
         decimal_places=2,
         default=0,
         verbose_name="Monto de descuento",
+    )
+    tipo_pago_cliente_ofertado = models.CharField(
+        max_length=20,
+        choices=Turno.TIPO_PAGO_CHOICES,
+        blank=True,
+        null=True,
+        verbose_name="Tipo de pago del cliente ofertado",
+    )
+    regla_descuento_aplicada = models.CharField(
+        max_length=80,
+        blank=True,
+        null=True,
+        verbose_name="Regla de descuento aplicada",
     )
     token = models.UUIDField(
         default=uuid.uuid4,

@@ -4,6 +4,7 @@ from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import ProtectedError
 
 from .models import Cliente
 from .serializers import (
@@ -75,23 +76,43 @@ class ClienteViewSet(viewsets.ModelViewSet):
             return ClienteDetailSerializer
 
     def destroy(self, request, *args, **kwargs):
-        """
-        Eliminar un cliente y su usuario asociado
+        """Dar de baja lógica al cliente en lugar de eliminarlo.
+
+        Si existiera un intento de borrado físico que viole integridad
+        referencial (ProtectedError), se devuelve un error 400 con mensaje
+        descriptivo recomendando la desactivación.
         """
         instance = self.get_object()
         user = instance.user
 
-        # Eliminar el cliente primero
-        instance.delete()
+        try:
+            instance.is_active = False
+            instance.save()
 
-        # Luego eliminar el usuario
-        if user:
-            user.delete()
+            # Opcionalmente desactivar también el usuario asociado
+            if user:
+                user.is_active = False
+                user.save()
 
-        return Response(
-            {"message": "Cliente eliminado exitosamente"},
-            status=status.HTTP_204_NO_CONTENT,
-        )
+            serializer = self.get_serializer(instance)
+            return Response(
+                {
+                    "message": "Cliente desactivado exitosamente",
+                    "data": serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except ProtectedError:
+            return Response(
+                {
+                    "error": (
+                        "No es posible eliminar este registro porque cuenta con "
+                        "historial asociado. Se recomienda dar de baja (desactivar) "
+                        "en su lugar."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @action(detail=False, methods=["get"])
     def vip(self, request):
@@ -157,6 +178,103 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 "message": "Historial de turnos no disponible - funcionalidad pendiente",
             }
         )
+
+    @action(detail=False, methods=["get"], url_path="buscar-por-dni")
+    def buscar_por_dni(self, request):
+        """Buscar cliente por DNI del usuario asociado.
+
+        Devuelve un envoltorio simple indicando si el cliente existe o no,
+        para que el panel profesional/propietario pueda decidir si continúa
+        la reserva como cliente ya registrado o walk-in.
+        """
+
+        dni = (request.query_params.get("dni") or "").strip()
+        if not dni:
+            return Response(
+                {"error": "Debe proporcionar el parámetro 'dni'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente = (
+            Cliente.objects.select_related("user")
+            .filter(user__dni=dni, is_active=True)
+            .first()
+        )
+
+        if not cliente:
+            return Response({"registrado": False, "cliente": None})
+
+        serializer = ClienteDetailSerializer(cliente)
+
+        # Advertencia útil para el panel profesional: si el cliente ya tiene
+        # un turno activo/futuro, devolverlo para evitar doble reserva.
+        turno_existente = None
+        try:
+            from django.utils import timezone
+            from apps.turnos.models import Turno
+
+            filtros = {
+                "cliente": cliente,
+                "estado__in": ["pendiente", "confirmado", "en_proceso"],
+                "fecha_hora__gte": timezone.now(),
+            }
+
+            # Si quien busca es profesional, priorizar su propia agenda.
+            if hasattr(request.user, "profesional_profile"):
+                filtros["empleado"] = request.user.profesional_profile
+
+            turno_obj = (
+                Turno.objects.select_related("servicio", "empleado__user")
+                .filter(**filtros)
+                .order_by("fecha_hora")
+                .first()
+            )
+
+            if turno_obj:
+                turno_existente = {
+                    "id": turno_obj.id,
+                    "fecha_hora": turno_obj.fecha_hora,
+                    "estado": turno_obj.estado,
+                    "estado_display": turno_obj.get_estado_display(),
+                    "servicio_nombre": getattr(turno_obj.servicio, "nombre", ""),
+                    "empleado_nombre": getattr(
+                        turno_obj.empleado, "nombre_completo", ""
+                    ),
+                }
+        except Exception:
+            # No romper el flujo de búsqueda por errores auxiliares.
+            turno_existente = None
+
+        return Response(
+            {
+                "registrado": True,
+                "cliente": serializer.data,
+                "turno_existente": turno_existente,
+            }
+        )
+
+    @action(detail=False, methods=["get"], url_path="buscar-por-email")
+    def buscar_por_email(self, request):
+        """Buscar cliente por email del usuario asociado."""
+
+        email = (request.query_params.get("email") or "").strip().lower()
+        if not email:
+            return Response(
+                {"error": "Debe proporcionar el parámetro 'email'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente = (
+            Cliente.objects.select_related("user")
+            .filter(user__email__iexact=email, is_active=True)
+            .first()
+        )
+
+        if not cliente:
+            return Response({"registrado": False, "cliente": None})
+
+        serializer = ClienteDetailSerializer(cliente)
+        return Response({"registrado": True, "cliente": serializer.data})
 
     @action(detail=False, methods=["get"])
     def mis_clientes(self, request):

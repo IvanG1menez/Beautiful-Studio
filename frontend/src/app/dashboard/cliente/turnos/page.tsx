@@ -2,10 +2,13 @@
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatDate, formatDateTimeReadable, formatTime } from '@/lib/dateUtils';
 import { Calendar, CalendarDays, CheckCircle, Clock, Filter, Loader2, Plus, Search, User, X, XCircle } from 'lucide-react';
@@ -28,9 +31,17 @@ interface Turno {
   fecha_hora_fin: string;
   estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio';
   estado_display: string;
-  precio_final: string;
+  precio_final: string | null;
+  servicio_precio?: string;
+  senia_pagada?: string;
+  monto_pendiente?: string;
+  monto_pendiente_original?: string;
+  descuento_aplicado?: string;
   puede_cancelar: boolean;
   tiene_pago_mp?: boolean;
+  pagado_completo?: boolean;
+  elegible_credito_cancelacion?: boolean;
+  monto_credito_cancelacion?: string;
   notas_cliente?: string;
   notas_empleado?: string;
   created_at: string;
@@ -55,8 +66,8 @@ export default function TurnosClientePage() {
 
   // Estados para modales
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState({ title: '', description: '' });
+  const [confirmCreditMessage, setConfirmCreditMessage] = useState('');
 
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState({
@@ -68,6 +79,13 @@ export default function TurnosClientePage() {
   // Estado para comprobante de pago
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [comprobanteData, setComprobanteData] = useState<any | null>(null);
+
+  // Estado para cancelación con motivo
+  const [turnoACancelar, setTurnoACancelar] = useState<Turno | null>(null);
+  const [motivoCancelacion, setMotivoCancelacion] = useState('');
+  const [cancelError, setCancelError] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const motivoCancelacionValido = motivoCancelacion.trim().length > 0;
 
   // Cargar turnos
   const fetchTurnos = async () => {
@@ -103,18 +121,80 @@ export default function TurnosClientePage() {
     fetchTurnos();
   }, []);
 
-  // Función para mostrar confirmación modal
-  const showConfirmDialog = (title: string, description: string, action: () => void) => {
-    setConfirmMessage({ title, description });
-    setConfirmAction(() => action);
+  // Función para abrir el diálogo de cancelación con mensaje según crédito
+  const showConfirmDialog = (turno: Turno) => {
+    const fecha = formatDateTimeReadable(turno.fecha_hora);
+    const baseDescription = `¿Estás seguro de que deseas cancelar el turno de "${turno.servicio_nombre}" para el ${fecha}?`;
+
+    let creditMessage = '';
+    if (turno.elegible_credito_cancelacion && turno.monto_credito_cancelacion) {
+      const monto = parseFloat(turno.monto_credito_cancelacion || '0');
+      creditMessage = `Al cancelar este turno vas a recibir $${monto.toFixed(2)} de crédito en tu billetera.`;
+    } else {
+      creditMessage = 'No vas a recibir crédito, simplemente se va a cancelar el turno.';
+    }
+
+    setTurnoACancelar(turno);
+    setMotivoCancelacion('');
+    setCancelError('');
+    setConfirmMessage({ title: '¿Cancelar turno?', description: baseDescription });
+    setConfirmCreditMessage(creditMessage);
     setConfirmDialogOpen(true);
   };
 
-  const handleConfirmAction = () => {
-    if (confirmAction) {
-      confirmAction();
+  const handleConfirmAction = async () => {
+    if (!turnoACancelar) return;
+
+    const motivo = motivoCancelacion.trim();
+    if (!motivo) {
+      setCancelError('Por favor ingresá un motivo de cancelación.');
+      return;
     }
-    setConfirmDialogOpen(false);
+
+    setCancelLoading(true);
+    setCancelError('');
+
+    try {
+      const response = await fetch(`/api/turnos/${turnoACancelar.id}/`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ motivo }),
+      });
+
+      if (response.ok) {
+        let descripcion = 'El turno ha sido cancelado correctamente.';
+        try {
+          const data = await response.json();
+          const montoCredito =
+            typeof data.monto_credito === 'number'
+              ? data.monto_credito
+              : parseFloat(data.monto_credito || '0');
+
+          if (data.credito_aplicado && montoCredito > 0) {
+            descripcion = `El turno ha sido cancelado correctamente. Vas a recibir $${montoCredito.toFixed(2)} de crédito en tu billetera.`;
+          } else if (!Number.isNaN(montoCredito)) {
+            descripcion = 'El turno ha sido cancelado correctamente. No se generó crédito en tu billetera.';
+          }
+        } catch {
+          // Si no se puede parsear el cuerpo, usamos el mensaje por defecto
+        }
+
+        showNotification('Turno cancelado', descripcion, 'success');
+        setConfirmDialogOpen(false);
+        setTurnoACancelar(null);
+        window.dispatchEvent(new Event('wallet-updated'));
+        fetchTurnos();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || 'No se pudo cancelar el turno';
+        setCancelError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setCancelError('Error de conexión. No se pudo conectar con el servidor');
+    } finally {
+      setCancelLoading(false);
+    }
   };
 
   // Función para mostrar notificación modal
@@ -145,40 +225,9 @@ export default function TurnosClientePage() {
     }
   };
 
-  // Cancelar turno
-  const handleCancelarTurno = async (turnoId: number, servicioNombre: string, fecha: string) => {
-    showConfirmDialog(
-      '¿Cancelar turno?',
-      `¿Estás seguro de que deseas cancelar el turno de "${servicioNombre}" para el ${fecha}?`,
-      async () => {
-        try {
-          const response = await fetch(`/api/turnos/${turnoId}/`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-          });
-
-          if (response.ok) {
-            showNotification(
-              'Turno cancelado',
-              'El turno ha sido cancelado correctamente.',
-              'success'
-            );
-            fetchTurnos();
-          } else {
-            const errorData = await response.json().catch(() => ({}));
-            const errorMessage = errorData.error || 'No se pudo cancelar el turno';
-            showNotification('Error al cancelar', errorMessage, 'error');
-          }
-        } catch (error) {
-          console.error('Error:', error);
-          showNotification(
-            'Error de conexión',
-            'No se pudo conectar con el servidor',
-            'error'
-          );
-        }
-      }
-    );
+  // Cancelar turno: abre diálogo con detalle de crédito y motivo
+  const handleCancelarTurno = (turno: Turno) => {
+    showConfirmDialog(turno);
   };
 
   // Filtrar turnos
@@ -334,8 +383,7 @@ export default function TurnosClientePage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin" />
-        <span className="ml-2">Cargando turnos...</span>
+        <BeautifulSpinner label="Cargando tus turnos..." />
       </div>
     );
   }
@@ -372,7 +420,7 @@ export default function TurnosClientePage() {
             </Button>
           </div>
 
-          {/* Filtros principales (Próximos/Historial/Todos) */}
+          {/* Filtros principales (Próximos/Auditoría/Todos) */}
           <div className="flex gap-2 mt-4 flex-wrap">
             <Button
               variant={filter === 'proximos' ? 'default' : 'outline'}
@@ -388,7 +436,7 @@ export default function TurnosClientePage() {
               onClick={() => setFilter('pasados')}
             >
               <Clock className="w-4 h-4 mr-2" />
-              Historial
+              Auditoría
             </Button>
             <Button
               variant={filter === 'todos' ? 'default' : 'outline'}
@@ -566,7 +614,30 @@ export default function TurnosClientePage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-gray-700">
-                        <span className="text-lg font-bold text-primary">${turno.precio_final}</span>
+                        <span className="text-lg font-bold text-primary flex flex-col items-start">
+                          {(() => {
+                            const montoPendiente = parseFloat(turno.monto_pendiente || turno.precio_final || '0');
+                            const montoOriginal = parseFloat(turno.monto_pendiente_original || turno.monto_pendiente || turno.precio_final || '0');
+                            const descuento = parseFloat(turno.descuento_aplicado || '0');
+
+                            if (descuento > 0 && montoOriginal > 0) {
+                              return (
+                                <>
+                                  <span className="line-through text-gray-400 text-xs">Antes ${montoOriginal.toFixed(2)}</span>
+                                  <span className="text-green-700 font-bold text-sm">Ahora ${montoPendiente.toFixed(2)}</span>
+                                  <span className="text-xs text-green-600">Bono aplicado: -${descuento.toFixed(2)}</span>
+                                </>
+                              );
+                            }
+
+                            return <span>${montoPendiente.toFixed(2)}</span>;
+                          })()}
+                          {turno.pagado_completo && (
+                            <span className="mt-1 text-xs font-semibold text-green-700">
+                              Servicio pagado completo
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </div>
 
@@ -614,11 +685,7 @@ export default function TurnosClientePage() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleCancelarTurno(
-                          turno.id,
-                          turno.servicio_nombre,
-                          formatDateTimeReadable(turno.fecha_hora)
-                        )}
+                        onClick={() => handleCancelarTurno(turno)}
                         className="whitespace-nowrap"
                       >
                         <X className="w-4 h-4 mr-1" />
@@ -640,7 +707,7 @@ export default function TurnosClientePage() {
                 </h3>
                 <p className="text-gray-500 mb-6 max-w-md mx-auto">
                   {filter === 'proximos' && searchTerm === '' && filtrosActivos === 0 && 'No tienes turnos próximos. ¡Agenda tu próxima cita!'}
-                  {filter === 'pasados' && searchTerm === '' && filtrosActivos === 0 && 'No tienes turnos en el historial'}
+                  {filter === 'pasados' && searchTerm === '' && filtrosActivos === 0 && 'No tienes turnos en la auditoría'}
                   {filter === 'todos' && searchTerm === '' && filtrosActivos === 0 && 'No tienes turnos agendados'}
                   {(searchTerm !== '' || filtrosActivos > 0) && 'No hay turnos que coincidan con los filtros seleccionados. Intenta ajustar tu búsqueda.'}
                 </p>
@@ -732,19 +799,59 @@ export default function TurnosClientePage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Modal de confirmación */}
+      {/* Modal de confirmación y motivo de cancelación */}
       <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmMessage.title}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmMessage.description}
+            <AlertDialogDescription asChild>
+              <div className="space-y-4">
+                <p>{confirmMessage.description}</p>
+                {confirmCreditMessage && (
+                  <p className="text-sm font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-md p-2">
+                    {confirmCreditMessage}
+                  </p>
+                )}
+
+                <div className="space-y-2 mt-2">
+                  <Label htmlFor="motivo-cancelacion">Motivo de la cancelación</Label>
+                  <Textarea
+                    id="motivo-cancelacion"
+                    placeholder="Contanos brevemente por qué necesitás cancelar este turno"
+                    value={motivoCancelacion}
+                    onChange={(e) => {
+                      setMotivoCancelacion(e.target.value);
+                      if (cancelError && e.target.value.trim()) {
+                        setCancelError('');
+                      }
+                    }}
+                    rows={3}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Este comentario es obligatorio para cancelar el turno.
+                  </p>
+                  {cancelError && (
+                    <p className="text-sm text-red-600">{cancelError}</p>
+                  )}
+                </div>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>No, mantener turno</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmAction} className="bg-red-600 hover:bg-red-700">
-              Sí, cancelar turno
+            <AlertDialogCancel disabled={cancelLoading}>No, mantener turno</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmAction}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={cancelLoading || !motivoCancelacionValido}
+            >
+              {cancelLoading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Cancelando...
+                </span>
+              ) : (
+                'Sí, cancelar turno'
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

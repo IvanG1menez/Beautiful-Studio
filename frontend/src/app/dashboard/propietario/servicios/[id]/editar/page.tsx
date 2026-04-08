@@ -7,6 +7,12 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+interface CategoriaApiItem {
+  id: number;
+  nombre: string;
+  is_active: boolean;
+}
+
 interface Servicio {
   id: number;
   nombre: string;
@@ -19,8 +25,14 @@ interface Servicio {
   permite_reacomodamiento: boolean;
   tipo_descuento_adelanto: 'PORCENTAJE' | 'MONTO_FIJO';
   valor_descuento_adelanto: string;
+  monto_sena_fijo?: string | number;
+  bono_reacomodamiento_senia?: string | number;
+  bono_reacomodamiento_pago_completo?: string | number;
   tiempo_espera_respuesta: number;
   porcentaje_sena: string;
+  horas_minimas_credito_cancelacion?: number;
+  porcentaje_devolucion_sena?: string | number;
+  porcentaje_devolucion_servicio_completo?: string | number;
   frecuencia_recurrencia_dias: number;
   descuento_fidelizacion_pct: number;
   descuento_fidelizacion_monto: number;
@@ -50,21 +62,41 @@ export default function EditarServicioPage() {
         ]);
 
         if (categoriasRes.ok) {
-          const categoriasData = await categoriasRes.json();
-          const categoriasActivas = (categoriasData.results || categoriasData).filter(
-            (cat: any) => cat.is_active
-          );
+          const categoriasData = await categoriasRes.json() as { results?: CategoriaApiItem[] } | CategoriaApiItem[];
+          const categoriasArray = Array.isArray(categoriasData)
+            ? categoriasData
+            : (categoriasData.results || []);
+          const categoriasActivas = categoriasArray.filter((cat) => cat.is_active);
           setCategorias(categoriasActivas);
         }
 
         if (servicioRes.ok) {
           const servicio: Servicio = await servicioRes.json();
-          // Determinar tipo de descuento de fidelización según los valores existentes
-          let tipoDescuentoFidelizacion: 'PORCENTAJE' | 'MONTO_FIJO' = 'PORCENTAJE';
+          const precioNumero = parseFloat(servicio.precio || '0') || 0;
+
+          // Determinar monto de fidelización según los valores existentes
+          let descuentoFidelizacionMonto = 0;
           if ((servicio.descuento_fidelizacion_monto ?? 0) > 0) {
-            tipoDescuentoFidelizacion = 'MONTO_FIJO';
-          } else if ((servicio.descuento_fidelizacion_pct ?? 0) > 0) {
-            tipoDescuentoFidelizacion = 'PORCENTAJE';
+            descuentoFidelizacionMonto = Number(servicio.descuento_fidelizacion_monto);
+          } else if ((servicio.descuento_fidelizacion_pct ?? 0) > 0 && precioNumero > 0) {
+            descuentoFidelizacionMonto = (servicio.descuento_fidelizacion_pct / 100) * precioNumero;
+          }
+
+          // Determinar monto de descuento por adelanto según configuración existente
+          let descuentoAdelantoMonto = 0;
+          if (servicio.valor_descuento_adelanto != null) {
+            const valor = Number(servicio.valor_descuento_adelanto) || 0;
+            if (servicio.tipo_descuento_adelanto === 'MONTO_FIJO') {
+              descuentoAdelantoMonto = valor;
+            } else if (servicio.tipo_descuento_adelanto === 'PORCENTAJE' && precioNumero > 0) {
+              descuentoAdelantoMonto = (valor / 100) * precioNumero;
+            }
+          }
+
+          // Calcular monto estimado de seña a partir del porcentaje guardado
+          let montoSena = 0;
+          if ((servicio.porcentaje_sena ?? 0) > 0 && precioNumero > 0) {
+            montoSena = (Number(servicio.porcentaje_sena) / 100) * precioNumero;
           }
 
           setInitialValues({
@@ -75,14 +107,20 @@ export default function EditarServicioPage() {
             descripcion: servicio.descripcion || '',
             is_active: servicio.is_active,
             permite_reacomodamiento: servicio.permite_reacomodamiento ?? false,
-            tipo_descuento_adelanto: servicio.tipo_descuento_adelanto || 'PORCENTAJE',
-            valor_descuento_adelanto: servicio.valor_descuento_adelanto?.toString?.() || servicio.valor_descuento_adelanto || '',
+            tipo_descuento_adelanto: 'MONTO_FIJO',
+            valor_descuento_adelanto: descuentoAdelantoMonto.toString(),
+            bono_reacomodamiento_senia: (servicio.bono_reacomodamiento_senia ?? 1000).toString(),
+            bono_reacomodamiento_pago_completo: (servicio.bono_reacomodamiento_pago_completo ?? 2000).toString(),
             tiempo_espera_respuesta: servicio.tiempo_espera_respuesta?.toString?.() || servicio.tiempo_espera_respuesta?.toString() || '15',
-            porcentaje_sena: servicio.porcentaje_sena?.toString?.() || servicio.porcentaje_sena || '25.00',
+            porcentaje_sena: montoSena ? montoSena.toFixed(2) : '',
+            monto_sena_fijo: (servicio.monto_sena_fijo ?? montoSena).toString(),
+            horas_minimas_credito_cancelacion: (servicio.horas_minimas_credito_cancelacion ?? 24).toString(),
+            porcentaje_devolucion_sena: (servicio.porcentaje_devolucion_sena ?? 100).toString(),
+            porcentaje_devolucion_servicio_completo: (servicio.porcentaje_devolucion_servicio_completo ?? 100).toString(),
             frecuencia_recurrencia_dias: servicio.frecuencia_recurrencia_dias?.toString() || '30',
-            tipo_descuento_fidelizacion: tipoDescuentoFidelizacion,
-            descuento_fidelizacion_pct: servicio.descuento_fidelizacion_pct?.toString?.() || servicio.descuento_fidelizacion_pct?.toString?.() || '0',
-            descuento_fidelizacion_monto: servicio.descuento_fidelizacion_monto?.toString?.() || servicio.descuento_fidelizacion_monto?.toString?.() || '0',
+            tipo_descuento_fidelizacion: 'MONTO_FIJO',
+            descuento_fidelizacion_pct: '0',
+            descuento_fidelizacion_monto: descuentoFidelizacionMonto ? descuentoFidelizacionMonto.toFixed(2) : '0',
           });
         } else {
           console.error('Error al cargar servicio');
@@ -111,14 +149,23 @@ export default function EditarServicioPage() {
       const duracion = parseInt(values.duracion_minutos, 10);
       const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseFloat(values.valor_descuento_adelanto);
       const tiempoEspera = values.tiempo_espera_respuesta === '' ? 15 : parseInt(values.tiempo_espera_respuesta, 10);
-      const porcentajeSena = values.porcentaje_sena === '' ? 25 : parseFloat(values.porcentaje_sena);
+      const porcentajeSena = 50;
+      const montoSenaFijo = values.monto_sena_fijo === '' ? 0 : parseFloat(values.monto_sena_fijo);
+      const horasMinimasCredito = values.horas_minimas_credito_cancelacion === ''
+        ? 24
+        : parseInt(values.horas_minimas_credito_cancelacion, 10);
+      const porcentajeDevolucionSena = 100;
+      const porcentajeDevolucionServicioCompleto = 100;
 
-      const valorFidelizacion = values.tipo_descuento_fidelizacion === 'PORCENTAJE'
-        ? (values.descuento_fidelizacion_pct === '' ? 0 : parseFloat(values.descuento_fidelizacion_pct))
-        : (values.descuento_fidelizacion_monto === '' ? 0 : parseFloat(values.descuento_fidelizacion_monto));
-
-      const descuentoFidelizacionPct = values.tipo_descuento_fidelizacion === 'PORCENTAJE' ? valorFidelizacion : 0;
-      const descuentoFidelizacionMonto = values.tipo_descuento_fidelizacion === 'MONTO_FIJO' ? valorFidelizacion : 0;
+      const descuentoFidelizacionMonto = values.descuento_fidelizacion_monto === ''
+        ? 0
+        : parseFloat(values.descuento_fidelizacion_monto);
+      const bonoReacomodamientoSenia = values.bono_reacomodamiento_senia === ''
+        ? 0
+        : parseFloat(values.bono_reacomodamiento_senia);
+      const bonoReacomodamientoPagoCompleto = values.bono_reacomodamiento_pago_completo === ''
+        ? 0
+        : parseFloat(values.bono_reacomodamiento_pago_completo);
 
       const dataToSend = {
         nombre: values.nombre,
@@ -130,10 +177,16 @@ export default function EditarServicioPage() {
         permite_reacomodamiento: values.permite_reacomodamiento,
         tipo_descuento_adelanto: values.tipo_descuento_adelanto,
         valor_descuento_adelanto: descuentoValor,
+        monto_sena_fijo: montoSenaFijo,
         tiempo_espera_respuesta: tiempoEspera,
         porcentaje_sena: porcentajeSena,
+        horas_minimas_credito_cancelacion: horasMinimasCredito,
+        porcentaje_devolucion_sena: porcentajeDevolucionSena,
+        porcentaje_devolucion_servicio_completo: porcentajeDevolucionServicioCompleto,
+        bono_reacomodamiento_senia: bonoReacomodamientoSenia,
+        bono_reacomodamiento_pago_completo: bonoReacomodamientoPagoCompleto,
         frecuencia_recurrencia_dias: parseInt(values.frecuencia_recurrencia_dias || '30', 10),
-        descuento_fidelizacion_pct: descuentoFidelizacionPct,
+        descuento_fidelizacion_pct: 0,
         descuento_fidelizacion_monto: descuentoFidelizacionMonto,
       };
 
@@ -180,7 +233,7 @@ export default function EditarServicioPage() {
         <div>
           <h1 className="text-3xl font-bold">Editar Servicio</h1>
           <p className="text-muted-foreground">
-            Modificar datos de {formData.nombre}
+            Modificar datos de {initialValues?.nombre ?? 'el servicio'}
           </p>
         </div>
       </div>

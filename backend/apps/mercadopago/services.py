@@ -115,3 +115,38 @@ def obtener_orden(merchant_order_id: str) -> dict:
             f"No se pudo obtener la orden {merchant_order_id}: {response.get('response', {})}"
         )
     return response["response"]
+
+
+def buscar_pago_aprobado_por_preference(preference_id: str) -> dict | None:
+    """Busca pagos por preference_id (vía external_reference) y devuelve el primero aprobado."""
+    pref_resp = sdk.preference().get(preference_id)
+    if pref_resp["status"] != 200:
+        raise ValueError(
+            f"No se pudo obtener preferencia {preference_id}: {pref_resp.get('response', {})}"
+        )
+
+    external_reference = pref_resp.get("response", {}).get("external_reference", "")
+    if not external_reference:
+        return None
+
+    response = sdk.payment().search(
+        {
+            "sort": "date_created",
+            "criteria": "desc",
+            "limit": 10,
+            "offset": 0,
+            "external_reference": external_reference,
+        }
+    )
+
+    if response["status"] != 200:
+        raise ValueError(
+            "No se pudo buscar pagos por external_reference de preference_id "
+            f"{preference_id}: {response.get('response', {})}"
+        )
+
+    results = response.get("response", {}).get("results", [])
+    for pago in results:
+        if pago.get("status") == "approved":
+            return pago
+    return None

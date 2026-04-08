@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { AlertCircle, CheckCircle2, Info, Loader2, Play, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
@@ -53,6 +52,8 @@ interface ClienteCandidato {
   email: string;
   dias_sin_turno: number;
   umbral_usado: number;
+  saldo_billetera?: number;
+  tiene_saldo?: boolean;
   servicio_propuesto?: {
     id: number;
     nombre: string;
@@ -98,7 +99,6 @@ export default function DiagnosticoPage() {
 
   // Estado para Fidelización
   const [diasInactividad, setDiasInactividad] = useState('');
-  const [enviarEmails, setEnviarEmails] = useState(false);
   const [resultadoFidelizacion, setResultadoFidelizacion] = useState<ResultadoFidelizacion | null>(null);
   const [errorFidelizacion, setErrorFidelizacion] = useState<string>('');
 
@@ -123,7 +123,7 @@ export default function DiagnosticoPage() {
     setErrorSimulacion('');
 
     try {
-      const response = await fetch('http://localhost:8000/api/turnos/diagnostico/optimizacion-agenda/', {
+      const response = await fetch('/api/turnos/diagnostico/optimizacion-agenda/', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ turno_id: parseInt(turnoId) }),
@@ -155,7 +155,7 @@ export default function DiagnosticoPage() {
     setResultadoSimulacion(null);
 
     try {
-      const response = await fetch('http://localhost:8000/api/turnos/diagnostico/simular-no-respuesta/', {
+      const response = await fetch('/api/turnos/diagnostico/simular-no-respuesta/', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ turno_id: resultadoOptimizacion.proceso_2.turno_candidato_id }),
@@ -183,14 +183,15 @@ export default function DiagnosticoPage() {
 
     try {
       const body: any = {
-        enviar_emails: enviarEmails,
+        // En diagnóstico siempre enviamos los emails reales
+        enviar_emails: true,
       };
 
       if (diasInactividad) {
         body.dias_inactividad = parseInt(diasInactividad);
       }
 
-      const response = await fetch('http://localhost:8000/api/turnos/diagnostico/fidelizacion-clientes/', {
+      const response = await fetch('/api/turnos/diagnostico/fidelizacion-clientes/', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(body),
@@ -475,21 +476,6 @@ export default function DiagnosticoPage() {
                 </p>
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <Label htmlFor="enviar_emails">Enviar emails reales</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Si está desactivado, solo simula el envío
-                  </p>
-                </div>
-                <Switch
-                  id="enviar_emails"
-                  checked={enviarEmails}
-                  onCheckedChange={setEnviarEmails}
-                  disabled={loadingFidelizacion}
-                />
-              </div>
-
               <Button
                 onClick={handleFidelizacion}
                 disabled={loadingFidelizacion}
@@ -542,13 +528,24 @@ export default function DiagnosticoPage() {
                   </div>
                 </div>
 
+                {resultadoFidelizacion.resumen.emails_fallidos > 0 && (
+                  <Alert variant="destructive">
+                    <XCircle className="h-4 w-4" />
+                    <AlertTitle>Algunos emails fallaron</AlertTitle>
+                    <AlertDescription>
+                      Hubo {resultadoFidelizacion.resumen.emails_fallidos} errores al enviar emails.
+                      Revisa el detalle por cliente y los logs del servidor para más información.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {resultadoFidelizacion.resumen.emails_simulados > 0 && (
                   <Alert>
                     <Info className="h-4 w-4" />
-                    <AlertTitle>Modo Simulación</AlertTitle>
+                    <AlertTitle>Clientes sin email enviado</AlertTitle>
                     <AlertDescription>
-                      Se simuló el envío de {resultadoFidelizacion.resumen.emails_simulados} emails.
-                      Activa "Enviar emails reales" para enviar los emails.
+                      Hay {resultadoFidelizacion.resumen.emails_simulados} candidatos en los que no se envió email
+                      (por falta de datos o condiciones). Revisa el motivo en cada tarjeta.
                     </AlertDescription>
                   </Alert>
                 )}
@@ -566,10 +563,29 @@ export default function DiagnosticoPage() {
                             <p className="text-xs text-muted-foreground">
                               {cliente.dias_sin_turno} días sin turno (umbral: {cliente.umbral_usado} días)
                             </p>
+                            {typeof cliente.saldo_billetera === 'number' && (
+                              <p className="text-xs text-purple-700">
+                                {cliente.saldo_billetera > 0
+                                  ? `${cliente.nombre.split(' ')[0]} tiene crédito en su billetera ($${cliente.saldo_billetera.toFixed(2)}). No recibirá descuento por fidelización.`
+                                  : `${cliente.nombre.split(' ')[0]} no tiene crédito en su billetera. Aplicará el descuento de fidelización.`}
+                              </p>
+                            )}
                             {cliente.servicio_propuesto && (
                               <p className="text-xs text-blue-600">
                                 {cliente.servicio_propuesto.nombre} - $
                                 {cliente.servicio_propuesto.precio_con_descuento.toFixed(2)} (desc.)
+                              </p>
+                            )}
+                            {cliente.email_status === 'simulado' && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                No se envió email a este cliente
+                                {cliente.email_error ? `: ${cliente.email_error}` : ''}.
+                              </p>
+                            )}
+                            {cliente.email_status === 'error' && (
+                              <p className="text-xs text-red-600 mt-1">
+                                Error al enviar email
+                                {cliente.email_error ? `: ${cliente.email_error}` : ''}.
                               </p>
                             )}
                           </div>

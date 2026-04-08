@@ -45,20 +45,7 @@ class Empleado(models.Model):
         blank=True, null=True, verbose_name="Biografía profesional"
     )
 
-    # Campos de ranking y métricas (Módulo Inteligente)
-    promedio_calificacion = models.DecimalField(
-        max_digits=3,
-        decimal_places=2,
-        default=5.0,
-        validators=[MinValueValidator(0), MaxValueValidator(10)],
-        verbose_name="Promedio de calificación",
-        help_text="Promedio de todas las encuestas recibidas (0-10)",
-    )
-    total_encuestas = models.PositiveIntegerField(
-        default=0,
-        verbose_name="Total de encuestas",
-        help_text="Número total de encuestas respondidas",
-    )
+    is_active = models.BooleanField(default=True, verbose_name="Activo")
 
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
@@ -131,11 +118,11 @@ class EmpleadoServicio(models.Model):
     """
 
     empleado = models.ForeignKey(
-        Empleado, on_delete=models.CASCADE, related_name="servicios_disponibles"
+        Empleado, on_delete=models.PROTECT, related_name="servicios_disponibles"
     )
     servicio = models.ForeignKey(
         "servicios.Servicio",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="profesionales_disponibles",
         verbose_name="Servicio",
     )

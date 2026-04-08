@@ -7,6 +7,8 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
+from django.utils import timezone
+from django.urls import reverse
 from typing import Dict, List, Optional
 import logging
 
@@ -19,25 +21,12 @@ class EmailService:
     @staticmethod
     def _get_email_destinatario(email_original: str) -> str:
         """
-        Retorna el email de destino.
-
-        Antes se forzaba en DEBUG a enviar siempre a una casilla fija
-        (gimenezivanb@gmail.com), lo que hacía que todos los correos
-        (incluidos los de clientes) llegaran al mismo inbox.
-
-        Ahora se respeta siempre el email real del usuario, salvo que
-        se configure explícitamente un override mediante
-        `settings.EMAIL_DEBUG_REDIRECT` (para casos puntuales).
+        Retorna el email de destino según el entorno
+        En DEBUG, envía a Mailtrap (gimenezivanb@gmail.com)
+        En producción, envía al email real
         """
-        override = getattr(settings, "EMAIL_DEBUG_REDIRECT", None)
-        if override:
-            logger.info(
-                "[EmailService] Redirigiendo email desde %s hacia override %s",
-                email_original,
-                override,
-            )
-            return override
-
+        if settings.DEBUG:
+            return "gimenezivanb@gmail.com"
         return email_original
 
     @staticmethod
@@ -325,6 +314,31 @@ class EmailService:
                 cuit = ""
                 fecha_fundacion_str = ""
 
+            # Intentar construir la URL de comprobante PDF si existe un pago aprobado
+            comprobante_pdf_url = None
+            try:
+                from apps.mercadopago.models import PagoMercadoPago
+
+                pago_mp = PagoMercadoPago.objects.filter(
+                    turno=turno, estado="approved"
+                ).first()
+                if pago_mp:
+                    base_url = (
+                        settings.FRONTEND_URL
+                        if hasattr(settings, "FRONTEND_URL")
+                        else "http://localhost:3000"
+                    )
+                    path = reverse(
+                        "comprobante-pago-pdf", kwargs={"turno_id": turno.id}
+                    )
+                    comprobante_pdf_url = f"{base_url.rstrip('/')}{path}"
+            except Exception as e:
+                logger.warning(
+                    "No se pudo construir URL de comprobante PDF para turno %s: %s",
+                    turno.id,
+                    str(e),
+                )
+
             contenido = f"""
                 <h2 style="color: #667eea; margin-bottom: 20px;">Tu turno ha sido confirmado</h2>
                 
@@ -366,7 +380,8 @@ class EmailService:
                     {f'<div class="info-row"><span class="info-label">CUIT:</span><span class="info-value">{cuit}</span></div>' if cuit else ''}
                     {f'<div class="info-row"><span class="info-label">Fecha de inicio:</span><span class="info-value">{fecha_fundacion_str}</span></div>' if fecha_fundacion_str else ''}
                 </div>
-                
+                {f'<p style="margin-top: 20px; text-align: center;"><a href="{comprobante_pdf_url}" class="button" target="_blank" rel="noopener noreferrer">Descargar comprobante de pago (PDF)</a></p>' if comprobante_pdf_url else ''}
+
                 <p>Te esperamos en {nombre_empresa}. ¡Gracias por elegirnos!</p>
             """
 
@@ -480,6 +495,237 @@ class EmailService:
 
         except Exception as e:
             logger.error(f"Error enviando email a propietarios: {str(e)}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Emails de fidelización de clientes
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def enviar_email_fidelizacion_con_saldo(
+        *,
+        cliente,
+        servicio,
+        empleado,
+        fecha_sugerida,
+        saldo_disponible,
+        url_reserva: str,
+    ) -> bool:
+        """Email de fidelización para clientes con crédito en billetera.
+
+        Este email le recuerda al cliente que tiene saldo a favor y le
+        propone volver con su servicio habitual, usando el link de
+        fidelización (flujo con saldo).
+        """
+
+        try:
+            if not getattr(cliente, "user", None) or not cliente.user.email:
+                logger.warning("Cliente sin usuario o sin email para fidelización")
+                return False
+
+            nombre_cliente = cliente.user.first_name or getattr(
+                cliente, "nombre_completo", "Cliente"
+            )
+            nombre_profesional = empleado.user.get_full_name()
+
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">Te extrañamos en Beautiful Studio</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+                <p>
+                    Vimos que hace un tiempo que no nos visitás y aún tenés
+                    <strong>${float(saldo_disponible):.2f}</strong> de crédito en tu billetera
+                    para usar en tu próximo servicio.
+                </p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Servicio sugerido:</span>
+                        <span class="info-value">{servicio.nombre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{nombre_profesional}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Próximo horario sugerido:</span>
+                        <span class="info-value">{fecha_sugerida.strftime('%d/%m/%Y %H:%M')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Crédito disponible:</span>
+                        <span class="info-value">${float(saldo_disponible):.2f}</span>
+                    </div>
+                </div>
+
+                <p style="margin-top: 16px;">Puedes usar ese crédito para reservar tu próximo turno ahora mismo:</p>
+
+                <div style="text-align: center;">
+                    <a href="{url_reserva}" class="button">Reservar mi turno</a>
+                </div>
+
+                <p style="margin-top: 12px; font-size: 13px; color: #6c757d;">
+                    Si ya utilizaste tu crédito recientemente, puedes ignorar este mensaje.
+                </p>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Te extrañamos en Beautiful Studio",
+                header_titulo="Tienes crédito disponible",
+                contenido=contenido,
+            )
+
+            plain_message = strip_tags(html_message)
+
+            email_destino = EmailService._get_email_destinatario(cliente.user.email)
+
+            send_mail(
+                subject="Tienes crédito disponible para tu próximo turno",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                "Email de fidelización (con saldo) enviado a %s (original: %s)",
+                email_destino,
+                cliente.user.email,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Error enviando email de fidelización con saldo a %s: %s",
+                getattr(cliente.user, "email", "<sin email>"),
+                str(e),
+            )
+            return False
+
+    @staticmethod
+    def enviar_email_fidelizacion_sin_saldo(
+        *,
+        cliente,
+        servicio,
+        empleado,
+        fecha_sugerida,
+        url_reserva: str,
+    ) -> bool:
+        """Email de fidelización para clientes sin saldo (descuento).
+
+        Ofrece un beneficio especial por fidelización (descuento) y
+        redirige al nuevo flujo de pago con descuento.
+        """
+
+        try:
+            if not getattr(cliente, "user", None) or not cliente.user.email:
+                logger.warning("Cliente sin usuario o sin email para fidelización")
+                return False
+
+            # Determinar porcentaje de descuento de fidelización
+            try:
+                from apps.authentication.models import ConfiguracionGlobal
+                from decimal import Decimal
+
+                config_global = ConfiguracionGlobal.get_config()
+                descuento_pct = (
+                    servicio.descuento_fidelizacion_pct
+                    or config_global.descuento_fidelizacion_pct
+                    or 0
+                )
+                precio_original = Decimal(servicio.precio)
+                precio_con_descuento = precio_original * (
+                    Decimal("1.0") - Decimal(descuento_pct) / Decimal("100")
+                )
+            except Exception:
+                descuento_pct = 0
+                precio_original = servicio.precio
+                precio_con_descuento = precio_original
+
+            nombre_cliente = cliente.user.first_name or getattr(
+                cliente, "nombre_completo", "Cliente"
+            )
+            nombre_profesional = empleado.user.get_full_name()
+
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">Tenemos un beneficio especial para vos</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+                <p>
+                    Hace un tiempo que no nos visitás. Para agradecerte por haber
+                    confiado en nosotros, queremos ofrecerte un
+                    <strong>{descuento_pct:.0f}% de descuento</strong> en tu próximo
+                    servicio habitual.
+                </p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Servicio sugerido:</span>
+                        <span class="info-value">{servicio.nombre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{nombre_profesional}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Horario sugerido:</span>
+                        <span class="info-value">{fecha_sugerida.strftime('%d/%m/%Y %H:%M')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Precio habitual:</span>
+                        <span class="info-value">${float(precio_original):.2f}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Precio con beneficio:</span>
+                        <span class="info-value">${float(precio_con_descuento):.2f}</span>
+                    </div>
+                </div>
+
+                <p style="margin-top: 16px;">
+                    Podés aprovechar este beneficio reservando desde el siguiente enlace:
+                </p>
+
+                <div style="text-align: center;">
+                    <a href="{url_reserva}" class="button">Aprovechar mi beneficio</a>
+                </div>
+
+                <p style="margin-top: 12px; font-size: 13px; color: #6c757d;">
+                    Este beneficio es personal y por tiempo limitado.
+                </p>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Beneficio de fidelización",
+                header_titulo="Beneficio especial",
+                contenido=contenido,
+            )
+
+            plain_message = strip_tags(html_message)
+
+            email_destino = EmailService._get_email_destinatario(cliente.user.email)
+
+            send_mail(
+                subject="Tenés un beneficio especial en tu próximo turno",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                "Email de fidelización (sin saldo) enviado a %s (original: %s)",
+                email_destino,
+                cliente.user.email,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Error enviando email de fidelización sin saldo a %s: %s",
+                getattr(cliente.user, "email", "<sin email>"),
+                str(e),
+            )
             return False
 
     @staticmethod
@@ -899,251 +1145,6 @@ class EmailService:
             return False
 
     @staticmethod
-    def enviar_email_fidelizacion_con_saldo(
-        cliente,
-        servicio,
-        empleado,
-        fecha_sugerida=None,
-        saldo_disponible=None,
-        url_reserva: Optional[str] = None,
-    ) -> bool:
-        """Envía email de fidelización a un cliente que tiene saldo en billetera.
-
-        Args:
-            cliente: Instancia de Cliente.
-            servicio: Instancia de Servicio.
-            empleado: Profesional sugerido para el servicio.
-            fecha_sugerida: Datetime opcional con la fecha/hora sugerida del próximo turno.
-            saldo_disponible: Saldo de billetera disponible (Decimal opcional).
-            url_reserva: URL del frontend para reservar/confirmar el turno.
-        """
-        try:
-            if not cliente or not getattr(cliente, "user", None):
-                logger.warning("Cliente sin usuario asociado para fidelización")
-                return False
-
-            user = cliente.user
-            if not user.email:
-                logger.warning("Usuario sin email configurado para fidelización")
-                return False
-
-            nombre_cliente = user.first_name or user.username
-            nombre_profesional = (
-                getattr(empleado, "nombre_completo", None)
-                or getattr(
-                    getattr(empleado, "user", None),
-                    "get_full_name",
-                    lambda: "Profesional",
-                )()
-            )
-
-            fecha_sugerida_str = (
-                fecha_sugerida.strftime("%d/%m/%Y %H:%M") if fecha_sugerida else None
-            )
-
-            saldo_str = None
-            if saldo_disponible is not None:
-                try:
-                    saldo_str = f"${saldo_disponible}"
-                except Exception:
-                    saldo_str = str(saldo_disponible)
-
-            if url_reserva is None:
-                base_url = (
-                    getattr(settings, "FRONTEND_URL", None)
-                    or getattr(settings, "BACKEND_URL", None)
-                    or "http://localhost:3000"
-                )
-                url_reserva = f"{base_url}/fidelizacion"  # Ruta genérica, el frontend podrá especializarla
-
-            call_to_action = "Confirmar mi próximo turno"
-
-            contenido_horario = (
-                f'<div class="info-row"><span class="info-label">Próximo horario sugerido:</span><span class="info-value">{fecha_sugerida_str}</span></div>'
-                if fecha_sugerida_str
-                else ""
-            )
-
-            contenido_saldo = (
-                f'<div class="info-row"><span class="info-label">Saldo disponible en tu billetera:</span><span class="info-value">{saldo_str}</span></div>'
-                if saldo_str
-                else ""
-            )
-
-            contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">¡Te esperamos de vuelta!</h2>
-
-                <p>Hola <strong>{nombre_cliente}</strong>,</p>
-                <p>Hace un tiempo que no te vemos por <strong>{servicio.nombre}</strong> con <strong>{nombre_profesional}</strong> y nos encantaría que vuelvas.</p>
-
-                <div class="info-box">
-                    <div class="info-row">
-                        <span class="info-label">Profesional:</span>
-                        <span class="info-value">{nombre_profesional}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Servicio:</span>
-                        <span class="info-value">{servicio.nombre}</span>
-                    </div>
-                    {contenido_horario}
-                    {contenido_saldo}
-                </div>
-
-                <div class="alert alert-success">
-                    <strong>¡Tenés saldo disponible en tu billetera!</strong><br>
-                    Aprovechalo para tu próximo servicio y no lo dejes pasar.
-                </div>
-
-                <p style="text-align: center; margin: 30px 0;">
-                    <a href="{url_reserva}" class="button">{call_to_action}</a>
-                </p>
-
-                <p style="font-size: 0.9em; color: #718096; margin-top: 10px;">
-                    Si ya reservaste tu próximo turno, podés ignorar este mensaje.
-                </p>
-            """
-
-            html_message = EmailService._get_base_template().format(
-                titulo="Te extrañamos en el salón",
-                header_titulo="Tenemos un turno para vos",
-                contenido=contenido,
-            )
-
-            plain_message = strip_tags(html_message)
-
-            email_destino = EmailService._get_email_destinatario(user.email)
-
-            send_mail(
-                subject="Tenés saldo para usar en tu próximo servicio",
-                message=plain_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email_destino],
-                html_message=html_message,
-                fail_silently=False,
-            )
-
-            logger.info(
-                f"Email de fidelización (con saldo) enviado a {email_destino} (original: {user.email})"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(f"Error enviando email de fidelización con saldo: {str(e)}")
-            return False
-
-    @staticmethod
-    def enviar_email_fidelizacion_sin_saldo(
-        cliente,
-        servicio,
-        empleado,
-        fecha_sugerida=None,
-        url_reserva: Optional[str] = None,
-    ) -> bool:
-        """Envía email de fidelización a un cliente sin saldo en billetera.
-
-        El mensaje sugiere un beneficio/descuento, pero la lógica económica
-        concreta se deja a criterio del negocio.
-        """
-        try:
-            if not cliente or not getattr(cliente, "user", None):
-                logger.warning("Cliente sin usuario asociado para fidelización")
-                return False
-
-            user = cliente.user
-            if not user.email:
-                logger.warning("Usuario sin email configurado para fidelización")
-                return False
-
-            nombre_cliente = user.first_name or user.username
-            nombre_profesional = (
-                getattr(empleado, "nombre_completo", None)
-                or getattr(
-                    getattr(empleado, "user", None),
-                    "get_full_name",
-                    lambda: "Profesional",
-                )()
-            )
-
-            fecha_sugerida_str = (
-                fecha_sugerida.strftime("%d/%m/%Y %H:%M") if fecha_sugerida else None
-            )
-
-            if url_reserva is None:
-                base_url = (
-                    getattr(settings, "FRONTEND_URL", None)
-                    or getattr(settings, "BACKEND_URL", None)
-                    or "http://localhost:3000"
-                )
-                url_reserva = f"{base_url}/fidelizacion"  # Ruta genérica, el frontend podrá especializarla
-
-            call_to_action = "Aprovechar mi beneficio"
-
-            contenido_horario = (
-                f'<div class="info-row"><span class="info-label">Próximo horario sugerido:</span><span class="info-value">{fecha_sugerida_str}</span></div>'
-                if fecha_sugerida_str
-                else ""
-            )
-
-            contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Tenemos un beneficio para vos</h2>
-
-                <p>Hola <strong>{nombre_cliente}</strong>,</p>
-                <p>Pasó un tiempo desde tu último <strong>{servicio.nombre}</strong> con <strong>{nombre_profesional}</strong> y queremos ayudarte a mantener tu rutina.</p>
-
-                <div class="info-box">
-                    <div class="info-row">
-                        <span class="info-label">Profesional:</span>
-                        <span class="info-value">{nombre_profesional}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Servicio:</span>
-                        <span class="info-value">{servicio.nombre}</span>
-                    </div>
-                    {contenido_horario}
-                </div>
-
-                <div class="alert alert-info">
-                    <strong>Beneficio especial:</strong> {"Te ofrecemos un descuento exclusivo en este servicio si reservas con este link."}
-                </div>
-
-                <p style="text-align: center; margin: 30px 0;">
-                    <a href="{url_reserva}" class="button">{call_to_action}</a>
-                </p>
-
-                <p style="font-size: 0.9em; color: #718096; margin-top: 10px;">
-                    El detalle exacto del beneficio será definido por el salón.
-                </p>
-            """
-
-            html_message = EmailService._get_base_template().format(
-                titulo="Tenemos un beneficio para vos",
-                header_titulo="Te extrañamos",
-                contenido=contenido,
-            )
-
-            plain_message = strip_tags(html_message)
-
-            email_destino = EmailService._get_email_destinatario(user.email)
-
-            send_mail(
-                subject="Tenemos un beneficio para vos en tu próximo servicio",
-                message=plain_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email_destino],
-                html_message=html_message,
-                fail_silently=False,
-            )
-
-            logger.info(
-                f"Email de fidelización (sin saldo) enviado a {email_destino} (original: {user.email})"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(f"Error enviando email de fidelización sin saldo: {str(e)}")
-            return False
-
-    @staticmethod
     def enviar_email_oferta_reasignacion(
         turno_cancelado,
         turno_ofrecido,
@@ -1175,64 +1176,132 @@ class EmailService:
                 f"{base_url}/reacomodamiento/confirmar?token={log_reasignacion.token}"
             )
 
-            contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
+            # Fechas en zona horaria local para evitar desfases de GMT
+            turno_actual_dt = timezone.localtime(turno_ofrecido.fecha_hora)
+            nuevo_turno_dt = timezone.localtime(turno_cancelado.fecha_hora)
+            expiracion_dt = timezone.localtime(log_reasignacion.expires_at)
 
-                <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
-                <p>Se liberó un turno para el mismo servicio y podemos adelantarte con un descuento especial.</p>
+            tipo_pago_cliente = (
+                log_reasignacion.tipo_pago_cliente_ofertado
+                or turno_ofrecido.resolver_tipo_pago()
+            )
+            cliente_pago_completo = tipo_pago_cliente == "PAGO_COMPLETO"
 
-                <div class="info-box">
-                    <div class="info-row">
-                        <span class="info-label">Tu turno actual:</span>
-                        <span class="info-value">{turno_ofrecido.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Nuevo turno disponible:</span>
-                        <span class="info-value"><strong>{turno_cancelado.fecha_hora.strftime('%d/%m/%Y %H:%M')}</strong></span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Servicio:</span>
-                        <span class="info-value">{turno_cancelado.servicio.nombre}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Profesional:</span>
-                        <span class="info-value">{turno_cancelado.empleado.user.get_full_name()}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Precio total:</span>
-                        <span class="info-value">${turno_cancelado.servicio.precio}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Descuento especial:</span>
-                        <span class="info-value" style="color: #48bb78;">-${monto_descuento}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Seña acreditada:</span>
-                        <span class="info-value">-${senia_pagada}</span>
-                    </div>
-                    <div class="info-row" style="border-top: 2px solid #667eea; padding-top: 10px; margin-top: 10px;">
-                        <span class="info-label"><strong>Monto final a pagar:</strong></span>
-                        <span class="info-value" style="font-size: 1.2em; color: #667eea;"><strong>${monto_final}</strong></span>
-                    </div>
-                </div>
+            if cliente_pago_completo:
+                titulo_email = "Reacomodo de turno disponible"
+                header_titulo = "Reacomodo de turno"
+                contenido = f"""
+                    <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
 
-                <div class="alert alert-warning">
-                    <strong>⏰ Importante:</strong> Esta oferta expira el {log_reasignacion.expires_at.strftime('%d/%m/%Y %H:%M')}.
-                </div>
+                    <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
+                    <p>Se liberó un turno para el mismo servicio y podemos reacomodarte a una fecha más cercana.</p>
+                    <p><strong>Como ya abonaste el 100% del servicio, este reacomodo no incluye descuento promocional adicional.</strong></p>
 
-                <p style="text-align: center; margin: 30px 0;">
-                    <a href="{confirmar_url}" class="button" style="font-size: 1.1em; padding: 15px 40px;">Ver detalles y confirmar</a>
-                </p>
+                    <div class="info-box">
+                        <div class="info-row">
+                            <span class="info-label">Tu turno actual:</span>
+                            <span class="info-value">{turno_actual_dt.strftime('%d/%m/%Y %H:%M')}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Nuevo turno disponible:</span>
+                            <span class="info-value"><strong>{nuevo_turno_dt.strftime('%d/%m/%Y %H:%M')}</strong></span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Servicio:</span>
+                            <span class="info-value">{turno_cancelado.servicio.nombre}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Profesional:</span>
+                            <span class="info-value">{turno_cancelado.empleado.user.get_full_name()}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Precio total:</span>
+                            <span class="info-value">${turno_cancelado.servicio.precio}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Pago ya acreditado (servicio completo):</span>
+                            <span class="info-value">-${senia_pagada}</span>
+                        </div>
+                        <div class="info-row" style="border-top: 2px solid #667eea; padding-top: 10px; margin-top: 10px;">
+                            <span class="info-label"><strong>Monto final a pagar:</strong></span>
+                            <span class="info-value" style="font-size: 1.2em; color: #667eea;"><strong>${monto_final}</strong></span>
+                        </div>
+                    </div>
 
-                <p style="color: #718096; font-size: 0.9em; text-align: center;">
-                    Si no deseas adelantar tu turno, simplemente ignora este email.<br>
-                    Tu turno original se mantendrá sin cambios.
-                </p>
-            """
+                    <div class="alert alert-warning">
+                        <strong>⏰ Importante:</strong> Esta propuesta expira el {expiracion_dt.strftime('%d/%m/%Y %H:%M')}.
+                    </div>
+
+                    <p style="text-align: center; margin: 30px 0;">
+                        <a href="{confirmar_url}" class="button" style="font-size: 1.1em; padding: 15px 40px;">Ver detalles y confirmar reacomodo</a>
+                    </p>
+
+                    <p style="color: #718096; font-size: 0.9em; text-align: center;">
+                        Si no deseas adelantar tu turno, simplemente ignora este email.<br>
+                        Tu turno original se mantendrá sin cambios.
+                    </p>
+                """
+            else:
+                titulo_email = "Tenemos un turno antes para ti"
+                header_titulo = "Oferta de turno"
+                contenido = f"""
+                    <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
+
+                    <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
+                    <p>Se liberó un turno para el mismo servicio y podemos adelantarte con un descuento especial.</p>
+
+                    <div class="info-box">
+                        <div class="info-row">
+                            <span class="info-label">Tu turno actual:</span>
+                            <span class="info-value">{turno_actual_dt.strftime('%d/%m/%Y %H:%M')}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Nuevo turno disponible:</span>
+                            <span class="info-value"><strong>{nuevo_turno_dt.strftime('%d/%m/%Y %H:%M')}</strong></span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Servicio:</span>
+                            <span class="info-value">{turno_cancelado.servicio.nombre}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Profesional:</span>
+                            <span class="info-value">{turno_cancelado.empleado.user.get_full_name()}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Precio total:</span>
+                            <span class="info-value">${turno_cancelado.servicio.precio}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Descuento especial:</span>
+                            <span class="info-value" style="color: #48bb78;">-${monto_descuento}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Seña acreditada:</span>
+                            <span class="info-value">-${senia_pagada}</span>
+                        </div>
+                        <div class="info-row" style="border-top: 2px solid #667eea; padding-top: 10px; margin-top: 10px;">
+                            <span class="info-label"><strong>Monto final a pagar:</strong></span>
+                            <span class="info-value" style="font-size: 1.2em; color: #667eea;"><strong>${monto_final}</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-warning">
+                        <strong>⏰ Importante:</strong> Esta oferta expira el {expiracion_dt.strftime('%d/%m/%Y %H:%M')}.
+                    </div>
+
+                    <p style="text-align: center; margin: 30px 0;">
+                        <a href="{confirmar_url}" class="button" style="font-size: 1.1em; padding: 15px 40px;">Ver detalles y confirmar</a>
+                    </p>
+
+                    <p style="color: #718096; font-size: 0.9em; text-align: center;">
+                        Si no deseas adelantar tu turno, simplemente ignora este email.<br>
+                        Tu turno original se mantendrá sin cambios.
+                    </p>
+                """
 
             html_message = EmailService._get_base_template().format(
-                titulo="Oferta de adelanto de turno",
-                header_titulo="Oferta de turno",
+                titulo=titulo_email,
+                header_titulo=header_titulo,
                 contenido=contenido,
             )
 
@@ -1242,7 +1311,7 @@ class EmailService:
             )
 
             send_mail(
-                subject="Tenemos un turno antes para ti",
+                subject=titulo_email,
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email_destino],

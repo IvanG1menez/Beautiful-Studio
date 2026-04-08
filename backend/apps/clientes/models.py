@@ -28,6 +28,7 @@ class Cliente(models.Model):
         blank=True, null=True, verbose_name="Primera visita"
     )
     is_vip = models.BooleanField(default=False, verbose_name="Cliente VIP")
+    is_active = models.BooleanField(default=True, verbose_name="Activo")
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
     )
@@ -144,6 +145,12 @@ class Billetera(models.Model):
     saldo = models.DecimalField(
         max_digits=10, decimal_places=2, default=0, verbose_name="Saldo disponible"
     )
+    fecha_vencimiento = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name="Fecha de vencimiento del saldo",
+        help_text="Fecha límite hasta la cual el crédito de la billetera es válido.",
+    )
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
     )
@@ -158,11 +165,54 @@ class Billetera(models.Model):
     def __str__(self):
         return f"Billetera de {self.cliente.nombre_completo} - ${self.saldo}"
 
+    def actualizar_fecha_vencimiento(self, dias=None):
+        """Actualiza la fecha de vencimiento del saldo.
+
+        Por simplicidad, se maneja una única fecha de vencimiento para todo el saldo
+        de la billetera. Cada vez que se acredita nuevo saldo, se extiende la
+        vigencia a hoy + ``dias`` si esa fecha es posterior a la ya existente.
+        """
+        from datetime import timedelta
+        from django.utils import timezone
+
+        if dias is None:
+            # Usa la configuración global y cae a 90 si hubiera algún problema.
+            try:
+                from apps.authentication.models import ConfiguracionGlobal
+
+                config = ConfiguracionGlobal.get_config()
+                dias = int(config.dias_vencimiento_credito or 90)
+            except Exception:
+                dias = 90
+
+        dias = max(30, int(dias))
+
+        hoy = timezone.now().date()
+        nueva_fecha = hoy + timedelta(days=dias)
+
+        if not self.fecha_vencimiento or nueva_fecha > self.fecha_vencimiento:
+            self.fecha_vencimiento = nueva_fecha
+
+    @property
+    def esta_por_vencer(self):
+        """Indica si el saldo está próximo a vencer en la próxima semana."""
+        from datetime import timedelta
+        from django.utils import timezone
+
+        if not self.fecha_vencimiento:
+            return False
+
+        hoy = timezone.now().date()
+        dias_restantes = (self.fecha_vencimiento - hoy).days
+        return 0 <= dias_restantes <= 7
+
     def agregar_saldo(self, monto, motivo=""):
         """Agrega crédito a la billetera"""
         from decimal import Decimal
 
         self.saldo += Decimal(str(monto))
+        # Actualizar vigencia del saldo cada vez que se acredita nuevo monto
+        self.actualizar_fecha_vencimiento()
         self.save()
 
         # Registrar movimiento

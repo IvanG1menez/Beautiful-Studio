@@ -21,6 +21,7 @@ interface ConfiguracionGlobal {
   email_contacto?: string;
   habilitar_recordatorios_email: boolean;
   dias_recordatorio_antes_turno: number;
+  dias_vencimiento_credito: number;
 }
 
 export default function ConfiguracionGlobalPage() {
@@ -58,7 +59,10 @@ export default function ConfiguracionGlobalPage() {
         }
 
         const data = await response.json();
-        setConfig(data);
+        setConfig({
+          ...data,
+          dias_vencimiento_credito: Math.max(30, Number(data.dias_vencimiento_credito ?? 90)),
+        });
       } catch (err) {
         console.error('Error al cargar configuración global:', err);
         setError('No se pudo cargar la configuración global del negocio');
@@ -117,7 +121,7 @@ export default function ConfiguracionGlobalPage() {
     const loadSSO = async () => {
       try {
         const baseUrl = '/api';
-        const response = await fetch(`${baseUrl}/configuracion/sso/`, {
+        const response = await fetch(`${baseUrl}/configuracion/sso/resumen/`, {
           method: 'GET',
           headers: getAuthHeaders(),
         });
@@ -167,6 +171,12 @@ export default function ConfiguracionGlobalPage() {
 
   const handleSave = async () => {
     if (!config) return;
+
+    if ((config.dias_vencimiento_credito ?? 90) < 30) {
+      setError('El vencimiento del crédito debe ser de al menos 30 días.');
+      toast.error('El vencimiento del crédito debe ser de al menos 30 días');
+      return;
+    }
 
     try {
       setIsSaving(true);
@@ -329,6 +339,30 @@ export default function ConfiguracionGlobalPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Billetera y Créditos</CardTitle>
+          <CardDescription>
+            Define la vigencia del crédito en billetera generado por cancelaciones.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="dias_vencimiento_credito">Vencimiento del crédito (días)</Label>
+          <Input
+            id="dias_vencimiento_credito"
+            type="number"
+            min={30}
+            step={1}
+            value={config.dias_vencimiento_credito ?? 90}
+            onChange={(e) => handleNumberChange('dias_vencimiento_credito', e.target.value)}
+          />
+          <p className="text-sm text-muted-foreground">
+            Mínimo permitido: 30 días. Este valor impacta en la fecha de vencimiento de los
+            créditos de clientes.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Otras configuraciones del sistema</CardTitle>
           <CardDescription>
             Accesos directos a todas las configuraciones avanzadas que ya conocés del sistema.
@@ -389,12 +423,7 @@ export default function ConfiguracionGlobalPage() {
               </Link>
             </Button>
 
-            <Button asChild variant="outline" className="justify-start">
-              <Link href="/dashboard/propietario/encuestas?tab=configuracion">
-                <Settings className="mr-2 h-4 w-4" />
-                Configuración de encuestas
-              </Link>
-            </Button>
+            {/* Enlace a configuración de encuestas eliminado al desactivar el módulo de encuestas */}
           </div>
         </CardContent>
       </Card>

@@ -21,6 +21,8 @@ interface OfertaDetalles {
   status: string;
   token: string;
   expires_at: string;
+  regla_descuento_aplicada?: string;
+  tipo_pago_cliente_ofertado?: 'SIN_PAGO' | 'SENIA' | 'PAGO_COMPLETO';
   estado?: string; // Para ya_resuelta
   mensaje?: string; // Mensaje adicional
   cliente: {
@@ -50,15 +52,25 @@ interface OfertaDetalles {
   };
 }
 
+interface ApiRespuesta {
+  status?: string;
+  mensaje?: string;
+  error?: string;
+  estado?: string;
+  [key: string]: unknown;
+}
+
 export default function ConfirmarReacomodamientoPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
+  const turnoLegacy = searchParams.get('turno');
 
   const [loading, setLoading] = useState(true);
   const [procesando, setProcesando] = useState(false);
   const [oferta, setOferta] = useState<OfertaDetalles | null>(null);
   const [estadoEspecial, setEstadoEspecial] = useState<'ya_resuelta' | 'expirada' | 'invalido' | null>(null);
+  const [estadoYaResuelta, setEstadoYaResuelta] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
   const [resultado, setResultado] = useState<{
     tipo: 'exito' | 'error';
@@ -68,13 +80,34 @@ export default function ConfirmarReacomodamientoPage() {
 
   useEffect(() => {
     if (!token) {
-      setError('Token no proporcionado en la URL');
+      if (turnoLegacy) {
+        setError(
+          'Este enlace de reacomodamiento es antiguo y ya no es valido (falta token). Solicita una nueva oferta desde el panel de diagnostico.'
+        );
+      } else {
+        setError('Token no proporcionado en la URL');
+      }
       setLoading(false);
       return;
     }
 
     cargarOferta();
-  }, [token]);
+  }, [token, turnoLegacy]);
+
+  const parsearRespuestaApi = async (response: Response): Promise<ApiRespuesta> => {
+    const raw = await response.text();
+    if (!raw) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(raw) as ApiRespuesta;
+    } catch {
+      return {
+        error: `Respuesta no válida del servidor (HTTP ${response.status})`,
+      };
+    }
+  };
 
   const cargarOferta = async () => {
     try {
@@ -83,15 +116,15 @@ export default function ConfirmarReacomodamientoPage() {
       setEstadoEspecial(null);
 
       const response = await fetch(`http://localhost:8000/api/turnos/reasignacion/${token}/`);
-      const data = await response.json();
+      const data = await parsearRespuestaApi(response);
 
       if (response.ok && data.status === 'activa') {
-        setOferta(data);
+        setOferta(data as unknown as OfertaDetalles);
       } else if (response.status === 410) {
         // Oferta ya resuelta o expirada
         if (data.status === 'ya_resuelta') {
           setEstadoEspecial('ya_resuelta');
-          setOferta(data); // Guardar data para mostrar el estado
+          setEstadoYaResuelta((data.estado as string) || null);
         } else if (data.status === 'expirada') {
           setEstadoEspecial('expirada');
         }
@@ -123,7 +156,7 @@ export default function ConfirmarReacomodamientoPage() {
         body: JSON.stringify({ accion }),
       });
 
-      const data = await response.json();
+      const data = await parsearRespuestaApi(response);
 
       if (response.ok) {
         if (data.status === 'aceptada') {
@@ -132,10 +165,10 @@ export default function ConfirmarReacomodamientoPage() {
             mensaje: '¡Perfecto! Tu turno ha sido adelantado exitosamente. Te esperamos en la nueva fecha.',
             accion: 'aceptada',
           });
-          // Redirigir después de 5 segundos
+          // Redirigir después de 10 segundos
           setTimeout(() => {
-            router.push('/');
-          }, 5000);
+            router.push('/dashboard/cliente');
+          }, 10000);
         } else if (data.status === 'rechazada') {
           setResultado({
             tipo: 'exito',
@@ -143,8 +176,21 @@ export default function ConfirmarReacomodamientoPage() {
             accion: 'rechazada',
           });
           setTimeout(() => {
-            router.push('/');
-          }, 5000);
+            router.push('/dashboard/cliente');
+          }, 10000);
+        } else if (data.status === 'expirada') {
+          setResultado({
+            tipo: 'error',
+            mensaje: 'Lo sentimos, tu tiempo se acabó para responder esta oferta.',
+          });
+          setEstadoEspecial('expirada');
+        } else if (data.status === 'ya_resuelta') {
+          setResultado({
+            tipo: 'error',
+            mensaje: 'Esta oferta ya fue respondida anteriormente.',
+          });
+          setEstadoEspecial('ya_resuelta');
+          setEstadoYaResuelta((data.estado as string) || null);
         } else {
           setResultado({
             tipo: 'error',
@@ -160,8 +206,9 @@ export default function ConfirmarReacomodamientoPage() {
         } else if (data.status === 'expirada') {
           setResultado({
             tipo: 'error',
-            mensaje: 'Esta oferta ha expirado.',
+            mensaje: 'Lo sentimos, tu tiempo se acabó para responder esta oferta.',
           });
+          setEstadoEspecial('expirada');
         } else {
           setResultado({
             tipo: 'error',
@@ -218,7 +265,7 @@ export default function ConfirmarReacomodamientoPage() {
 
   // Pantallas especiales para estados ya resueltos
   if (estadoEspecial === 'ya_resuelta') {
-    const estadoFinal = oferta?.estado;
+    const estadoFinal = estadoYaResuelta || oferta?.estado;
     const esAceptada = estadoFinal === 'aceptada';
     const esRechazada = estadoFinal === 'rechazada';
 
@@ -260,8 +307,8 @@ export default function ConfirmarReacomodamientoPage() {
               </Alert>
             )}
             <div className="pt-4 flex justify-center">
-              <Button onClick={() => router.push('/')} className="w-full sm:w-auto">
-                Volver al inicio
+              <Button onClick={() => router.push('/dashboard/cliente')} className="w-full sm:w-auto">
+                Ir a mi cuenta
               </Button>
             </div>
           </CardContent>
@@ -298,8 +345,8 @@ export default function ConfirmarReacomodamientoPage() {
               </p>
             </div>
             <div className="pt-2 flex justify-center">
-              <Button onClick={() => router.push('/')} className="w-full sm:w-auto">
-                Volver al inicio
+              <Button onClick={() => router.push('/dashboard/cliente')} className="w-full sm:w-auto">
+                Ir a mi cuenta
               </Button>
             </div>
           </CardContent>
@@ -336,8 +383,8 @@ export default function ConfirmarReacomodamientoPage() {
               </p>
             </div>
             <div className="pt-2 flex justify-center">
-              <Button onClick={() => router.push('/')} variant="outline" className="w-full sm:w-auto">
-                Volver al inicio
+              <Button onClick={() => router.push('/dashboard/cliente')} variant="outline" className="w-full sm:w-auto">
+                Ir a mi cuenta
               </Button>
             </div>
           </CardContent>
@@ -357,6 +404,10 @@ export default function ConfirmarReacomodamientoPage() {
       </div>
     );
   }
+
+  const descuentoNumerico = Number(oferta.turno_nuevo.descuento || 0);
+  const esClientePagoCompleto = oferta.tipo_pago_cliente_ofertado === 'PAGO_COMPLETO';
+  const tienePromo = !esClientePagoCompleto && descuentoNumerico > 0;
 
   if (resultado) {
     // Pantalla de error
@@ -385,8 +436,8 @@ export default function ConfirmarReacomodamientoPage() {
                 <Button onClick={() => setResultado(null)} variant="outline">
                   Volver a intentar
                 </Button>
-                <Button onClick={() => router.push('/')}>
-                  Ir al inicio
+                <Button onClick={() => router.push('/dashboard/cliente')}>
+                  Ir a mi cuenta
                 </Button>
               </div>
             </CardContent>
@@ -399,7 +450,7 @@ export default function ConfirmarReacomodamientoPage() {
     if (resultado.accion === 'aceptada' && oferta) {
       return (
         <div className="container mx-auto py-12 max-w-2xl">
-          <Card className="border-2 border-green-200 bg-gradient-to-br from-green-50 to-white">
+          <Card className="border-2 border-green-200 bg-linear-to-br from-green-50 to-white">
             <CardHeader className="text-center pb-4">
               <div className="mx-auto mb-4 h-20 w-20 rounded-full bg-green-100 flex items-center justify-center animate-bounce">
                 <CheckCircle2 className="h-12 w-12 text-green-600" />
@@ -441,11 +492,13 @@ export default function ConfirmarReacomodamientoPage() {
               {/* Beneficios */}
               <Alert className="bg-green-50 border-green-200">
                 <TrendingDown className="h-4 w-4 text-green-600" />
-                <AlertTitle className="text-green-800">¡Excelente ahorro!</AlertTitle>
+                <AlertTitle className="text-green-800">
+                  {tienePromo ? '¡Excelente ahorro!' : 'Turno reacomodado con éxito'}
+                </AlertTitle>
                 <AlertDescription className="text-green-700">
                   Te adelantaste <strong>{oferta.ahorro.dias_adelantados} días</strong> y tu turno original
                   quedó libre para otro cliente.
-                  {oferta.ahorro.descuento_aplicado !== '0' && oferta.ahorro.descuento_aplicado !== '0.00' && (
+                  {tienePromo && oferta.ahorro.descuento_aplicado !== '0' && oferta.ahorro.descuento_aplicado !== '0.00' && (
                     <> Además, ahorraste <strong>${oferta.ahorro.descuento_aplicado}</strong>.</>
                   )}
                 </AlertDescription>
@@ -466,10 +519,10 @@ export default function ConfirmarReacomodamientoPage() {
 
               <div className="pt-4 text-center">
                 <p className="text-sm text-muted-foreground mb-4">
-                  Serás redirigido al inicio en 5 segundos...
+                  Serás redirigido a tu cuenta en 10 segundos...
                 </p>
-                <Button onClick={() => router.push('/')} size="lg" className="w-full sm:w-auto">
-                  Volver al inicio ahora
+                <Button onClick={() => router.push('/dashboard/cliente')} size="lg" className="w-full sm:w-auto">
+                  Ir a mi cuenta ahora
                 </Button>
               </div>
             </CardContent>
@@ -527,10 +580,10 @@ export default function ConfirmarReacomodamientoPage() {
 
               <div className="pt-4 text-center">
                 <p className="text-sm text-muted-foreground mb-4">
-                  Serás redirigido al inicio en 5 segundos...
+                  Serás redirigido a tu cuenta en 10 segundos...
                 </p>
-                <Button onClick={() => router.push('/')} size="lg" className="w-full sm:w-auto">
-                  Volver al inicio ahora
+                <Button onClick={() => router.push('/dashboard/cliente')} size="lg" className="w-full sm:w-auto">
+                  Ir a mi cuenta ahora
                 </Button>
               </div>
             </CardContent>
@@ -561,7 +614,9 @@ export default function ConfirmarReacomodamientoPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-center mb-2">¡Tenemos una fecha mejor para ti!</h1>
         <p className="text-center text-muted-foreground">
-          Se liberó un turno antes de tu fecha actual y queremos ofrecértelo con un descuento especial
+          {tienePromo
+            ? 'Se liberó un turno antes de tu fecha actual y queremos ofrecértelo con un descuento especial'
+            : 'Se liberó un turno antes de tu fecha actual y podemos reacomodarte sin costo adicional'}
         </p>
       </div>
 
@@ -619,7 +674,11 @@ export default function ConfirmarReacomodamientoPage() {
               <TrendingDown className="h-5 w-5" />
               Nuevo turno disponible
             </CardTitle>
-            <CardDescription>¡Con descuento especial!</CardDescription>
+            <CardDescription>
+              {tienePromo
+                ? '¡Con descuento especial!'
+                : 'Reacomodo de turno (sin promo adicional)'}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-start gap-3">
@@ -666,11 +725,17 @@ export default function ConfirmarReacomodamientoPage() {
               <span className="font-medium">${oferta.turno_nuevo.precio_total}</span>
             </div>
             <div className="flex justify-between text-green-600">
-              <span>Descuento especial por adelanto</span>
-              <span className="font-medium">-${oferta.turno_nuevo.descuento}</span>
+              <span>
+                {tienePromo
+                  ? 'Descuento especial por adelanto'
+                  : 'Descuento promocional'}
+              </span>
+              <span className="font-medium">-{tienePromo ? oferta.turno_nuevo.descuento : '0.00'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Seña ya pagada</span>
+              <span className="text-muted-foreground">
+                {esClientePagoCompleto ? 'Pago ya acreditado (servicio completo)' : 'Seña ya pagada'}
+              </span>
               <span className="font-medium">-${oferta.turno_original.senia_pagada}</span>
             </div>
             <Separator />
