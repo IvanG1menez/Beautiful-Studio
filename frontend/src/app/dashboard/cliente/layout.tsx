@@ -1,6 +1,7 @@
 'use client';
 
 import TopBar from '@/components/layout/TopBar';
+import TelegramFloatingButton from '@/components/TelegramFloatingButton';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { useAuth } from '@/contexts/AuthContext';
@@ -81,7 +82,7 @@ export default function DashboardClienteLayout({
             ${isMobile ? 'absolute z-40' : 'relative'}
             ${sidebarOpen ? 'w-64' : 'w-20'}
             transition-all duration-300 ease-in-out
-            bg-gradient-to-b from-purple-900 to-purple-800 text-white
+            bg-linear-to-b from-purple-900 to-purple-800 text-white
             flex flex-col
             h-full
           `}
@@ -126,7 +127,7 @@ export default function DashboardClienteLayout({
                   `}
                   onClick={() => isMobile && setSidebarOpen(false)}
                 >
-                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  <Icon className="h-5 w-5 shrink-0" />
                   {sidebarOpen && <span className="font-medium">{item.label}</span>}
                 </Link>
               );
@@ -147,6 +148,8 @@ export default function DashboardClienteLayout({
         <main className="flex-1 overflow-y-auto bg-background">
           {children}
         </main>
+
+        <TelegramFloatingButton />
 
         {isMobile && sidebarOpen && (
           <div

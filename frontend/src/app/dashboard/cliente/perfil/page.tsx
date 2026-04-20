@@ -35,12 +35,15 @@ import {
   Lock,
   Mail,
   MapPin,
+  MessageCircle,
   Phone,
   Star,
   User
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+
+const TELEGRAM_BOT_URL = 'https://t.me/beauti0598_bot';
 
 interface ClienteProfile {
   id: number;
@@ -316,6 +319,10 @@ export default function PerfilClientePage() {
     });
   };
 
+  const openBeautyBot = () => {
+    window.open(TELEGRAM_BOT_URL, '_blank', 'noopener,noreferrer');
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -379,6 +386,15 @@ export default function PerfilClientePage() {
                     <Badge variant="outline">{profile.user.phone}</Badge>
                   )}
                 </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="mt-3 bg-cyan-600 hover:bg-cyan-700"
+                  onClick={openBeautyBot}
+                >
+                  <MessageCircle className="w-4 h-4 mr-2" />
+                  Abrir chat con BeautyBot
+                </Button>
               </div>
             </div>
           </CardContent>

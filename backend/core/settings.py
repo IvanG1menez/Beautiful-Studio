@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     "apps.empleados",
     "apps.emails",
     "apps.mercadopago",
+    "apps.telegram_bot",
 ]
 
 MIDDLEWARE = [
@@ -391,6 +392,18 @@ MERCADO_PAGO_PENDING_URL = env(
 )  # Monto mínimo permitido por Mercado Pago (en ARS). MP rechaza montos menores.
 MP_MIN_AMOUNT = config("MP_MIN_AMOUNT", default=100, cast=float)
 # ──────────────────────────────────────────────────────────────────────────────
+
+# ── Telegram Bot ─────────────────────────────────────────────────────────────
+TELEGRAM_BOT_TOKEN = config("TELEGRAM_BOT_TOKEN", default=None)
+TELEGRAM_WEBHOOK_SECRET = config("TELEGRAM_WEBHOOK_SECRET", default="")
+TELEGRAM_WEBHOOK_URL = config("TELEGRAM_WEBHOOK_URL", default="",
+)
+TELEGRAM_DEBUG = config("TELEGRAM_DEBUG", default=False, cast=bool)
+TELEGRAM_API_REQUEST_TIMEOUT = config(
+    "TELEGRAM_API_REQUEST_TIMEOUT", default=10, cast=int
+)
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Logging
 # ──────────────────────────────────────────────────────────────────────────────
 LOGGING = {

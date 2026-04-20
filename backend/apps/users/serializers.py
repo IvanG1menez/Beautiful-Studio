@@ -34,6 +34,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
     cliente_profile = serializers.SerializerMethodField()
     profesional_profile = serializers.SerializerMethodField()
     empleado_id = serializers.SerializerMethodField()
+    telegram_chat_id = serializers.SerializerMethodField()
+    has_telegram_link = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -65,11 +67,50 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return obj.profesional_profile.id
         return None
 
+    def _get_telegram_link(self, obj):
+        if not hasattr(obj, "cliente_profile") or not obj.cliente_profile:
+            return None
+
+        from apps.telegram_bot.models import TelegramLink
+
+        return (
+            TelegramLink.objects.filter(cliente=obj.cliente_profile, is_verified=True)
+            .order_by("-last_seen_at")
+            .first()
+        )
+
+    def get_telegram_chat_id(self, obj):
+        link = self._get_telegram_link(obj)
+        return link.chat_id if link else None
+
+    def get_has_telegram_link(self, obj):
+        return self._get_telegram_link(obj) is not None
+
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = "__all__"
+        fields = [
+            "first_name",
+            "last_name",
+            "phone",
+        ]
+
+    def validate_phone(self, value):
+        if value in [None, ""]:
+            return value
+
+        current_user = self.instance
+        exists = (
+            User.objects.filter(phone=value)
+            .exclude(id=current_user.id)
+            .exists()
+        )
+        if exists:
+            raise serializers.ValidationError(
+                "Este telefono ya esta registrado por otro usuario."
+            )
+        return value
 
 
 class CustomAuthTokenSerializer(serializers.Serializer):

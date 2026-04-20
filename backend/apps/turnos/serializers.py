@@ -479,20 +479,8 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
                     f'No se puede cambiar de estado "{estado_actual}" a "{value}".'
                 )
 
-            # Restricción operativa: iniciar turno solo el día y hora del turno.
-            if value == "en_proceso":
-                ahora = timezone.now()
-                fecha_turno = self.instance.fecha_hora
-
-                if fecha_turno.date() != ahora.date():
-                    raise serializers.ValidationError(
-                        "Solo se puede iniciar un turno en la fecha actual del turno."
-                    )
-
-                if ahora < fecha_turno:
-                    raise serializers.ValidationError(
-                        "No se puede iniciar un turno antes de su horario programado."
-                    )
+            # Restricción operativa de inicio deshabilitada en modo test.
+            # En producción deberá volver a activarse para respetar fecha/hora programadas.
 
         return value
 

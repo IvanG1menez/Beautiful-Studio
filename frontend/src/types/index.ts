@@ -8,6 +8,8 @@ export interface User {
   first_name: string;
   last_name: string;
   phone?: string;
+  telegram_chat_id?: number | null;
+  has_telegram_link?: boolean;
   role: 'admin' | 'empleado' | 'cliente' | 'profesional' | 'propietario' | 'superusuario';
   is_active: boolean;
   created_at: string;

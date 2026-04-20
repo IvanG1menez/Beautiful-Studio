@@ -248,7 +248,6 @@ export default function LoginPage() {
             <div className="relative my-6">
               <Separator />
               <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-2 text-xs text-muted-foreground">
-                O continúa con
               </span>
             </div>
 
@@ -267,25 +266,6 @@ export default function LoginPage() {
               </p>
             </div>
 
-            {/* Credenciales de prueba */}
-            <div className="mt-6 p-4 bg-card/80 border border-border rounded-lg">
-              <p className="text-xs font-medium text-foreground mb-2">Credenciales de prueba:</p>
-              <div className="space-y-1 text-xs text-muted-foreground">
-                <p><strong>Admin:</strong> admin@test.com / password1.2.3</p>
-                <p><strong>Profesional:</strong> profesional@test.com / password1.2.3</p>
-                <p><strong>Cliente:</strong> cliente@test.com / password1.2.3</p>
-              </div>
-
-              {/* Debug info */}
-              {process.env.NODE_ENV === 'development' && (
-                <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs font-medium text-foreground mb-1">Debug Mode:</p>
-                  <p className="text-xs text-muted-foreground">
-                    Revisa la consola del navegador para información detallada de errores
-                  </p>
-                </div>
-              )}
-            </div>
           </CardContent>
         </Card>
       </div>

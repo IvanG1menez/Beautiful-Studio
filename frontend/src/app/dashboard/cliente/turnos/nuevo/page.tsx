@@ -1,8 +1,8 @@
 ﻿'use client';
 
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
-import { getAuthHeaders } from '@/lib/auth-headers';
-import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
+import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronsUpDown, Clock, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
@@ -14,7 +14,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCurrency } from '@/lib/utils';
@@ -131,6 +130,10 @@ export default function NuevoTurnoPage() {
   const mpTabCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Estados para búsqueda y paginación de profesionales
+  const [searchCategoria, setSearchCategoria] = useState('');
+  const [openCategoriaSelect, setOpenCategoriaSelect] = useState(false);
+  const [catalogoServicios, setCatalogoServicios] = useState<Servicio[]>([]);
+  const [loadingCatalogoServicios, setLoadingCatalogoServicios] = useState(false);
   const [searchEmpleado, setSearchEmpleado] = useState('');
   const [filterEspecialidad, setFilterEspecialidad] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -191,6 +194,7 @@ export default function NuevoTurnoPage() {
   // Cargar categorías al montar
   useEffect(() => {
     fetchCategorias();
+    fetchCatalogoServicios();
     loadBilleteraData();
   }, []);
 
@@ -484,6 +488,25 @@ export default function NuevoTurnoPage() {
     }
   };
 
+  const fetchCatalogoServicios = async () => {
+    setLoadingCatalogoServicios(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/servicios/?page_size=300`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const serviciosData = (data.results || data) as Servicio[];
+        setCatalogoServicios(serviciosData.filter((servicio) => servicio.is_active));
+      }
+    } catch (error) {
+      console.error('Error fetching catálogo de servicios:', error);
+    } finally {
+      setLoadingCatalogoServicios(false);
+    }
+  };
+
   const fetchEmpleados = async () => {
     if (!servicioSeleccionado) return;
 
@@ -594,7 +617,7 @@ export default function NuevoTurnoPage() {
 
   const handleSubmit = async () => {
     if (!servicioSeleccionado || !empleadoSeleccionado || !fechaSeleccionada || !horarioSeleccionado) {
-      setError('Por favor completa todos los campos requeridos');
+      setError('Por favor completá todos los campos requeridos');
       setShowConfirmDialog(false);
       return;
     }
@@ -612,7 +635,7 @@ export default function NuevoTurnoPage() {
 
       const response = await fetch(`${API_BASE_URL}/mercadopago/preferencia-sin-turno/`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify({
           servicio_id: servicioSeleccionado.id,
           empleado_id: empleadoSeleccionado.id,
@@ -834,9 +857,56 @@ export default function NuevoTurnoPage() {
     return '⭐'.repeat(nivel);
   };
 
+  const getInicialesProfesional = (empleado: Empleado) => {
+    const nombre = (empleado.first_name || '').trim();
+    const apellido = (empleado.last_name || '').trim();
+    return `${nombre.charAt(0)}${apellido.charAt(0)}`.toUpperCase() || 'PR';
+  };
+
   const serviciosFiltrados = servicios.filter(s =>
     categoriaSeleccionada ? s.categoria === categoriaSeleccionada : true
   );
+
+  const horariosDisponiblesOrdenados = [...horariosDisponibles].sort((a, b) => a.localeCompare(b));
+
+  const proximoHorarioDisponible = (() => {
+    if (!fechaSeleccionada || horariosDisponiblesOrdenados.length === 0) return null;
+
+    const fechaElegida = new Date(`${fechaSeleccionada}T00:00:00`);
+    const ahora = new Date();
+    const esHoy = fechaElegida.toDateString() === ahora.toDateString();
+
+    if (!esHoy) {
+      return horariosDisponiblesOrdenados[0];
+    }
+
+    const minutosActuales = ahora.getHours() * 60 + ahora.getMinutes();
+    const siguiente = horariosDisponiblesOrdenados.find((horario) => {
+      const [hora, minuto] = horario.split(':').map(Number);
+      if (Number.isNaN(hora) || Number.isNaN(minuto)) return false;
+      return hora * 60 + minuto >= minutosActuales;
+    });
+
+    return siguiente || horariosDisponiblesOrdenados[0] || null;
+  })();
+
+  const categoriasOrdenadas = [...categorias].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })
+  );
+
+  const categoriasFiltradas = categoriasOrdenadas.filter((categoria) =>
+    categoria.nombre.toLowerCase().includes(searchCategoria.toLowerCase())
+  );
+
+  const categoriaSeleccionadaNombre = categorias.find(
+    (categoria) => categoria.id === categoriaSeleccionada
+  )?.nombre;
+
+  const getServiciosPorCategoria = (categoriaId: number) => {
+    return catalogoServicios
+      .filter((servicio) => servicio.categoria === categoriaId)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }));
+  };
 
   // ── Pantalla de espera mientras se confirma el pago en Mercado Pago ──
   if (isWaitingPayment) {
@@ -1007,882 +1077,929 @@ export default function NuevoTurnoPage() {
   }
 
   return (
-    <div className="container mx-auto p-6">
-      {/* Diálogo de confirmación para salir */}
-      {showExitConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="max-w-md mx-4">
-            <CardHeader>
-              <CardTitle>¿Cancelar reserva?</CardTitle>
-              <CardDescription>
-                Si sales ahora, perderás el progreso de tu reserva actual.
+    <div className="min-h-screen bg-slate-100/80 py-6">
+      <div className="container mx-auto max-w-5xl px-4 sm:px-6">
+        {/* Diálogo de confirmación para salir */}
+        {showExitConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <Card className="max-w-md mx-4">
+              <CardHeader>
+                <CardTitle>¿Cancelar reserva?</CardTitle>
+                <CardDescription>
+                  Si sales ahora, perderás el progreso de tu reserva actual.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-3 justify-end">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowExitConfirm(false)}
+                  >
+                    Continuar reserva
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => confirmExit('/dashboard/cliente')}
+                  >
+                    Sí, cancelar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="mb-8">
+          <Button
+            variant="ghost"
+            onClick={() => step > 1 ? setStep(step - 1) : handleExit('/dashboard/cliente')}
+            className="mb-4"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Volver
+          </Button>
+
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-indigo-600 to-violet-500 text-white shadow-lg shadow-indigo-200">
+              <CalendarIcon className="h-7 w-7" />
+            </div>
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight text-slate-900">
+                Agendar Nuevo Turno
+              </h1>
+              <p className="mt-1 text-lg text-slate-600">
+                Completá los siguientes pasos para reservar tu cita
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress Steps */}
+        <div className="mb-8 flex items-center gap-2 sm:gap-4">
+          {[1, 2, 3, 4].map((stepNum) => (
+            <div key={stepNum} className="flex flex-1 items-center">
+              <div className={`h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold ${step > stepNum
+                ? 'bg-emerald-500 text-white'
+                : step === stepNum
+                  ? 'bg-primary text-white'
+                  : 'bg-slate-300 text-slate-700'
+                }`}>
+                {step > stepNum ? <Check className="h-4 w-4" /> : stepNum}
+              </div>
+              {stepNum < 4 && (
+                <div className={`mx-2 h-0.5 flex-1 ${step > stepNum ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Error Alert */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-red-900">Error</h3>
+              <p className="text-red-700">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Resumen de servicio para pasos avanzados */}
+        {step >= 2 && servicioSeleccionado && (
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            {step >= 3 && empleadoSeleccionado ? (
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-violet-400 font-semibold text-white">
+                  {getInicialesProfesional(empleadoSeleccionado)}
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    {empleadoSeleccionado.first_name} {empleadoSeleccionado.last_name}
+                  </p>
+                  <p className="text-sm text-slate-500">{servicioSeleccionado.nombre}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-slate-500">Servicio:</p>
+                  <p className="font-semibold text-slate-900">{servicioSeleccionado.nombre}</p>
+                </div>
+                <p className="text-xl font-bold text-slate-900">${servicioSeleccionado.precio}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Step 1: Seleccionar Servicio */}
+        {step === 1 && (
+          <Card className="rounded-3xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-3xl text-slate-900">Paso 1: Elegí el servicio</CardTitle>
+              <CardDescription className="text-lg text-slate-600">Elegí el servicio que querés reservar</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Selector de categoría */}
+              <div>
+                <Label htmlFor="categoria" className="text-base font-semibold text-slate-900">Categoría</Label>
+                <Popover open={openCategoriaSelect} onOpenChange={setOpenCategoriaSelect}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="categoria"
+                      variant="outline"
+                      className="mt-2 h-12 w-full justify-between rounded-xl border-slate-300 bg-slate-50 text-base font-normal"
+                    >
+                      <span className={categoriaSeleccionadaNombre ? 'text-foreground' : 'text-muted-foreground'}>
+                        {categoriaSeleccionadaNombre || 'Seleccioná una categoría'}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <div className="border-b p-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={searchCategoria}
+                          onChange={(e) => setSearchCategoria(e.target.value)}
+                          placeholder="Buscá categoría..."
+                          className="h-9 pl-9"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto p-1">
+                      {categoriasFiltradas.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-muted-foreground">
+                          No se encontraron categorías
+                        </p>
+                      ) : (
+                        categoriasFiltradas.map((cat) => (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => {
+                              setCategoriaSeleccionada(cat.id);
+                              setServicioSeleccionado(null);
+                              setOpenCategoriaSelect(false);
+                            }}
+                            className={`flex w-full items-center justify-between rounded-sm px-2 py-2 text-left text-sm transition-colors hover:bg-accent ${categoriaSeleccionada === cat.id ? 'bg-accent' : ''}`}
+                          >
+                            <span>{cat.nombre}</span>
+                            {categoriaSeleccionada === cat.id && <Check className="h-4 w-4 text-primary" />}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const section = document.getElementById('categorias-disponibles');
+                      section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    ¿Querés conocer las categorías disponibles?
+                  </button>
+                </div>
+              </div>
+
+              <div id="categorias-disponibles" className="rounded-xl border bg-muted/30 p-4">
+                <h3 className="text-sm font-semibold text-foreground">Categorías disponibles y servicios asociados</h3>
+                <p className="mb-4 mt-1 text-xs text-muted-foreground">
+                  Listado alfabético para consultar rápidamente qué servicios incluye cada categoría.
+                </p>
+
+                {loadingCatalogoServicios ? (
+                  <div className="py-4">
+                    <BeautifulSpinner label="Cargando categorías y servicios..." />
+                  </div>
+                ) : categoriasOrdenadas.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay categorías disponibles en este momento.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {categoriasOrdenadas.map((categoria) => {
+                      const serviciosCategoria = getServiciosPorCategoria(categoria.id);
+                      return (
+                        <div key={categoria.id} className="rounded-lg border bg-background p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-medium text-foreground">{categoria.nombre}</p>
+                            <Badge variant="outline" className="text-xs">
+                              {serviciosCategoria.length} {serviciosCategoria.length === 1 ? 'servicio' : 'servicios'}
+                            </Badge>
+                          </div>
+                          {categoria.descripcion && (
+                            <p className="mt-1 text-xs text-muted-foreground">{categoria.descripcion}</p>
+                          )}
+
+                          {serviciosCategoria.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {serviciosCategoria.map((servicio) => (
+                                <button
+                                  key={servicio.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setCategoriaSeleccionada(categoria.id);
+                                    setServicioSeleccionado(servicio);
+                                    setStep(2);
+                                  }}
+                                  className="rounded-full border border-transparent bg-secondary px-2.5 py-1 text-xs font-normal text-secondary-foreground transition-colors hover:border-primary/30 hover:bg-primary/10"
+                                  aria-label={`Elegir servicio ${servicio.nombre}`}
+                                >
+                                  {servicio.nombre}
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              Esta categoría todavía no tiene servicios activos.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Lista de servicios */}
+              {categoriaSeleccionada && (
+                <div className="space-y-3">
+                  <Label className="text-base font-semibold text-slate-900">Servicio</Label>
+                  {loadingServicios ? (
+                    <div className="flex items-center justify-center py-8">
+                      <BeautifulSpinner label="Cargando servicios disponibles..." />
+                    </div>
+                  ) : serviciosFiltrados.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-8 text-center text-sm text-slate-600">
+                      No hay servicios disponibles en esta categoría
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {serviciosFiltrados.map((servicio) => (
+                        <div
+                          key={servicio.id}
+                          onClick={() => {
+                            setServicioSeleccionado(servicio);
+                            setStep(2);
+                          }}
+                          className={`group cursor-pointer rounded-2xl border p-4 transition-all ${servicioSeleccionado?.id === servicio.id
+                            ? 'border-primary bg-primary/5 shadow-md ring-1 ring-primary/20'
+                            : 'border-slate-200 bg-white hover:border-primary/40 hover:shadow-sm'
+                            }`}
+                        >
+                          <div className="mb-2 flex items-start justify-between gap-3">
+                            <div>
+                              <h3 className="font-semibold leading-tight text-slate-900">{servicio.nombre}</h3>
+                              <p className="mt-1 text-xs text-slate-500">{servicio.categoria_nombre}</p>
+                            </div>
+                            {servicioSeleccionado?.id === servicio.id && (
+                              <Badge className="bg-primary text-primary-foreground">Seleccionado</Badge>
+                            )}
+                          </div>
+
+                          <p className="mb-4 mt-1 line-clamp-2 text-sm text-slate-600">{servicio.descripcion}</p>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-xl font-bold text-primary">${servicio.precio}</span>
+                            <Badge variant="outline" className="bg-white text-xs">
+                              <Clock className="mr-1.5 h-3 w-3" />
+                              {servicio.duracion_horas}
+                            </Badge>
+                          </div>
+
+                          <div className="mt-3 border-t border-dashed border-slate-200 pt-3">
+                            <p className="text-xs font-medium text-primary underline-offset-4 group-hover:underline">
+                              Elegir y continuar
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step 2: Seleccionar Profesional */}
+        {step === 2 && servicioSeleccionado && (
+          <Card className="rounded-3xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-3xl text-slate-900">Paso 2: Elegí el profesional</CardTitle>
+              <CardDescription className="text-sm text-slate-500">
+                {empleadosFiltrados.length} {empleadosFiltrados.length === 1 ? 'profesional disponible' : 'profesionales disponibles'} para este servicio
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex gap-3 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowExitConfirm(false)}
-                >
-                  Continuar reserva
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => confirmExit('/dashboard/cliente')}
-                >
-                  Sí, cancelar
+            <CardContent className="space-y-5">
+              {loadingEmpleados ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
+                  <BeautifulSpinner label="Buscando profesionales disponibles..." />
+                  <p className="text-xs text-muted-foreground">Esto solo tomará un momento.</p>
+                </div>
+              ) : empleados.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <User className="w-10 h-10 text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    No hay profesionales disponibles
+                  </h3>
+                  <p className="text-gray-600 mb-4 max-w-md mx-auto">
+                    En este momento no hay profesionales disponibles para el servicio "{servicioSeleccionado.nombre}".
+                  </p>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Podés intentar:
+                  </p>
+                  <ul className="text-sm text-gray-600 space-y-1 mb-6">
+                    <li>• Seleccionar otro servicio similar</li>
+                    <li>• Contactar directamente al salón</li>
+                    <li>• Intentar en otro horario</li>
+                  </ul>
+                </div>
+              ) : (
+                <>
+                  {/* Barra de búsqueda */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      placeholder="Buscá por nombre, email o biografía..."
+                      value={searchEmpleado}
+                      onChange={(e) => setSearchEmpleado(e.target.value)}
+                      className="h-11 rounded-xl border-slate-200 bg-slate-50 pl-10"
+                    />
+                  </div>
+
+                  {/* Lista de profesionales */}
+                  {empleadosFiltrados.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-8 text-center">
+                      <p className="text-sm text-slate-600">
+                        No se encontraron profesionales con los criterios de búsqueda
+                      </p>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={() => {
+                          setSearchEmpleado('');
+                          setFilterEspecialidad('all');
+                        }}
+                        className="mt-2"
+                      >
+                        Limpiar búsqueda
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-4">
+                        {empleadosPaginados.map((empleado) => (
+                          <button
+                            key={empleado.id}
+                            type="button"
+                            onClick={() => setEmpleadoSeleccionado(empleado)}
+                            className={`w-full rounded-2xl border p-4 text-left transition-all ${empleadoSeleccionado?.id === empleado.id
+                              ? 'border-primary bg-primary/5 shadow-sm'
+                              : 'border-slate-200 bg-white hover:border-primary/40 hover:shadow-sm'
+                              }`}
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-violet-400 text-lg font-bold text-white">
+                                {getInicialesProfesional(empleado)}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="mb-1 flex items-start justify-between gap-2">
+                                  <h3 className="text-2xl font-semibold leading-tight text-slate-900">
+                                    {empleado.first_name} {empleado.last_name}
+                                  </h3>
+                                  <Badge variant="outline" className="border-yellow-300 bg-yellow-50 text-yellow-700">
+                                    ⭐ {empleado.nivel_experiencia?.nivel_display || 'Profesional'}
+                                  </Badge>
+                                </div>
+
+                                <p className="text-sm font-semibold text-primary">
+                                  {servicioSeleccionado.nombre}
+                                </p>
+
+                                <p className="mt-2 text-sm text-slate-700">
+                                  {empleado.biografia || 'Profesional disponible para este servicio'}
+                                </p>
+
+                                <div className="mt-3 rounded-xl bg-slate-100/80 p-3">
+                                  <p className="mb-2 text-sm font-semibold text-slate-700">Horarios laborales:</p>
+                                  <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm text-slate-700 sm:grid-cols-2">
+                                    {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'].map((dia) => {
+                                      const horariosDia = getHorariosAgrupados(empleado)[dia];
+                                      const textoHorario = horariosDia && horariosDia.length > 0
+                                        ? formatearRangosHorarios(horariosDia)
+                                        : 'Cerrado';
+                                      return (
+                                        <div key={`${empleado.id}-${dia}`} className="flex items-center justify-between gap-3">
+                                          <span className="font-medium text-slate-700">{dia}:</span>
+                                          <span className={textoHorario === 'Cerrado' ? 'text-slate-400' : 'text-slate-800'}>
+                                            {textoHorario}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                                  <span>{empleado.especialidad_display}</span>
+                                  <div className="flex items-center gap-1">
+                                    {empleadoSeleccionado?.id === empleado.id && (
+                                      <Check className="h-4 w-4 text-primary" />
+                                    )}
+                                    <span className="text-primary">Elegir</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {totalPaginas > 1 && currentPage < totalPaginas && (
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage((p) => Math.min(totalPaginas, p + 1))}
+                          className="pt-2 text-sm font-semibold text-primary underline-offset-4 hover:underline"
+                        >
+                          Ver más profesionales
+                        </button>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+              <div className="flex justify-start mt-6">
+                <Button variant="outline" onClick={() => setStep(1)}>
+                  Atrás
                 </Button>
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
+        )}
 
-      {/* Header */}
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => step > 1 ? setStep(step - 1) : handleExit('/dashboard/cliente')}
-          className="mb-4"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Volver
-        </Button>
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-          <CalendarIcon className="w-8 h-8" />
-          Agendar Nuevo Turno
-        </h1>
-        <p className="text-gray-600 mt-1">
-          Completa los siguientes pasos para reservar tu cita
-        </p>
-      </div>
-
-      {/* Progress Steps */}
-      <div className="mb-8 flex items-center justify-center gap-4">
-        {[1, 2, 3, 4].map((stepNum) => (
-          <div key={stepNum} className="flex items-center">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${step >= stepNum ? 'bg-primary text-white' : 'bg-gray-200 text-gray-600'
-              }`}>
-              {stepNum}
-            </div>
-            {stepNum < 4 && (
-              <div className={`w-12 h-1 ${step > stepNum ? 'bg-primary' : 'bg-gray-200'}`} />
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Error Alert */}
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
-          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
-          <div>
-            <h3 className="font-semibold text-red-900">Error</h3>
-            <p className="text-red-700">{error}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Step 1: Seleccionar Servicio */}
-      {step === 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Paso 1: Selecciona el servicio</CardTitle>
-            <CardDescription>Elige el servicio que deseas</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Selector de categoría */}
-            <div>
-              <Label htmlFor="categoria">Categoría</Label>
-              <Select
-                value={categoriaSeleccionada?.toString() || ''}
-                onValueChange={(value) => {
-                  setCategoriaSeleccionada(parseInt(value));
-                  setServicioSeleccionado(null);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona una categoría" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categorias.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id.toString()}>
-                      {cat.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Lista de servicios */}
-            {categoriaSeleccionada && (
-              <div className="space-y-2">
-                <Label>Servicio</Label>
-                {loadingServicios ? (
-                  <div className="flex items-center justify-center py-8">
-                    <BeautifulSpinner label="Cargando servicios disponibles..." />
+        {/* Step 3: Seleccionar Fecha y Hora */}
+        {step === 3 && empleadoSeleccionado && (
+          <Card className="rounded-3xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[1.7rem] leading-tight text-slate-900 sm:text-3xl">Paso 3: Elegí fecha y hora</CardTitle>
+              <CardDescription className="text-sm text-slate-600 sm:text-base">
+                Elegí el día y el horario para confirmar tu cita
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                  <div className="mb-3 flex items-center gap-2.5">
+                    <CalendarIcon className="h-4 w-4 text-primary" />
+                    <h3 className="text-base font-semibold text-slate-900">Elegí una fecha</h3>
                   </div>
-                ) : serviciosFiltrados.length === 0 ? (
-                  <p className="text-sm text-gray-600 text-center py-8">
-                    No hay servicios disponibles en esta categoría
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {serviciosFiltrados.map((servicio) => (
-                      <div
-                        key={servicio.id}
-                        onClick={() => setServicioSeleccionado(servicio)}
-                        className={`p-4 border rounded-lg cursor-pointer transition-all ${servicioSeleccionado?.id === servicio.id
-                          ? 'border-primary bg-primary/5 shadow-sm'
-                          : 'border-gray-200 hover:border-primary/50 hover:shadow-sm'
-                          }`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-semibold text-gray-900">{servicio.nombre}</h3>
-                          {servicioSeleccionado?.id === servicio.id && (
-                            <Check className="w-5 h-5 text-primary" />
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1 mb-3">{servicio.descripcion}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-primary font-semibold text-lg">${servicio.precio}</span>
-                          <Badge variant="outline" className="text-xs">
-                            <Clock className="w-3 h-3 mr-1" />
-                            {servicio.duracion_horas}
-                          </Badge>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-2 sm:p-3">
+                    <Calendar
+                      mode="single"
+                      selected={fechaSeleccionada ? new Date(fechaSeleccionada + 'T12:00:00') : undefined}
+                      onSelect={(date) => {
+                        if (date) {
+                          const dateString = date.toISOString().split('T')[0];
+                          if (isValidWorkDay(dateString)) {
+                            setFechaSeleccionada(dateString);
+                            setHorarioSeleccionado('');
+                            setError('');
+                          } else {
+                            setError(`${empleadoSeleccionado.first_name} no trabaja ese día. Por favor selecciona un día de trabajo: ${formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}`);
+                          }
+                        }
+                      }}
+                      disabled={(date) => {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const maxDate = new Date();
+                        maxDate.setDate(maxDate.getDate() + 30);
+                        maxDate.setHours(23, 59, 59, 999);
+                        if (date < today || date > maxDate) return true;
+                        const dateString = date.toISOString().split('T')[0];
+                        return !isValidWorkDay(dateString);
+                      }}
+                      className="mx-auto"
+                    />
+                  </div>
+
+                  {fechaSeleccionada ? (
+                    <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium capitalize text-blue-900">
+                      {new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-xs text-slate-500 sm:text-sm">
+                      Días laborables: {formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                  <div className="mb-3 flex items-center gap-2.5">
+                    <Clock className="h-4 w-4 text-primary" />
+                    <h3 className="text-base font-semibold text-slate-900">Elegí un horario</h3>
+                  </div>
+
+                  {!fechaSeleccionada ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 py-10 text-center text-sm text-slate-600">
+                      Primero elegí una fecha para ver los horarios disponibles.
+                    </div>
+                  ) : loadingHorarios ? (
+                    <div className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50">
+                      <BeautifulSpinner label="Consultando disponibilidad..." />
+                      <p className="text-xs text-muted-foreground text-center px-4">
+                        Obteniendo horarios reales disponibles para la fecha seleccionada.
+                      </p>
+                    </div>
+                  ) : horariosDisponiblesOrdenados.length > 0 ? (
+                    <>
+                      <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3.5">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                          Horario más próximo disponible:
+                        </p>
+                        <p className="text-xl font-bold leading-tight text-emerald-800">
+                          {proximoHorarioDisponible || horariosDisponiblesOrdenados[0]}
+                        </p>
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto pr-1.5">
+                        <div className="grid grid-cols-3 gap-2.5">
+                          {horariosDisponiblesOrdenados.map((horario) => (
+                            <button
+                              key={horario}
+                              type="button"
+                              onClick={() => setHorarioSeleccionado(horario)}
+                              className={`h-10 rounded-xl border text-sm font-semibold transition-all ${horarioSeleccionado === horario
+                                ? 'border-transparent bg-linear-to-r from-indigo-500 to-violet-500 text-white shadow-md'
+                                : 'border-slate-300 bg-white text-slate-700 hover:border-primary/40 hover:bg-primary/5'
+                                }`}
+                            >
+                              {horario}
+                            </button>
+                          ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
-      {/* Step 2: Seleccionar Profesional */}
-      {step === 2 && servicioSeleccionado && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Paso 2: Selecciona el profesional</CardTitle>
-            <CardDescription>
-              Servicio: {servicioSeleccionado.nombre} - ${servicioSeleccionado.precio}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {loadingEmpleados ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2">
-                <BeautifulSpinner label="Buscando profesionales disponibles..." />
-                <p className="text-xs text-muted-foreground">Esto solo tomará un momento.</p>
-              </div>
-            ) : empleados.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <User className="w-10 h-10 text-gray-400" />
+                      <div className="mt-4 flex items-center gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-full border border-slate-400 bg-white" />
+                          <span>Disponible</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
+                          <span>Seleccionado</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 py-8 text-center">
+                      <AlertCircle className="mx-auto mb-3 h-10 w-10 text-amber-600" />
+                      <h3 className="font-semibold text-amber-900">No hay horarios disponibles</h3>
+                      <p className="mx-auto mt-2 max-w-xs text-sm text-amber-800">
+                        No encontramos horarios libres para esta fecha. Probá otro día o cambiá de profesional.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  No hay profesionales disponibles
-                </h3>
-                <p className="text-gray-600 mb-4 max-w-md mx-auto">
-                  Actualmente no tenemos profesionales disponibles para el servicio "{servicioSeleccionado.nombre}".
+              </div>
+
+              <div className="flex justify-between border-t border-slate-100 pt-2">
+                <Button variant="outline" onClick={() => setStep(2)}>
+                  Atrás
+                </Button>
+                <Button
+                  onClick={() => setStep(4)}
+                  disabled={!horarioSeleccionado}
+                >
+                  Continuar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step 4: Confirmar */}
+        {step === 4 && (
+          <Card className="rounded-3xl border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-[1.7rem] leading-tight text-slate-900 sm:text-3xl">Paso 4: Confirmar turno</CardTitle>
+              <CardDescription className="text-sm text-slate-600 sm:text-base">Revisa los detalles antes de confirmar</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Resumen detallado */}
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                {/* Header del resumen */}
+                <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-5">
+                  <h3 className="font-semibold text-slate-900">Resumen del turno</h3>
+                </div>
+
+                {/* Detalles */}
+                <div className="space-y-4 p-4 sm:p-5">
+                  {/* Servicio */}
+                  <div>
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Servicio</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-slate-900">{servicioSeleccionado?.nombre}</p>
+                        <p className="text-sm text-slate-500">{servicioSeleccionado?.categoria_nombre}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold leading-none text-slate-900">${servicioSeleccionado?.precio}</p>
+                        <p className="mt-1 text-xs text-slate-500">{servicioSeleccionado?.duracion_horas}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-200" />
+
+                  {/* Profesional */}
+                  <div>
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Profesional</p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-indigo-500 to-violet-400 text-xs font-semibold text-white">
+                        {empleadoSeleccionado ? getInicialesProfesional(empleadoSeleccionado) : 'PR'}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {empleadoSeleccionado?.first_name} {empleadoSeleccionado?.last_name}
+                        </p>
+                        {empleadoSeleccionado?.nivel_experiencia ? (
+                          <p className="text-xs text-slate-500">
+                            ⭐ {empleadoSeleccionado.nivel_experiencia.nivel_display}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-500">Profesional asignado</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-200" />
+
+                  {/* Fecha y Hora */}
+                  <div>
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Fecha y Hora</p>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-900">
+                      <div className="flex items-center gap-1.5 text-sm font-medium capitalize">
+                        <CalendarIcon className="h-4 w-4 text-primary" />
+                        <span>
+                          {new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
+                            weekday: 'long',
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Clock className="h-4 w-4 text-primary" />
+                        <span>{horarioSeleccionado}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-200" />
+
+                  {/* Sala */}
+                  <div>
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sala</p>
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-slate-900">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      <span>{servicioSeleccionado?.sala_nombre || 'Sin sala asignada'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notas opcionales */}
+              <div>
+                <Label htmlFor="notas" className="text-base font-semibold">
+                  Notas adicionales (opcional)
+                </Label>
+                <p className="text-sm text-gray-600 mb-2">
+                  ¿Tenés alguna preferencia o comentario para el profesional?
                 </p>
-                <p className="text-sm text-gray-500 mb-4">
-                  Puedes intentar:
-                </p>
-                <ul className="text-sm text-gray-600 space-y-1 mb-6">
-                  <li>• Seleccionar otro servicio similar</li>
-                  <li>• Contactar directamente al salón</li>
-                  <li>• Intentar en otro horario</li>
+                <Textarea
+                  id="notas"
+                  placeholder="Ej: Prefiero corte con tijera, tengo alergia a ciertos productos, etc."
+                  value={notasCliente}
+                  onChange={(e) => setNotasCliente(e.target.value)}
+                  rows={3}
+                  className="resize-none rounded-xl border-slate-300"
+                />
+              </div>
+
+              {/* Información importante */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4" />
+                  Información importante
+                </h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• Tu turno quedará como <strong>pendiente</strong> hasta ser confirmado</li>
+                  <li>• Recibirás una notificación cuando sea confirmado</li>
+                  <li>• Por favor, llegá 5 minutos antes de tu horario</li>
+                  <li>• Podés cancelar hasta 24 horas antes sin cargo</li>
                 </ul>
               </div>
-            ) : (
-              <>
-                {/* Barra de búsqueda y filtros */}
-                <div className="space-y-4 mb-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Búsqueda por nombre */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        placeholder="Buscar por nombre, email o biografía..."
-                        value={searchEmpleado}
-                        onChange={(e) => setSearchEmpleado(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
 
-                    {/* Filtro por especialidad */}
-                    {especialidadesUnicas.length > 1 && (
-                      <Select value={filterEspecialidad} onValueChange={setFilterEspecialidad}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Todas las especialidades" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todas las especialidades</SelectItem>
-                          {especialidadesUnicas.map((esp) => (
-                            <SelectItem key={esp} value={esp.toLowerCase()}>
-                              {esp}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
+              <div className="flex justify-between mt-6">
+                <Button variant="outline" onClick={() => setStep(3)}>
+                  Atrás
+                </Button>
+                <Button
+                  onClick={() => setShowConfirmDialog(true)}
+                  disabled={loading}
+                  size="lg"
+                >
+                  <Check className="w-4 h-4 mr-2" />
+                  Confirmar turno
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-                  {/* Contador de resultados */}
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <p className="text-sm text-blue-900">
-                      {empleadosFiltrados.length === empleados.length ? (
-                        <>
-                          <strong>{empleados.length}</strong> {empleados.length === 1 ? 'profesional disponible' : 'profesionales disponibles'} para este servicio
-                        </>
+        {/* Dialog de confirmación con cálculo de seña */}
+        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Confirmar reserva</DialogTitle>
+              <DialogDescription>
+                Revisá el detalle del pago antes de confirmar tu turno
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {/* Información del servicio */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-2">Resumen del servicio</h4>
+                <p className="text-sm text-gray-600">{servicioSeleccionado?.nombre}</p>
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-sm text-gray-600">Precio total:</span>
+                  <span className="text-lg font-bold text-gray-900">{formatCurrency(getPrecioServicioConFidelizacion())}</span>
+                </div>
+              </div>
+
+              {/* Cálculo de monto a pagar ahora (seña o servicio completo) */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-blue-900 mb-1">
+                      {pagarServicioCompleto ? 'Pagar servicio completo ahora' : 'Monto de seña requerido'}
+                    </h4>
+                    <p className="text-sm text-blue-700">
+                      {pagarServicioCompleto ? (
+                        'Vas a dejar el servicio completamente abonado. El día del turno no vas a tener que pagar la diferencia.'
                       ) : (
                         <>
-                          Mostrando <strong>{empleadosFiltrados.length}</strong> de <strong>{empleados.length}</strong> profesionales
+                          Para reservar tu turno debés abonar el <strong>50%</strong> del precio total como seña.
                         </>
                       )}
                     </p>
                   </div>
                 </div>
 
-                {/* Lista de profesionales paginada */}
-                {empleadosFiltrados.length === 0 ? (
-                  <div className="text-center py-8">
-                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <User className="w-8 h-8 text-gray-400" />
-                    </div>
-                    <p className="text-gray-600">
-                      No se encontraron profesionales con los criterios de búsqueda
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSearchEmpleado('');
-                        setFilterEspecialidad('all');
-                      }}
-                      className="mt-4"
-                    >
-                      Limpiar filtros
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                      {empleadosPaginados.map((empleado) => (
-                        <div
-                          key={empleado.id}
-                          onClick={() => setEmpleadoSeleccionado(empleado)}
-                          className={`p-4 border rounded-lg cursor-pointer transition-all ${empleadoSeleccionado?.id === empleado.id
-                            ? 'border-primary bg-primary/5 shadow-md'
-                            : 'border-gray-200 hover:border-primary/50 hover:shadow-sm'
-                            }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="w-14 h-14 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center shrink-0">
-                              <User className="w-7 h-7 text-primary" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between mb-1">
-                                <h3 className="font-semibold text-gray-900">
-                                  {empleado.first_name} {empleado.last_name}
-                                </h3>
-                                {empleadoSeleccionado?.id === empleado.id && (
-                                  <Check className="w-5 h-5 text-primary shrink-0" />
-                                )}
-                              </div>
-
-                              <div className="flex flex-wrap gap-2 mb-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {empleado.especialidad_display}
-                                </Badge>
-                                {empleado.nivel_experiencia && (
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-xs ${getExperienciaColor(empleado.nivel_experiencia.nivel)}`}
-                                  >
-                                    {getExperienciaIcon(empleado.nivel_experiencia.nivel)} {empleado.nivel_experiencia.nivel_display}
-                                  </Badge>
-                                )}
-                              </div>
-
-                              {empleado.biografia && (
-                                <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                                  {empleado.biografia}
-                                </p>
-                              )}
-
-                              <div className="text-xs text-gray-500 space-y-1">
-                                {empleado.horarios_detallados && empleado.horarios_detallados.length > 0 ? (
-                                  <>
-                                    <div className="flex items-start gap-1">
-                                      <Clock className="w-3 h-3 mt-0.5 shrink-0" />
-                                      <div className="space-y-0.5">
-                                        {Object.entries(getHorariosAgrupados(empleado)).map(([dia, horarios]) => (
-                                          <div key={dia} className="text-xs">
-                                            <span className="font-medium">{dia}:</span>{' '}
-                                            {formatearRangosHorarios(horarios)}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div className="flex items-center gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    <span>
-                                      {empleado.horario_entrada.slice(0, 5)} - {empleado.horario_salida.slice(0, 5)}
-                                    </span>
-                                  </div>
-                                )}
-                                <div className="flex items-center gap-1">
-                                  <CalendarIcon className="w-3 h-3" />
-                                  <span>{formatDiasTrabajo(empleado.dias_trabajo)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Controles de paginación */}
-                    {totalPaginas > 1 && (
-                      <div className="flex items-center justify-between border-t pt-4">
-                        <div className="text-sm text-gray-600">
-                          Página {currentPage} de {totalPaginas} • Mostrando {indiceInicio + 1}-{Math.min(indiceFin, empleadosFiltrados.length)} de {empleadosFiltrados.length}
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                            disabled={currentPage === 1}
-                          >
-                            <ChevronLeft className="w-4 h-4 mr-1" />
-                            Anterior
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(p => Math.min(totalPaginas, p + 1))}
-                            disabled={currentPage === totalPaginas}
-                          >
-                            Siguiente
-                            <ChevronRight className="w-4 h-4 ml-1" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-
-            <div className="flex justify-start mt-6">
-              <Button variant="outline" onClick={() => setStep(1)}>
-                Atrás
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Step 3: Seleccionar Fecha y Hora */}
-      {step === 3 && empleadoSeleccionado && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Paso 3: Selecciona fecha y hora</CardTitle>
-            <CardDescription>
-              Con {empleadoSeleccionado.first_name} {empleadoSeleccionado.last_name}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Información del profesional */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
-                  <User className="w-6 h-6 text-primary" />
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-900">
-                    {empleadoSeleccionado.first_name} {empleadoSeleccionado.last_name}
-                  </p>
-                  <p className="text-sm text-gray-600">{empleadoSeleccionado.especialidad_display}</p>
-                </div>
-              </div>
-              {empleadoSeleccionado.horarios_detallados && empleadoSeleccionado.horarios_detallados.length > 0 ? (
-                <div className="space-y-1 text-sm text-gray-700">
-                  <div className="flex items-start gap-2">
-                    <Clock className="w-4 h-4 text-gray-500 mt-0.5 shrink-0" />
-                    <div className="space-y-1">
-                      {Object.entries(getHorariosAgrupados(empleadoSeleccionado)).map(([dia, horarios]) => (
-                        <div key={dia}>
-                          <span className="font-medium">{dia}:</span>{' '}
-                          {formatearRangosHorarios(horarios)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex items-center gap-2 text-gray-700">
-                    <Clock className="w-4 h-4 text-gray-500" />
-                    <span>
-                      {empleadoSeleccionado.horario_entrada.slice(0, 5)} - {empleadoSeleccionado.horario_salida.slice(0, 5)}
+                <div className="flex items-center justify-between pt-3 border-t border-blue-200">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-medium text-blue-800 uppercase">Modalidad de pago</span>
+                    <span className="text-sm text-blue-900">
+                      {pagarServicioCompleto ? 'Servicio completo' : 'Solo seña'}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 text-gray-700">
-                    <CalendarIcon className="w-4 h-4 text-gray-500" />
-                    <span>{formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-blue-800">Solo seña</span>
+                    <Switch
+                      checked={pagarServicioCompleto}
+                      onCheckedChange={setPagarServicioCompleto}
+                      className="data-[state=checked]:bg-blue-600"
+                    />
+                    <span className="text-xs text-blue-800">Servicio completo</span>
                   </div>
                 </div>
-              )}
-            </div>
 
-            {/* Selector de fecha */}
-            <div>
-              <Label htmlFor="fecha">Fecha</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start text-left font-normal mt-1"
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {fechaSeleccionada ? (
-                      new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
-                        weekday: 'long',
-                        day: 'numeric',
-                        month: 'long',
-                        year: 'numeric'
-                      })
-                    ) : (
-                      <span className="text-muted-foreground">Selecciona una fecha</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={fechaSeleccionada ? new Date(fechaSeleccionada + 'T12:00:00') : undefined}
-                    onSelect={(date) => {
-                      if (date) {
-                        const dateString = date.toISOString().split('T')[0];
-                        if (isValidWorkDay(dateString)) {
-                          setFechaSeleccionada(dateString);
-                          setHorarioSeleccionado('');
-                          setError('');
-                        } else {
-                          setError(`${empleadoSeleccionado.first_name} no trabaja ese día. Por favor selecciona un día de trabajo: ${formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)}`);
-                        }
-                      }
-                    }}
-                    disabled={(date) => {
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      const maxDate = new Date();
-                      maxDate.setDate(maxDate.getDate() + 30);
-                      maxDate.setHours(23, 59, 59, 999);
-
-                      // Deshabilitar fechas fuera del rango
-                      if (date < today || date > maxDate) return true;
-
-                      // Deshabilitar días que no son de trabajo
-                      const dateString = date.toISOString().split('T')[0];
-                      return !isValidWorkDay(dateString);
-                    }}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-              <p className="text-xs text-gray-500 mt-1">
-                Días laborables: {formatDiasTrabajo(empleadoSeleccionado.dias_trabajo)} | Hasta 30 días en adelante
-              </p>
-            </div>
-
-            {/* Horarios disponibles */}
-            {fechaSeleccionada && (
-              <div>
-                <Label className="mb-2 block">Horarios disponibles</Label>
-                {loadingHorarios ? (
-                  <div className="flex flex-col items-center justify-center py-12 bg-gray-50 dark:bg-secondary/20 rounded-lg gap-3">
-                    <BeautifulSpinner label="Consultando disponibilidad..." />
-                    <p className="text-xs text-muted-foreground text-center">
-                      Verificando horarios para {new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
-                        weekday: 'long',
-                        day: 'numeric',
-                        month: 'long'
-                      })}
-                    </p>
-                  </div>
-                ) : horariosDisponibles.length > 0 ? (
-                  <>
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
-                      <p className="text-sm text-green-900">
-                        ✓ {horariosDisponibles.length} horarios disponibles para esta fecha
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                      {horariosDisponibles.map((horario) => (
-                        <Button
-                          key={horario}
-                          variant={horarioSeleccionado === horario ? 'default' : 'outline'}
-                          onClick={() => setHorarioSeleccionado(horario)}
-                          className={`w-full ${horarioSeleccionado === horario
-                            ? 'shadow-md'
-                            : 'hover:border-primary hover:bg-primary/5'
-                            }`}
-                        >
-                          {horario}
-                        </Button>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-center py-8 bg-amber-50 border border-amber-200 rounded-lg">
-                    <AlertCircle className="w-12 h-12 mx-auto text-amber-600 mb-3" />
-                    <h3 className="font-semibold text-amber-900 mb-2">
-                      No hay horarios disponibles
-                    </h3>
-                    <p className="text-sm text-amber-800 mb-3">
-                      {empleadoSeleccionado.first_name} no tiene horarios disponibles para la fecha seleccionada.
-                    </p>
-                    <p className="text-xs text-amber-700">
-                      Por favor, intenta con otra fecha o selecciona otro profesional.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex justify-between mt-6">
-              <Button variant="outline" onClick={() => setStep(2)}>
-                Atrás
-              </Button>
-              <Button
-                onClick={() => setStep(4)}
-                disabled={!horarioSeleccionado}
-              >
-                Continuar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Step 4: Confirmar */}
-      {step === 4 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Paso 4: Confirmar turno</CardTitle>
-            <CardDescription>Revisa los detalles antes de confirmar</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Resumen detallado */}
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              {/* Header del resumen */}
-              <div className="bg-primary/5 border-b border-gray-200 px-4 py-3">
-                <h3 className="font-semibold text-gray-900">Resumen de tu turno</h3>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-blue-900">
+                    {pagarServicioCompleto ? 'Monto a pagar ahora:' : 'Monto de seña:'}
+                  </span>
+                  <span className="text-xl font-bold text-blue-900">{formatCurrency(calcularMontoBasePago())}</span>
+                </div>
               </div>
 
-              {/* Detalles */}
-              <div className="p-4 space-y-4">
-                {/* Servicio */}
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase mb-1">Servicio</p>
+              {/* Selector de usar saldo en el pago actual */}
+              {billetera && parseFloat(billetera.saldo) > 0 && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-gray-900">{servicioSeleccionado?.nombre}</p>
-                      <p className="text-sm text-gray-600">{servicioSeleccionado?.categoria_nombre}</p>
-                    </div>
-                    <Badge variant="outline">
-                      <Clock className="w-3 h-3 mr-1" />
-                      {servicioSeleccionado?.duracion_horas}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-100"></div>
-
-                {/* Sala */}
-                {servicioSeleccionado?.sala_nombre && (
-                  <>
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase mb-1">Sala</p>
-                      <div className="flex items-center gap-2 text-gray-900">
-                        <MapPin className="w-4 h-4 text-primary" />
-                        <span className="font-medium">{servicioSeleccionado.sala_nombre}</span>
+                    <div className="flex items-center gap-2">
+                      <Wallet className="w-5 h-5 text-green-600" />
+                      <div>
+                        <p className="font-semibold text-green-900">Usar saldo de billetera en este pago</p>
+                        <p className="text-sm text-green-700">
+                          Saldo disponible: {formatCurrency(parseFloat(billetera.saldo))}
+                        </p>
                       </div>
                     </div>
-                    <div className="border-t border-gray-100"></div>
-                  </>
-                )}
-
-                {/* Profesional */}
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase mb-1">Profesional</p>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-linear-to-br from-primary/20 to-primary/10 rounded-full flex items-center justify-center">
-                      <User className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {empleadoSeleccionado?.first_name} {empleadoSeleccionado?.last_name}
-                      </p>
-                      <p className="text-sm text-gray-600">{empleadoSeleccionado?.especialidad_display}</p>
-                    </div>
+                    <Switch
+                      checked={usarSaldoEnSena}
+                      onCheckedChange={setUsarSaldoEnSena}
+                      className="data-[state=checked]:bg-green-600"
+                    />
                   </div>
-                  {empleadoSeleccionado?.nivel_experiencia && (
-                    <Badge
-                      variant="outline"
-                      className={`mt-2 text-xs ${getExperienciaColor(empleadoSeleccionado.nivel_experiencia.nivel)}`}
-                    >
-                      {getExperienciaIcon(empleadoSeleccionado.nivel_experiencia.nivel)} {empleadoSeleccionado.nivel_experiencia.nivel_display}
-                    </Badge>
+
+                  {usarSaldoEnSena && (
+                    <div className="pt-3 border-t border-green-200 space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-green-700">
+                          {pagarServicioCompleto ? 'Monto a pagar:' : 'Seña requerida:'}
+                        </span>
+                        <span className="font-medium">{formatCurrency(calcularMontoBasePago())}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-green-700">Saldo aplicado:</span>
+                        <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizadoEnPago())}</span>
+                      </div>
+                      <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
+                        <span className="text-green-900">Total a pagar ahora:</span>
+                        <span className={calcularPagoFinalAhora() === 0 ? 'text-green-600' : 'text-green-900'}>
+                          {formatCurrency(calcularPagoFinalAhora())}
+                        </span>
+                      </div>
+                      {calcularPagoFinalAhora() === 0 && (
+                        <p className="text-xs text-green-600 mt-2 text-center">
+                          🎉 ¡Tu saldo cubre el 100% de este pago!
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
+              )}
 
-                <div className="border-t border-gray-100"></div>
-
-                {/* Fecha y Hora */}
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase mb-1">Fecha y Hora</p>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-gray-900">
-                      <CalendarIcon className="w-4 h-4 text-primary" />
-                      <span className="font-medium">
-                        {new Date(fechaSeleccionada + 'T12:00:00').toLocaleDateString('es-AR', {
-                          weekday: 'long',
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-gray-900">
-                      <Clock className="w-4 h-4 text-primary" />
-                      <span className="font-medium">{horarioSeleccionado}</span>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Notas opcionales */}
-            <div>
-              <Label htmlFor="notas" className="text-base font-semibold">
-                Notas adicionales (opcional)
-              </Label>
-              <p className="text-sm text-gray-600 mb-2">
-                ¿Tienes alguna preferencia o comentario para el profesional?
-              </p>
-              <Textarea
-                id="notas"
-                placeholder="Ej: Prefiero corte con tijera, tengo alergia a ciertos productos, etc."
-                value={notasCliente}
-                onChange={(e) => setNotasCliente(e.target.value)}
-                rows={3}
-                className="resize-none"
-              />
-            </div>
-
-            {/* Información importante */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h4 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" />
-                Información importante
-              </h4>
-              <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Tu turno quedará como <strong>pendiente</strong> hasta ser confirmado</li>
-                <li>• Recibirás una notificación cuando sea confirmado</li>
-                <li>• Por favor, llega 5 minutos antes de tu horario</li>
-                <li>• Puedes cancelar hasta 24 horas antes sin cargo</li>
-              </ul>
-            </div>
-
-            <div className="flex justify-between mt-6">
-              <Button variant="outline" onClick={() => setStep(3)}>
-                Atrás
-              </Button>
-              <Button
-                onClick={() => setShowConfirmDialog(true)}
-                disabled={loading}
-                size="lg"
-              >
-                <Check className="w-4 h-4 mr-2" />
-                Confirmar Turno
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Dialog de confirmación con cálculo de seña */}
-      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Confirmar Reserva</DialogTitle>
-            <DialogDescription>
-              Revisa el detalle del pago antes de confirmar tu turno
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Información del servicio */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h4 className="font-semibold text-gray-900 mb-2">Resumen del servicio</h4>
-              <p className="text-sm text-gray-600">{servicioSeleccionado?.nombre}</p>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-sm text-gray-600">Precio total:</span>
-                <span className="text-lg font-bold text-gray-900">{formatCurrency(getPrecioServicioConFidelizacion())}</span>
-              </div>
-            </div>
-
-            {/* Cálculo de monto a pagar ahora (seña o servicio completo) */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-semibold text-blue-900 mb-1">
-                    {pagarServicioCompleto ? 'Pagar servicio completo ahora' : 'Monto de seña requerido'}
-                  </h4>
-                  <p className="text-sm text-blue-700">
-                    {pagarServicioCompleto ? (
-                      'Vas a dejar el servicio completamente abonado. El día del turno no tendrás que pagar la diferencia.'
-                    ) : (
-                      <>
-                        Para reservar tu turno debés abonar el <strong>50%</strong> del precio total como seña.
-                      </>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-3 border-t border-blue-200">
-                <div className="flex flex-col">
-                  <span className="text-xs font-medium text-blue-800 uppercase">Modalidad de pago</span>
-                  <span className="text-sm text-blue-900">
-                    {pagarServicioCompleto ? 'Servicio completo' : 'Solo seña'}
+              {/* Monto final destacado */}
+              <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-semibold text-gray-900">Pagarás ahora:</span>
+                  <span className="text-2xl font-bold text-primary">
+                    {formatCurrency(calcularPagoFinalAhora())}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-blue-800">Solo seña</span>
-                  <Switch
-                    checked={pagarServicioCompleto}
-                    onCheckedChange={setPagarServicioCompleto}
-                    className="data-[state=checked]:bg-blue-600"
-                  />
-                  <span className="text-xs text-blue-800">Servicio completo</span>
-                </div>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="font-medium text-blue-900">
-                  {pagarServicioCompleto ? 'Monto a pagar ahora:' : 'Monto de seña:'}
-                </span>
-                <span className="text-xl font-bold text-blue-900">{formatCurrency(calcularMontoBasePago())}</span>
+                <p className="text-xs text-gray-600 mt-2">
+                  {pagarServicioCompleto
+                    ? 'Estarás pagando el servicio completo por adelantado.'
+                    : 'El resto se abona al finalizar el servicio.'}
+                </p>
               </div>
             </div>
 
-            {/* Selector de usar saldo en el pago actual */}
-            {billetera && parseFloat(billetera.saldo) > 0 && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-5 h-5 text-green-600" />
-                    <div>
-                      <p className="font-semibold text-green-900">Usar saldo de billetera en este pago</p>
-                      <p className="text-sm text-green-700">
-                        Saldo disponible: {formatCurrency(parseFloat(billetera.saldo))}
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={usarSaldoEnSena}
-                    onCheckedChange={setUsarSaldoEnSena}
-                    className="data-[state=checked]:bg-green-600"
-                  />
-                </div>
-
-                {usarSaldoEnSena && (
-                  <div className="pt-3 border-t border-green-200 space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-green-700">
-                        {pagarServicioCompleto ? 'Monto a pagar:' : 'Seña requerida:'}
-                      </span>
-                      <span className="font-medium">{formatCurrency(calcularMontoBasePago())}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-green-700">Saldo aplicado:</span>
-                      <span className="font-medium text-green-600">-{formatCurrency(getSaldoUtilizadoEnPago())}</span>
-                    </div>
-                    <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
-                      <span className="text-green-900">Total a pagar ahora:</span>
-                      <span className={calcularPagoFinalAhora() === 0 ? 'text-green-600' : 'text-green-900'}>
-                        {formatCurrency(calcularPagoFinalAhora())}
-                      </span>
-                    </div>
-                    {calcularPagoFinalAhora() === 0 && (
-                      <p className="text-xs text-green-600 mt-2 text-center">
-                        🎉 ¡Tu saldo cubre el 100% de este pago!
-                      </p>
-                    )}
-                  </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowConfirmDialog(false);
+                  setUsarSaldoEnSena(false);
+                }}
+                disabled={loading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={loading}
+                className={usarSaldoEnSena && calcularPagoFinalAhora() === 0 ? 'bg-green-600 hover:bg-green-700' : ''}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Procesando...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 mr-2" />
+                    Confirmar y Pagar
+                  </>
                 )}
-              </div>
-            )}
-
-            {/* Monto final destacado */}
-            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-              <div className="flex justify-between items-center">
-                <span className="text-lg font-semibold text-gray-900">Pagarás ahora:</span>
-                <span className="text-2xl font-bold text-primary">
-                  {formatCurrency(calcularPagoFinalAhora())}
-                </span>
-              </div>
-              <p className="text-xs text-gray-600 mt-2">
-                {pagarServicioCompleto
-                  ? 'Estarás pagando el servicio completo por adelantado.'
-                  : 'El resto se abona al finalizar el servicio.'}
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowConfirmDialog(false);
-                setUsarSaldoEnSena(false);
-              }}
-              disabled={loading}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={loading}
-              className={usarSaldoEnSena && calcularPagoFinalAhora() === 0 ? 'bg-green-600 hover:bg-green-700' : ''}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Procesando...
-                </>
-              ) : (
-                <>
-                  <Check className="w-4 h-4 mr-2" />
-                  Confirmar y Pagar
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 }

@@ -12,8 +12,15 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-# Instancia única del SDK (reutilizada en toda la app)
-sdk = mercadopago.SDK(settings.MP_ACCESS_TOKEN)
+
+def _get_sdk() -> mercadopago.SDK:
+    """Crea el SDK con el token actual y valida configuración mínima."""
+    access_token = (getattr(settings, "MP_ACCESS_TOKEN", "") or "").strip()
+    if not access_token:
+        raise ValueError(
+            "Configuración incompleta de Mercado Pago: falta MP_ACCESS_TOKEN en backend/.env"
+        )
+    return mercadopago.SDK(access_token)
 
 
 def crear_preferencia(
@@ -33,6 +40,8 @@ def crear_preferencia(
     Devuelve un dict con:
         preference_id, init_point, sandbox_init_point
     """
+    sdk = _get_sdk()
+
     # Usar las URLs de retorno específicas de MP si están configuradas,
     # con fallback a FRONTEND_URL. Estas pueden apuntar a la URL pública (ngrok/prod).
     back_urls_final = back_urls or {
@@ -84,6 +93,21 @@ def crear_preferencia(
 
     response = sdk.preference().create(preference_data)
 
+    # Algunas cuentas/credenciales de MP rechazan la preferencia cuando se envía
+    # payer.email (PolicyAgent). Reintentamos sin payer para no bloquear el flujo.
+    response_body = response.get("response", {})
+    if (
+        response.get("status") == 403
+        and response_body.get("blocked_by") == "PolicyAgent"
+        and preference_data.get("payer")
+    ):
+        logger.warning(
+            "MP rechazó preferencia con payer.email (%s). Reintentando sin payer.",
+            response_body,
+        )
+        preference_data.pop("payer", None)
+        response = sdk.preference().create(preference_data)
+
     if response["status"] not in (200, 201):
         raise ValueError(
             f"Mercado Pago rechazó la preferencia: {response.get('response', {})}"
@@ -99,6 +123,7 @@ def crear_preferencia(
 
 def obtener_pago(payment_id: str) -> dict:
     """Consulta el estado de un pago por su payment_id."""
+    sdk = _get_sdk()
     response = sdk.payment().get(payment_id)
     if response["status"] != 200:
         raise ValueError(
@@ -109,6 +134,7 @@ def obtener_pago(payment_id: str) -> dict:
 
 def obtener_orden(merchant_order_id: str) -> dict:
     """Consulta una merchant_order por su ID."""
+    sdk = _get_sdk()
     response = sdk.merchant_order().get(merchant_order_id)
     if response["status"] != 200:
         raise ValueError(
@@ -119,6 +145,7 @@ def obtener_orden(merchant_order_id: str) -> dict:
 
 def buscar_pago_aprobado_por_preference(preference_id: str) -> dict | None:
     """Busca pagos por preference_id (vía external_reference) y devuelve el primero aprobado."""
+    sdk = _get_sdk()
     pref_resp = sdk.preference().get(preference_id)
     if pref_resp["status"] != 200:
         raise ValueError(

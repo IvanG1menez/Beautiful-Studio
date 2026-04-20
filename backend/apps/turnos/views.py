@@ -25,6 +25,7 @@ from apps.turnos.services.reasignacion_service import (
     responder_oferta_reasignacion,
     obtener_detalles_oferta_reasignacion,
 )
+from apps.turnos.services.cancelacion_service import cancelar_turno_para_cliente
 
 logger = logging.getLogger(__name__)
 
@@ -283,108 +284,26 @@ class TurnoViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Cancelar turno en lugar de eliminar"""
         turno = self.get_object()
+        motivo = request.data.get("motivo")
 
-        # Guardar estado previo para el historial
-        estado_anterior = turno.estado
-
-        # Motivo de cancelación (obligatorio para el flujo de cliente)
-        motivo = (request.data.get("motivo") or "").strip()
-        if not motivo:
+        try:
+            resultado = cancelar_turno_para_cliente(
+                turno=turno,
+                usuario=request.user,
+                motivo=motivo,
+            )
+        except ValueError as exc:
             return Response(
-                {"error": "Debes indicar un motivo de cancelación."},
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        if not turno.puede_cancelar():
-            return Response(
-                {"error": "Este turno no puede ser cancelado."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Obtener configuración global
-        from apps.authentication.models import ConfiguracionGlobal
-
-        config_global = ConfiguracionGlobal.get_config()
-        min_horas_credito_global = config_global.min_horas_cancelacion_credito
-        min_horas_credito_servicio = max(
-            24,
-            int(getattr(turno.servicio, "horas_minimas_credito_cancelacion", 24) or 24),
-        )
-        min_horas_credito = max(min_horas_credito_global, min_horas_credito_servicio)
-
-        # Calcular diferencia de horas entre ahora y el turno
-        horas_diferencia = (turno.fecha_hora - timezone.now()).total_seconds() / 3600
-
-        # Si cancela con más de las horas configuradas de anticipación, agregar crédito
-        credito_aplicado = False
-        monto_credito_valor = 0
-
-        if horas_diferencia >= min_horas_credito and turno.cliente:
-            from apps.clientes.models import Billetera
-            from decimal import Decimal
-
-            # Obtener o crear billetera
-            billetera, created = Billetera.objects.get_or_create(
-                cliente=turno.cliente, defaults={"saldo": Decimal("0.00")}
-            )
-
-            # Calcular monto a acreditar con política fija:
-            # - Si pagó completo: devuelve 100% del servicio
-            # - Si pagó seña: devuelve 100% de la seña
-            precio_base = Decimal(turno.precio_final or turno.servicio.precio or 0)
-            senia_pagada = Decimal(turno.senia_pagada or 0)
-            pago_completo = turno.resolver_tipo_pago() == "PAGO_COMPLETO"
-
-            if pago_completo:
-                monto_credito = precio_base
-            else:
-                monto_credito = senia_pagada
-
-            monto_credito = monto_credito.quantize(Decimal("0.01"))
-
-            if monto_credito <= 0:
-                credito_aplicado = False
-                monto_credito_valor = 0
-            else:
-                # Agregar crédito
-                billetera.agregar_saldo(
-                    monto=monto_credito,
-                    motivo=f"Cancelación anticipada del turno #{turno.id} - {turno.servicio.nombre}",
-                )
-
-                # Actualizar el movimiento con referencia al turno
-                ultimo_movimiento = billetera.movimientos.first()
-                if ultimo_movimiento:
-                    ultimo_movimiento.turno = turno
-                    ultimo_movimiento.save()
-
-                credito_aplicado = True
-                monto_credito_valor = float(monto_credito)
-
-        turno.estado = "cancelado"
-        turno.motivo_cancelacion = motivo
-        turno.save()
-
-        # Registrar en historial
-        HistorialTurno.objects.create(
-            turno=turno,
-            usuario=request.user,
-            accion="Turno cancelado",
-            estado_anterior=estado_anterior,
-            estado_nuevo="cancelado",
-            observaciones=(
-                f"Turno cancelado por {request.user.full_name}. "
-                f"Motivo: {motivo}. "
-                f"Crédito {'aplicado' if credito_aplicado else f'no aplicado (menos de {min_horas_credito}hs)'}"
-            ),
-        )
 
         return Response(
             {
                 "message": "Turno cancelado exitosamente",
-                "credito_aplicado": credito_aplicado,
-                "monto_credito": monto_credito_valor,
-                "horas_antelacion_requerida": min_horas_credito,
+                "credito_aplicado": resultado.credito_aplicado,
+                "monto_credito": resultado.monto_credito,
+                "horas_antelacion_requerida": resultado.horas_antelacion_requerida,
             },
             status=status.HTTP_200_OK,
         )

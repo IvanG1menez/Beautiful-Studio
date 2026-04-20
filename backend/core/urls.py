@@ -40,5 +40,6 @@ urlpatterns = [
     path("api/turnos/", include("apps.turnos.urls")),
     path("api/", include("apps.emails.urls")),
     path("api/mercadopago/", include("apps.mercadopago.urls")),
+    path("api/telegram/", include("apps.telegram_bot.urls")),
     path("api-auth/", include("rest_framework.urls")),
 ]

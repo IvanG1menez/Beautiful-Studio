@@ -3,7 +3,7 @@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getAuthHeaders } from "@/lib/auth-headers";
+import { getAuthHeaders, getJsonAuthHeaders } from "@/lib/auth-headers";
 import {
   AlertCircle,
   Building2,
@@ -249,7 +249,7 @@ export default function PagoFidelizacionPage() {
 
       const response = await fetch(`${API_BASE_URL}/mercadopago/preferencia-sin-turno/`, {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify({
           servicio_id: servicio.id,
           empleado_id: empleado.id,

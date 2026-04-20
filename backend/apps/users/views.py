@@ -295,3 +295,21 @@ def change_password_view(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def update_phone_view(request):
+    """Actualiza solo el telefono del usuario autenticado."""
+    user = request.user
+    serializer = UserUpdateSerializer(
+        instance=user,
+        data={"phone": request.data.get("phone", "")},
+        partial=True,
+    )
+
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    return Response(UserProfileSerializer(user).data, status=status.HTTP_200_OK)

@@ -11,6 +11,7 @@ urlpatterns = [
     # Perfil de usuario
     path("profile/", views.UserProfileView.as_view(), name="profile"),
     path("me/", views.UserProfileView.as_view(), name="me"),  # Alias para profile
+    path("phone/", views.update_phone_view, name="update-phone"),
     # Cambiar contraseña
     path("change-password/", views.change_password_view, name="change-password"),
     # Vista alternativa comentada para referencia futura

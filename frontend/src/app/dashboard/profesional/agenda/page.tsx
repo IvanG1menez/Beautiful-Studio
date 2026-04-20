@@ -28,7 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatTime } from '@/lib/dateUtils';
 import { Turno } from '@/types';
-import { Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
+import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -593,8 +593,19 @@ export default function AgendaEmpleadoPage() {
   const confirmarCambioEstado = async () => {
     if (!turnoActual || !nuevoEstado) return;
 
-    if (nuevoEstado === 'en_proceso' && !puedeIniciarTurno(turnoActual)) {
-      alert(getMotivoNoIniciable(turnoActual));
+    if (nuevoEstado === 'en_proceso') {
+      const clienteNombre =
+        (turnoActual as any)?.cliente_nombre ||
+        turnoActual?.cliente?.nombre_completo ||
+        (turnoActual as any)?.cliente_email ||
+        'el cliente';
+
+      setConfirmMessage(`Vas a iniciar el turno de ${clienteNombre}. ¿Deseas continuar?`);
+      setConfirmAction(() => async () => {
+        await ejecutarCambioEstado();
+        setShowConfirmDialog(false);
+      });
+      setShowConfirmDialog(true);
       return;
     }
 
@@ -765,24 +776,12 @@ export default function AgendaEmpleadoPage() {
     return mapa;
   })();
 
-  const puedeIniciarTurno = (turno: Turno): boolean => {
-    const ahora = new Date();
-    const inicioTurno = new Date(turno.fecha_hora);
-    return inicioTurno.toDateString() === ahora.toDateString() && ahora >= inicioTurno;
+  const puedeIniciarTurno = (_turno: Turno): boolean => {
+    // Restricción temporal deshabilitada en modo test: se puede iniciar en cualquier momento.
+    return true;
   };
 
-  const getMotivoNoIniciable = (turno: Turno): string => {
-    const ahora = new Date();
-    const inicioTurno = new Date(turno.fecha_hora);
-
-    if (inicioTurno.toDateString() !== ahora.toDateString()) {
-      return 'Solo se puede iniciar el turno en su fecha programada';
-    }
-
-    if (ahora < inicioTurno) {
-      return 'No se puede iniciar antes de la hora programada';
-    }
-
+  const getMotivoNoIniciable = (_turno: Turno): string => {
     return '';
   };
 
@@ -1477,13 +1476,8 @@ export default function AgendaEmpleadoPage() {
                                   <Button
                                     size="sm"
                                     variant="default"
-                                    disabled={!puedeIniciarTurno(turno)}
                                     title={!puedeIniciarTurno(turno) ? getMotivoNoIniciable(turno) : ''}
                                     onClick={() => {
-                                      if (!puedeIniciarTurno(turno)) {
-                                        alert(getMotivoNoIniciable(turno));
-                                        return;
-                                      }
                                       setTurnoActual(turno);
                                       setNuevoEstado('en_proceso');
                                       setNotasEmpleado('');
@@ -1813,9 +1807,7 @@ export default function AgendaEmpleadoPage() {
                   )}
                   {turnoActual?.estado === 'confirmado' && (
                     <>
-                      {turnoActual && puedeIniciarTurno(turnoActual) && (
-                        <SelectItem value="en_proceso">En Proceso</SelectItem>
-                      )}
+                      <SelectItem value="en_proceso">En Proceso</SelectItem>
                       <SelectItem value="cancelado">Cancelado</SelectItem>
                       <SelectItem value="no_asistio">No Asistio</SelectItem>
                     </>
@@ -1869,6 +1861,12 @@ export default function AgendaEmpleadoPage() {
               {confirmMessage}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>
+              Esto se usa solo para testeo. El producto final tendrá activa esta restricción.
+            </span>
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowConfirmDialog(false)}>
               Cancelar
