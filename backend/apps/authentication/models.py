@@ -228,6 +228,13 @@ class ConfiguracionGlobal(models.Model):
         help_text="Cantidad de días que dura vigente el crédito en billetera (mínimo 30)",
     )
 
+    horas_vencimiento_solicitud_reprogramacion = models.IntegerField(
+        default=48,
+        validators=[MinValueValidator(1)],
+        verbose_name="Horas de vencimiento de solicitud de reprogramación",
+        help_text="Horas disponibles para que el profesional atienda una solicitud flexible de reprogramación",
+    )
+
     # Parámetros de Reincorporación
     margen_fidelizacion_dias = models.IntegerField(
         default=60,
@@ -241,6 +248,29 @@ class ConfiguracionGlobal(models.Model):
         default=15.00,
         verbose_name="Porcentaje de descuento para fidelización",
         help_text="Porcentaje de descuento a aplicar en ofertas de reincorporación (ej: 15.00 para 15%)",
+    )
+
+    # Parámetros de Racha (PA3)
+    streak_expiration_days = models.IntegerField(
+        default=180,
+        validators=[MinValueValidator(1)],
+        verbose_name="Días de vencimiento de racha",
+        help_text="Si entre turnos completados pasan más días que este valor, la racha se reinicia.",
+    )
+
+    streak_bonus_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        verbose_name="Bono fijo por racha",
+        help_text="Monto fijo de descuento promocional que se aplica al alcanzar cada múltiplo de 5.",
+    )
+
+    streak_alert_days = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Umbrales de alerta de vencimiento",
+        help_text="Lista de días previos al vencimiento para disparar alertas (ej: [3, 1]).",
     )
 
     # Capacidad Global
@@ -308,8 +338,12 @@ class ConfiguracionGlobal(models.Model):
             defaults={
                 "min_horas_cancelacion_credito": 24,
                 "dias_vencimiento_credito": 90,
+                "horas_vencimiento_solicitud_reprogramacion": 48,
                 "margen_fidelizacion_dias": 60,
                 "descuento_fidelizacion_pct": 15.00,
+                "streak_expiration_days": 180,
+                "streak_bonus_amount": 0,
+                "streak_alert_days": [3, 1],
                 "capacidad_maxima_global": 0,
                 "nombre_empresa": "Beautiful Studio",
                 "nombre_comercial": "Beautiful Studio",

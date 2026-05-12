@@ -1,6 +1,8 @@
 """Tareas asíncronas de Celery para emails."""
 
 from celery import shared_task
+from django.conf import settings
+from django.core.mail import send_mail
 from django.utils import timezone
 from django.db.models import Count, Sum, Q
 from datetime import timedelta, datetime
@@ -467,4 +469,139 @@ def enviar_emails_fidelizacion_clientes(dias_por_defecto: int = 30):
         "candidatos": total_candidatos,
         "emails_enviados": emails_enviados,
         "emails_fallidos": emails_fallidos,
+    }
+
+
+@shared_task(name="apps.emails.tasks.enviar_alertas_vencimiento_racha")
+def enviar_alertas_vencimiento_racha():
+    """Envía alertas preventivas por vencimiento de racha (PA3)."""
+
+    from apps.authentication.models import ConfiguracionGlobal
+    from apps.emails.models import Notificacion
+    from apps.telegram_bot.models import TelegramLink
+    from apps.telegram_bot.services import TelegramBotService
+    from apps.turnos.models import ClienteStreakStats, StreakExpiryAlertLog
+
+    config = ConfiguracionGlobal.get_config()
+    raw_alert_days = getattr(config, "streak_alert_days", None) or [3, 1]
+    expiration_days = int(getattr(config, "streak_expiration_days", 180) or 180)
+
+    alert_days = []
+    for value in raw_alert_days:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed >= 0:
+            alert_days.append(parsed)
+
+    alert_days = sorted(set(alert_days), reverse=True) or [3, 1]
+
+    today = timezone.localdate()
+    bot_service = TelegramBotService()
+
+    processed = 0
+    sent = 0
+    skipped = 0
+
+    stats_qs = ClienteStreakStats.objects.select_related("cliente__user").filter(
+        streak_count__gt=0,
+        next_expiration_at__isnull=False,
+    )
+
+    for stats in stats_qs:
+        expiration_date = timezone.localtime(stats.next_expiration_at).date()
+        remaining_days = (expiration_date - today).days
+
+        if remaining_days not in alert_days:
+            continue
+
+        processed += 1
+        alert_log, created = StreakExpiryAlertLog.objects.get_or_create(
+            cliente=stats.cliente,
+            threshold_days=remaining_days,
+            expiration_date_reference=expiration_date,
+            defaults={"channels_sent": []},
+        )
+
+        if not created:
+            skipped += 1
+            continue
+
+        cliente_user = stats.cliente.user
+        channels = []
+
+        titulo = "Tu racha está por vencer"
+        mensaje = (
+            f"Tu racha actual es de {stats.streak_count} turnos y vence en "
+            f"{remaining_days} día(s). Reservá para mantenerla activa."
+        )
+
+        Notificacion.objects.create(
+            usuario=cliente_user,
+            tipo="recordatorio",
+            titulo=titulo,
+            mensaje=mensaje,
+            data={
+                "tipo": "streak_expiry",
+                "streak_count": stats.streak_count,
+                "remaining_days": remaining_days,
+                "expiration_date": expiration_date.isoformat(),
+                "expiration_days_config": expiration_days,
+            },
+        )
+        channels.append("in_app")
+
+        if cliente_user.email:
+            try:
+                send_mail(
+                    subject=titulo,
+                    message=(
+                        f"Hola {cliente_user.first_name or 'cliente'},\n\n"
+                        f"{mensaje}\n"
+                        "Podés ingresar al panel y reservar tu próximo turno."
+                    ),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[cliente_user.email],
+                    fail_silently=False,
+                )
+                channels.append("email")
+            except Exception as exc:
+                logger.error(
+                    "Error enviando alerta de racha por email a cliente=%s: %s",
+                    stats.cliente_id,
+                    exc,
+                )
+
+        telegram_links = TelegramLink.objects.filter(
+            cliente=stats.cliente,
+            is_verified=True,
+        )
+        for link in telegram_links:
+            bot_service.send_message(
+                link.chat_id,
+                (
+                    f"Tu racha ({stats.streak_count}) vence en {remaining_days} dia(s).\n"
+                    "Reservá tu próximo turno para no perder el progreso."
+                ),
+            )
+            channels.append("telegram")
+
+        StreakExpiryAlertLog.objects.filter(pk=alert_log.pk).update(
+            channels_sent=sorted(set(channels))
+        )
+        sent += 1
+
+    logger.info(
+        "Alertas PA3 - procesados=%s enviados=%s deduplicados=%s",
+        processed,
+        sent,
+        skipped,
+    )
+
+    return {
+        "processed": processed,
+        "sent": sent,
+        "deduplicated": skipped,
+        "alert_days": alert_days,
     }

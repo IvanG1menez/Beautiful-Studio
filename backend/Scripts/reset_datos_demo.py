@@ -10,6 +10,7 @@ Usuarios creados (login por email):
 - Superadmin:   admin@beautifulstudio.com        / pass: admin123
 - Propietario:  propietario@beautifulstudio.com  / pass: admin123
 - Profesional:  profesional@beautifulstudio.com  / pass: profesional123
+- Profesional 2: profesional2@beautifulstudio.com / pass: profesional123
 - Cliente 1:    cliente1@beautifulstudio.com     / pass: cliente123
 - Cliente 2:    cliente2@beautifulstudio.com     / pass: cliente123
 - Cliente 3:    cliente3@beautifulstudio.com     / pass: cliente123
@@ -30,9 +31,10 @@ def limpiar_datos():
 
     # Importar modelos dentro de la función para que funcione
     # tanto con runscript como al ejecutar el script directamente
-    from apps.turnos.models import Turno, HistorialTurno
+    from apps.turnos.models import SolicitudReprogramacionFlexible, Turno, HistorialTurno
     from apps.mercadopago.models import PagoMercadoPago
 
+    solicitudes_deleted, _ = SolicitudReprogramacionFlexible.objects.all().delete()
     pagos_deleted, _ = PagoMercadoPago.objects.all().delete()
     historial_deleted, _ = HistorialTurno.objects.all().delete()
     turnos_deleted, _ = Turno.objects.all().delete()
@@ -40,6 +42,7 @@ def limpiar_datos():
     print(f"  - Turnos eliminados: {turnos_deleted}")
     print(f"  - Historial de turnos eliminado: {historial_deleted}")
     print(f"  - Pagos Mercado Pago eliminados: {pagos_deleted}\n")
+    print(f"  - Solicitudes flexibles eliminadas: {solicitudes_deleted}")
 
 
 def crear_usuarios_base():
@@ -49,6 +52,7 @@ def crear_usuarios_base():
     - Superadmin (superusuario): admin@beautifulstudio.com / admin123
     - Propietario (dueño local): propietario@beautifulstudio.com / admin123
     - Profesional:              profesional@beautifulstudio.com / profesional123
+    - Profesional 2:            profesional2@beautifulstudio.com / profesional123
     - Cliente 1:                cliente1@beautifulstudio.com / cliente123
     - Cliente 2:                cliente2@beautifulstudio.com / cliente123
     """
@@ -195,7 +199,7 @@ def crear_usuarios_base():
         "fecha_ingreso": date.today(),
         "horario_entrada": time(10, 0),
         "horario_salida": time(19, 0),
-        "dias_trabajo": "L,M,M,J,V",
+        "dias_trabajo": "L,Mi,V",
         "comision_porcentaje": 30,
         "is_disponible": True,
         "biografia": "Especialista en color y cortes modernos con más de 8 años de experiencia.",
@@ -279,10 +283,89 @@ def crear_usuarios_base():
         defaults={"nivel_experiencia": 3},
     )
 
-    # Horarios de trabajo detallados de lunes a viernes 10-19
-    for dia in range(0, 5):  # 0=Lunes ... 4=Viernes
+    # Horarios de trabajo detallados lunes, miercoles y viernes 10-19
+    for dia in (0, 2, 4):  # 0=Lunes, 2=Miercoles, 4=Viernes
         HorarioEmpleado.objects.get_or_create(
             empleado=empleado,
+            dia_semana=dia,
+            hora_inicio=time(10, 0),
+            hora_fin=time(19, 0),
+            defaults={"is_active": True},
+        )
+
+    # 3.b) Segundo profesional con perfil Empleado
+    pro2_email = "profesional2@beautifulstudio.com"
+
+    profesional2_user, created = User.objects.get_or_create(
+        email=pro2_email,
+        defaults={
+            "username": "profesional2",
+            "first_name": "Valentina",
+            "last_name": "Suárez",
+            "role": "profesional",
+            "is_staff": False,
+            "is_superuser": False,
+        },
+    )
+
+    if created:
+        profesional2_user.set_password("profesional123")
+        profesional2_user.save()
+        print(
+            "✅ Usuario profesional 'profesional2@beautifulstudio.com' creado (pass: profesional123)"
+        )
+    else:
+        changed = False
+        if profesional2_user.role != "profesional":
+            profesional2_user.role = "profesional"
+            changed = True
+        if changed:
+            profesional2_user.save(update_fields=["role"])
+        print("ℹ️ Usuario profesional 'profesional2@beautifulstudio.com' ya existía")
+
+    # Identidad del profesional 2
+    profesional2_user.first_name = "Valentina"
+    profesional2_user.last_name = "Suárez"
+    profesional2_user.dni = profesional2_user.dni or "29444555666"
+    profesional2_user.phone = profesional2_user.phone or "+54 9 11 5555-4444"
+    profesional2_user.save(update_fields=["first_name", "last_name", "dni", "phone"])
+
+    empleado2_defaults = {
+        "fecha_ingreso": date.today(),
+        "horario_entrada": time(10, 0),
+        "horario_salida": time(19, 0),
+        "dias_trabajo": "M,J,S",
+        "comision_porcentaje": 30,
+        "is_disponible": True,
+        "biografia": "Especialista en peinados y tratamientos capilares con enfoque en atención personalizada.",
+    }
+    empleado2, created = Empleado.objects.get_or_create(
+        user=profesional2_user,
+        defaults=empleado2_defaults,
+    )
+    if created:
+        print(
+            "✅ Perfil profesional (Empleado) creado para 'profesional2@beautifulstudio.com'"
+        )
+    else:
+        for field, value in empleado2_defaults.items():
+            setattr(empleado2, field, value)
+        empleado2.save()
+        print(
+            "ℹ️ Perfil profesional ya existía para 'profesional2@beautifulstudio.com' (datos actualizados)"
+        )
+
+    # Vincular el segundo profesional al mismo servicio demo
+    EmpleadoServicio.objects.get_or_create(
+        empleado=empleado2,
+        servicio=servicio,
+        defaults={"nivel_experiencia": 3},
+    )
+
+    # Horarios de trabajo detallados martes, jueves y sabado 10-19 para profesional 2
+    for dia in (1, 3, 5):  # 1=Martes, 3=Jueves, 5=Sabado
+        HorarioEmpleado.objects.get_or_create(
+            empleado=empleado2,
             dia_semana=dia,
             hora_inicio=time(10, 0),
             hora_fin=time(19, 0),

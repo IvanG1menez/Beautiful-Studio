@@ -22,6 +22,7 @@ interface ConfiguracionGlobal {
   habilitar_recordatorios_email: boolean;
   dias_recordatorio_antes_turno: number;
   dias_vencimiento_credito: number;
+  horas_vencimiento_solicitud_reprogramacion: number;
 }
 
 export default function ConfiguracionGlobalPage() {
@@ -62,6 +63,10 @@ export default function ConfiguracionGlobalPage() {
         setConfig({
           ...data,
           dias_vencimiento_credito: Math.max(30, Number(data.dias_vencimiento_credito ?? 90)),
+          horas_vencimiento_solicitud_reprogramacion: Math.max(
+            1,
+            Number(data.horas_vencimiento_solicitud_reprogramacion ?? 48)
+          ),
         });
       } catch (err) {
         console.error('Error al cargar configuración global:', err);
@@ -175,6 +180,12 @@ export default function ConfiguracionGlobalPage() {
     if ((config.dias_vencimiento_credito ?? 90) < 30) {
       setError('El vencimiento del crédito debe ser de al menos 30 días.');
       toast.error('El vencimiento del crédito debe ser de al menos 30 días');
+      return;
+    }
+
+    if ((config.horas_vencimiento_solicitud_reprogramacion ?? 48) < 1) {
+      setError('El vencimiento de solicitudes de reprogramación debe ser de al menos 1 hora.');
+      toast.error('El vencimiento de solicitudes de reprogramación debe ser de al menos 1 hora');
       return;
     }
 
@@ -357,6 +368,31 @@ export default function ConfiguracionGlobalPage() {
           <p className="text-sm text-muted-foreground">
             Mínimo permitido: 30 días. Este valor impacta en la fecha de vencimiento de los
             créditos de clientes.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Reprogramación de Turnos</CardTitle>
+          <CardDescription>
+            Define cuánto tiempo tiene el profesional para resolver una solicitud flexible.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="horas_vencimiento_solicitud_reprogramacion">
+            Vencimiento de solicitudes flexibles (horas)
+          </Label>
+          <Input
+            id="horas_vencimiento_solicitud_reprogramacion"
+            type="number"
+            min={1}
+            step={1}
+            value={config.horas_vencimiento_solicitud_reprogramacion ?? 48}
+            onChange={(e) => handleNumberChange('horas_vencimiento_solicitud_reprogramacion', e.target.value)}
+          />
+          <p className="text-sm text-muted-foreground">
+            Valor actual recomendado: 48 horas. Si una solicitud vence, seguirá pendiente pero quedará marcada para revisión del propietario.
           </p>
         </CardContent>
       </Card>

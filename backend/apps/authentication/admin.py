@@ -153,6 +153,7 @@ class ConfiguracionGlobalAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "min_horas_cancelacion_credito",
+        "horas_vencimiento_solicitud_reprogramacion",
         "margen_fidelizacion_dias",
         "descuento_fidelizacion_pct",
         "capacidad_maxima_global",
@@ -168,6 +169,13 @@ class ConfiguracionGlobalAdmin(admin.ModelAdmin):
             {
                 "fields": ("min_horas_cancelacion_credito",),
                 "description": "Parámetros para el sistema de créditos por cancelación",
+            },
+        ),
+        (
+            "Reprogramación de Turnos",
+            {
+                "fields": ("horas_vencimiento_solicitud_reprogramacion",),
+                "description": "Tiempo disponible para atender solicitudes flexibles antes de que requieran explicación",
             },
         ),
         (

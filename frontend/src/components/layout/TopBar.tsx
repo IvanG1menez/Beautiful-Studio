@@ -158,7 +158,7 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
   return (
     <>
       <div className={`bg-card/80 backdrop-blur border-b border-border px-4 py-3 ${className}`}>
-        <div className="flex items-center justify-between">
+        <div className="relative flex items-center justify-between">
           {/* Lado izquierdo - Botón menú móvil (opcional) */}
           <div className="flex items-center gap-4">
             {onMenuToggle && (
@@ -178,21 +178,26 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
 
             {/* Logo o Título */}
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 className="text-lg font-semibold text-foreground md:hidden">
                 Beautiful Studio
               </h2>
             </div>
+          </div>
+
+          <div className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2 md:flex md:flex-col md:items-center">
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Beautiful Studio</p>
+            <p
+              className="text-2xl leading-tight text-slate-900"
+              style={{ fontFamily: '"Cormorant Garamond", "Georgia", serif' }}
+            >
+              Tu belleza, nuestra pasión
+            </p>
           </div>
 
           {/* Lado derecho - Usuario y acciones */}
           <div className="flex items-center gap-3">
             {/* Notificaciones */}
             <NotificationBell />
-
-            {/* Billetera cliente */}
-            {user.role?.toLowerCase() === 'cliente' && (
-              <ClientWalletQuickAccess />
-            )}
 
             {/* Separador */}
             <div className="h-6 w-px bg-border"></div>

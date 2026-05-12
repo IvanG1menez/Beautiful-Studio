@@ -143,8 +143,17 @@ def obtener_orden(merchant_order_id: str) -> dict:
     return response["response"]
 
 
+def _primer_pago_aprobado(results: list[dict], external_reference: str = "") -> dict | None:
+    for pago in results:
+        if pago.get("status") == "approved":
+            if external_reference and not pago.get("external_reference"):
+                pago["external_reference"] = external_reference
+            return pago
+    return None
+
+
 def buscar_pago_aprobado_por_preference(preference_id: str) -> dict | None:
-    """Busca pagos por preference_id (vía external_reference) y devuelve el primero aprobado."""
+    """Busca pagos por preference_id y devuelve el primero aprobado."""
     sdk = _get_sdk()
     pref_resp = sdk.preference().get(preference_id)
     if pref_resp["status"] != 200:
@@ -153,27 +162,44 @@ def buscar_pago_aprobado_por_preference(preference_id: str) -> dict | None:
         )
 
     external_reference = pref_resp.get("response", {}).get("external_reference", "")
-    if not external_reference:
-        return None
 
-    response = sdk.payment().search(
-        {
-            "sort": "date_created",
-            "criteria": "desc",
-            "limit": 10,
-            "offset": 0,
-            "external_reference": external_reference,
-        }
-    )
+    search_attempts = [
+        ("preference_id", {"preference_id": preference_id}),
+    ]
+    if external_reference:
+        search_attempts.append(("external_reference", {"external_reference": external_reference}))
 
-    if response["status"] != 200:
-        raise ValueError(
-            "No se pudo buscar pagos por external_reference de preference_id "
-            f"{preference_id}: {response.get('response', {})}"
+    last_error = None
+    for search_name, search_filter in search_attempts:
+        response = sdk.payment().search(
+            {
+                "sort": "date_created",
+                "criteria": "desc",
+                "limit": 10,
+                "offset": 0,
+                **search_filter,
+            }
         )
 
-    results = response.get("response", {}).get("results", [])
-    for pago in results:
-        if pago.get("status") == "approved":
-            return pago
+        if response["status"] != 200:
+            last_error = response.get("response", {})
+            logger.warning(
+                "MP search por %s falló para preference_id=%s: %s",
+                search_name,
+                preference_id,
+                last_error,
+            )
+            continue
+
+        pago_aprobado = _primer_pago_aprobado(
+            response.get("response", {}).get("results", []),
+            external_reference=external_reference,
+        )
+        if pago_aprobado:
+            return pago_aprobado
+
+    if last_error and not external_reference:
+        raise ValueError(
+            f"No se pudo buscar pagos de preference_id {preference_id}: {last_error}"
+        )
     return None

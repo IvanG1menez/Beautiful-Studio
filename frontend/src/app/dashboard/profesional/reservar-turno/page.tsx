@@ -1,8 +1,22 @@
 'use client';
 
-import { AlertCircle, Calendar as CalendarIcon, Clock, CreditCard, DollarSign, Search, User as UserIcon } from 'lucide-react';
+import {
+  AlertCircle,
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  Clock,
+  CreditCard,
+  DollarSign,
+  Mail,
+  Phone,
+  QrCode,
+  Search,
+  User as UserIcon,
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -11,8 +25,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,8 +36,6 @@ import {
   ReservaStaffPayload,
 } from '@/services/profesionalTurnos';
 import { ApiResponse, EmpleadoServicio, Servicio } from '@/types';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 
 interface HorarioDisponible {
   disponible: boolean;
@@ -37,28 +47,67 @@ interface ClienteLookupData {
   id: number;
   user?: {
     full_name?: string;
+    first_name?: string;
+    last_name?: string;
     email?: string;
     phone?: string;
     dni?: string;
   };
 }
 
+type MetodoPago = 'efectivo' | 'mercadopago_qr';
+type TipoPago = 'PAGO_COMPLETO' | 'SENIA';
+type ServicioReserva = Servicio & {
+  porcentaje_sena?: string | number;
+  monto_sena_fijo?: string | number;
+};
+
+const API_BASE_URL = '/api';
+const HORARIOS_REFERENCIA = [
+  '09:00',
+  '09:30',
+  '10:00',
+  '10:30',
+  '11:00',
+  '11:30',
+  '12:00',
+  '12:30',
+  '14:00',
+  '14:30',
+  '15:00',
+  '15:30',
+  '16:00',
+  '16:30',
+  '17:00',
+  '17:30',
+  '18:00',
+  '18:30',
+];
+
 const getErrorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
+  if (error instanceof Error && error.message) return error.message;
   return fallback;
+};
+
+const isPastOrSunday = (date: Date) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const candidate = new Date(date);
+  candidate.setHours(0, 0, 0, 0);
+
+  return candidate < today || candidate.getDay() === 0;
 };
 
 export default function ReservarTurnoProfesionalPage() {
   const router = useRouter();
   const { user } = useAuth();
 
-  // Paso 1: Datos del cliente
   const [dni, setDni] = useState('');
   const [clienteRegistrado, setClienteRegistrado] = useState<boolean | null>(null);
   const [clienteData, setClienteData] = useState<ClienteLookupData | null>(null);
   const [clienteNombre, setClienteNombre] = useState('');
+  const [clienteApellido, setClienteApellido] = useState('');
   const [clienteEmail, setClienteEmail] = useState('');
   const [clienteTelefono, setClienteTelefono] = useState('');
   const [checkingDni, setCheckingDni] = useState(false);
@@ -74,53 +123,69 @@ export default function ReservarTurnoProfesionalPage() {
     servicio_nombre?: string;
   } | null>(null);
 
-  // Paso 2: Servicio y horario
-  const [servicios, setServicios] = useState<Servicio[]>([]);
-  const [servicioSeleccionado, setServicioSeleccionado] = useState<Servicio | null>(null);
+  const [servicioSeleccionado, setServicioSeleccionado] = useState<ServicioReserva | null>(null);
   const [fechaSeleccionada, setFechaSeleccionada] = useState<Date | undefined>(undefined);
   const [horariosDisponibles, setHorariosDisponibles] = useState<string[]>([]);
-  const [horarioSeleccionado, setHorarioSeleccionado] = useState<string>('');
-  const [horaSeleccionada, setHoraSeleccionada] = useState<string>('');
-  const [minutoSeleccionado, setMinutoSeleccionado] = useState<string>('');
+  const [horaSeleccionada, setHoraSeleccionada] = useState('');
+  const [minutoSeleccionado, setMinutoSeleccionado] = useState('');
   const [loadingServicios, setLoadingServicios] = useState(false);
   const [loadingHorarios, setLoadingHorarios] = useState(false);
   const [profesionalInicializado, setProfesionalInicializado] = useState(false);
-  const [horasDisponibles, setHorasDisponibles] = useState<string[]>([]);
-
-  // Paso 3: Pago
-  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'mercadopago_qr'>('efectivo');
-  const [cobraSeniaFija, setCobraSeniaFija] = useState(true);
-  const [pagarServicioCompleto, setPagarServicioCompleto] = useState(false);
   const [notasCliente, setNotasCliente] = useState('');
 
-  // Estados de feedback
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string>('');
-  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [metodoPago, setMetodoPago] = useState<MetodoPago>('efectivo');
+  const [tipoPago, setTipoPago] = useState<TipoPago>('PAGO_COMPLETO');
+  const [montoRecibido, setMontoRecibido] = useState('');
 
-  // Pago con MP QR
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [isWaitingPayment, setIsWaitingPayment] = useState(false);
-  const [preferenceId, setPreferenceId] = useState<string>('');
+  const [preferenceId, setPreferenceId] = useState('');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const API_BASE_URL = '/api';
+  const clienteBloqueado = clienteRegistrado === true && Boolean(clienteData);
+  const horarioSeleccionado = horaSeleccionada && minutoSeleccionado
+    ? `${horaSeleccionada}:${minutoSeleccionado}`
+    : '';
+  const horarioDisponible = Boolean(
+    fechaSeleccionada &&
+    horarioSeleccionado &&
+    horariosDisponibles.includes(horarioSeleccionado),
+  );
+  const horarioNoDisponible = Boolean(
+    fechaSeleccionada &&
+    horarioSeleccionado &&
+    !loadingHorarios &&
+    !horarioDisponible,
+  );
+
+  const precioServicio = servicioSeleccionado ? parseFloat(servicioSeleccionado.precio) || 0 : 0;
+  const porcentajeSena = servicioSeleccionado ? Number(servicioSeleccionado.porcentaje_sena) || 0 : 0;
+  const montoSeniaFijo = servicioSeleccionado ? Number(servicioSeleccionado.monto_sena_fijo) || 0 : 0;
+  const montoSenia = montoSeniaFijo > 0 ? montoSeniaFijo : (precioServicio * porcentajeSena) / 100;
+  const montoACobrar = tipoPago === 'PAGO_COMPLETO' ? precioServicio : montoSenia;
+  const montoRecibidoNumerico = Number(montoRecibido.replace(',', '.')) || 0;
+  const vuelto = Math.max(0, montoRecibidoNumerico - montoACobrar);
+  const pagoExacto = metodoPago === 'efectivo' && tipoPago === 'PAGO_COMPLETO' && montoRecibidoNumerico === montoACobrar && montoACobrar > 0;
+  const nombreIncompleto = clienteRegistrado === false && !clienteNombre.trim();
+  const apellidoIncompleto = clienteRegistrado === false && !clienteApellido.trim();
+  const telefonoIncompleto = clienteRegistrado === false && !clienteTelefono.trim();
+  const horariosParaMostrar = Array.from(new Set([...HORARIOS_REFERENCIA, ...horariosDisponibles])).sort();
 
   useEffect(() => {
     const fetchServicios = async () => {
       setLoadingServicios(true);
       try {
         if (!user?.empleado_id) {
-          setServicios([]);
           setServicioSeleccionado(null);
-          setError('Tu usuario no está asociado a un profesional. Contactá al administrador del salón.');
+          setError('Tu usuario no esta asociado a un profesional. Contacta al administrador del salon.');
           return;
         }
 
         const response = await apiClient.get<ApiResponse<EmpleadoServicio>>(
           `/empleados/${user.empleado_id}/servicios/`,
-          {
-            params: { page_size: 1000 },
-          },
+          { params: { page_size: 1000 } },
         );
 
         const data = response.data;
@@ -130,30 +195,25 @@ export default function ReservarTurnoProfesionalPage() {
             ? data.results
             : [];
 
-        const serviciosData: Servicio[] = serviciosEmpleado
-          .map((es) => es.servicio)
-          .filter((s) => s && s.is_active);
+        const serviciosData: ServicioReserva[] = serviciosEmpleado
+          .map((empleadoServicio) => empleadoServicio.servicio)
+          .filter((servicio): servicio is ServicioReserva => Boolean(servicio && servicio.is_active));
 
-        setServicios(serviciosData);
-        if (serviciosData.length > 0) {
-          setServicioSeleccionado(serviciosData[0]);
-        } else {
-          setServicioSeleccionado(null);
+        setServicioSeleccionado(serviciosData[0] || null);
+        if (serviciosData.length === 0) {
           setError('No hay servicios configurados para este profesional. Configuralos desde el panel de propietario.');
         }
       } catch (e) {
         console.error('Error cargando servicios', e);
-        setServicios([]);
         setServicioSeleccionado(null);
-        setError('No se pudieron cargar los servicios del profesional. Intentá de nuevo o contactá al administrador.');
+        setError('No se pudieron cargar los servicios del profesional. Intenta de nuevo o contacta al administrador.');
       } finally {
         setLoadingServicios(false);
         setProfesionalInicializado(true);
       }
     };
-    if (user) {
-      fetchServicios();
-    }
+
+    if (user) void fetchServicios();
   }, [user]);
 
   const buscarClientePorDni = async (dniLimpio: string) => {
@@ -171,9 +231,15 @@ export default function ReservarTurnoProfesionalPage() {
       setUltimoDniBuscado(dniLimpio);
 
       if (data.registrado && data.cliente) {
-        setClienteNombre(data.cliente.user?.full_name || '');
+        const firstName = data.cliente.user?.first_name || '';
+        const lastName = data.cliente.user?.last_name || '';
+        setClienteNombre(firstName || data.cliente.user?.full_name || '');
+        setClienteApellido(lastName);
         setClienteEmail(data.cliente.user?.email || '');
         setClienteTelefono(data.cliente.user?.phone || '');
+      } else {
+        setClienteData(null);
+        setClienteApellido('');
       }
     } catch (e: unknown) {
       setError(getErrorMessage(e, 'Error buscando cliente'));
@@ -183,16 +249,16 @@ export default function ReservarTurnoProfesionalPage() {
   };
 
   const handleBuscarPorDni = async () => {
-    const dniLimpio = (dni || '').replace(/\D/g, '');
+    const dniLimpio = dni.replace(/\D/g, '');
     if (dniLimpio.length !== 8) {
-      setDniError('El DNI debe tener 8 dígitos numéricos');
+      setDniError('El DNI debe tener 8 digitos numericos');
       return;
     }
     await buscarClientePorDni(dniLimpio);
   };
 
   useEffect(() => {
-    const dniLimpio = (dni || '').replace(/\D/g, '');
+    const dniLimpio = dni.replace(/\D/g, '');
 
     if (!dniLimpio) {
       setDniError('');
@@ -200,24 +266,16 @@ export default function ReservarTurnoProfesionalPage() {
       setClienteData(null);
       setTurnoExistenteCliente(null);
       setUltimoDniBuscado('');
-      return;
-    }
-
-    if (!/^\d+$/.test(dniLimpio)) {
-      setDniError('El DNI solo admite números');
-      return;
-    }
-
-    if (dniLimpio.length > 8) {
-      setDniError('El DNI debe tener 8 dígitos');
+      setClienteApellido('');
       return;
     }
 
     if (dniLimpio.length < 8) {
-      setDniError('El DNI debe tener 8 dígitos numéricos');
+      setDniError('El DNI debe tener 8 digitos numericos');
       setClienteRegistrado(null);
       setClienteData(null);
       setTurnoExistenteCliente(null);
+      setClienteApellido('');
       return;
     }
 
@@ -232,29 +290,25 @@ export default function ReservarTurnoProfesionalPage() {
   }, [dni, ultimoDniBuscado]);
 
   useEffect(() => {
-    const telefonoLimpio = (clienteTelefono || '').replace(/\D/g, '');
+    const telefonoLimpio = clienteTelefono.replace(/\D/g, '');
     if (!clienteTelefono) {
       setTelefonoError('');
       return;
     }
-
     if (telefonoLimpio.length < 8) {
-      setTelefonoError('El teléfono debe tener al menos 8 dígitos');
+      setTelefonoError('El telefono debe tener al menos 8 digitos');
       return;
     }
-
     if (telefonoLimpio.length > 15) {
-      setTelefonoError('El teléfono no puede superar 15 dígitos');
+      setTelefonoError('El telefono no puede superar 15 digitos');
       return;
     }
-
     setTelefonoError('');
   }, [clienteTelefono]);
 
   useEffect(() => {
-    const email = (clienteEmail || '').trim().toLowerCase();
-
-    if (!email) {
+    const email = clienteEmail.trim().toLowerCase();
+    if (!email || clienteBloqueado) {
       setEmailError('');
       setEmailAsociado(false);
       return;
@@ -262,7 +316,7 @@ export default function ReservarTurnoProfesionalPage() {
 
     const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     if (!emailValido) {
-      setEmailError('Ingresá un email válido');
+      setEmailError('Ingresa un email valido');
       setEmailAsociado(false);
       return;
     }
@@ -273,7 +327,7 @@ export default function ReservarTurnoProfesionalPage() {
         const data = await profesionalTurnosApi.buscarClientePorEmail(email);
         if (data.registrado) {
           setEmailAsociado(true);
-          setEmailError('este mail ya pertenece a un cliente asociado');
+          setEmailError('Este mail ya pertenece a un cliente asociado');
         } else {
           setEmailAsociado(false);
         }
@@ -283,12 +337,11 @@ export default function ReservarTurnoProfesionalPage() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [clienteEmail]);
+  }, [clienteEmail, clienteBloqueado]);
 
-  const cargarDisponibilidadFecha = async (date: Date | undefined) => {
-    if (!date || !servicioSeleccionado || !user?.empleado_id) {
+  const cargarDisponibilidadFecha = useCallback(async (date: Date | undefined) => {
+    if (!date || !servicioSeleccionado || !user?.empleado_id || isPastOrSunday(date)) {
       setHorariosDisponibles([]);
-      setHorasDisponibles([]);
       return;
     }
 
@@ -296,119 +349,121 @@ export default function ReservarTurnoProfesionalPage() {
     setError('');
 
     try {
-      const fechaStr = format(date, 'yyyy-MM-dd');
       const res = await apiClient.get<HorarioDisponible>('/turnos/disponibilidad/', {
         params: {
           servicio: servicioSeleccionado.id,
           empleado: user.empleado_id,
-          fecha: fechaStr,
+          fecha: format(date, 'yyyy-MM-dd'),
         },
       });
 
-      const disponibles = res.data.horarios || [];
-      setHorariosDisponibles(disponibles);
-
-      const horas = Array.from(new Set(disponibles.map((h) => h.split(':')[0])));
-      setHorasDisponibles(horas);
+      setHorariosDisponibles(res.data.horarios || []);
     } catch (e) {
       console.error('Error obteniendo disponibilidad', e);
       setHorariosDisponibles([]);
-      setHorasDisponibles([]);
       setError('No se pudo cargar la disponibilidad del profesional para esa fecha');
     } finally {
       setLoadingHorarios(false);
     }
-  };
+  }, [servicioSeleccionado, user?.empleado_id]);
 
   const handleFechaChange = (date: Date | undefined) => {
     setFechaSeleccionada(date);
-    setHorarioSeleccionado('');
-    setHorariosDisponibles([]);
-    setHorasDisponibles([]);
     setHoraSeleccionada('');
     setMinutoSeleccionado('');
-    setError('');
-    void cargarDisponibilidadFecha(date);
-  };
-
-  const handleConfirmarFechaHora = async () => {
-    if (!profesionalInicializado || loadingServicios) {
-      setError('Todavía se están cargando los datos del profesional. Esperá un momento.');
-      return;
-    }
-    if (!fechaSeleccionada) {
-      setError('Seleccioná una fecha para el turno');
-      return;
-    }
-    if (!servicioSeleccionado) {
-      setError('No se encontró el servicio asociado al profesional');
-      return;
-    }
-    if (!horaSeleccionada || !minutoSeleccionado) {
-      setError('Seleccioná una hora y minutos');
-      return;
-    }
-
-    const horaStr = `${horaSeleccionada.padStart(2, '0')}:${minutoSeleccionado.padStart(2, '0')}`;
-
-    if (!horariosDisponibles.includes(horaStr)) {
-      setHorarioSeleccionado('');
-      setError('Ese horario no está disponible. Elegí uno libre en la agenda del profesional.');
-      return;
-    }
-
-    setHorarioSeleccionado(horaStr);
+    setHorariosDisponibles([]);
     setError('');
   };
 
-  const precioServicio = servicioSeleccionado ? parseFloat(servicioSeleccionado.precio) || 0 : 0;
-  const porcentajeSena = servicioSeleccionado ? parseFloat(servicioSeleccionado.porcentaje_sena) || 0 : 0;
-  const montoSeniaFijo = !servicioSeleccionado
-    ? 0
-    : (precioServicio * porcentajeSena) / 100;
+  const handleHorarioClick = (horario: string) => {
+    const [hora, minuto] = horario.split(':');
+    setHoraSeleccionada(hora);
+    setMinutoSeleccionado(minuto);
+  };
+
+  useEffect(() => {
+    if (fechaSeleccionada) void cargarDisponibilidadFecha(fechaSeleccionada);
+    setHoraSeleccionada('');
+    setMinutoSeleccionado('');
+  }, [cargarDisponibilidadFecha, fechaSeleccionada]);
+
+  useEffect(() => {
+    if (tipoPago !== 'PAGO_COMPLETO' || metodoPago !== 'efectivo') {
+      setMontoRecibido('');
+    }
+  }, [tipoPago, metodoPago]);
+
+  const fechaHoraIso = () => {
+    if (!fechaSeleccionada || !horarioSeleccionado) return '';
+    return `${format(fechaSeleccionada, "yyyy-MM-dd'T'")}${horarioSeleccionado}:00`;
+  };
+
+  const buildClientePayload = (
+    payload: ReservaStaffPayload | PreferenciaStaffPayload,
+  ) => {
+    if (clienteRegistrado && clienteData) {
+      payload.cliente_id = clienteData.id;
+      return;
+    }
+
+    payload.dni = dni || undefined;
+    payload.email = clienteEmail || undefined;
+    payload.nombre = `${clienteNombre} ${clienteApellido}`.trim() || undefined;
+    payload.telefono = clienteTelefono || undefined;
+  };
+
+  const datosClienteCompletos = clienteRegistrado
+    ? Boolean(clienteData)
+    : Boolean(dni && clienteNombre.trim() && clienteApellido.trim() && clienteTelefono.trim());
+
+  const pagoCompletoValido =
+    metodoPago !== 'efectivo' ||
+    tipoPago !== 'PAGO_COMPLETO' ||
+    montoRecibidoNumerico >= montoACobrar;
+
+  const puedeConfirmar = Boolean(
+    profesionalInicializado &&
+    !loadingServicios &&
+    !loadingHorarios &&
+    servicioSeleccionado &&
+    fechaSeleccionada &&
+    horarioDisponible &&
+    datosClienteCompletos &&
+    pagoCompletoValido &&
+    !dniError &&
+    !telefonoError &&
+    !emailError &&
+    !emailAsociado,
+  );
 
   const submitEfectivo = async () => {
     if (!user?.empleado_id) {
-      setError('No se encontró el profesional asociado al usuario logueado');
+      setError('No se encontro el profesional asociado al usuario logueado');
       return;
     }
-    if (dniError || telefonoError || emailError || emailAsociado) {
-      setError('Revisá los datos del cliente antes de confirmar la reserva');
+    if (!puedeConfirmar || !servicioSeleccionado) {
+      setError('Completa los campos requeridos y elegi un horario disponible');
       return;
     }
-    if (!servicioSeleccionado || !fechaSeleccionada || !horarioSeleccionado) {
-      setError('Completa servicio, fecha y horario');
-      return;
-    }
-
-    const fechaStr = format(fechaSeleccionada, "yyyy-MM-dd'T'") + horarioSeleccionado + ':00';
 
     const payload: ReservaStaffPayload = {
       servicio: servicioSeleccionado.id,
       empleado: user.empleado_id,
-      fecha_hora: fechaStr,
+      fecha_hora: fechaHoraIso(),
       notas_cliente: notasCliente,
       metodo_pago: 'efectivo',
-      paga_servicio_completo: pagarServicioCompleto,
-      tipo_pago: pagarServicioCompleto ? 'PAGO_COMPLETO' : 'SENIA',
-      monto_senia: pagarServicioCompleto ? precioServicio : Number(montoSeniaFijo || 0),
+      paga_servicio_completo: tipoPago === 'PAGO_COMPLETO',
+      tipo_pago: tipoPago,
+      monto_senia: montoACobrar,
     };
-
-    if (clienteRegistrado && clienteData) {
-      payload.cliente_id = clienteData.id;
-    } else {
-      payload.dni = dni || undefined;
-      payload.email = clienteEmail || undefined;
-      payload.nombre = clienteNombre || undefined;
-      payload.telefono = clienteTelefono || undefined;
-    }
+    buildClientePayload(payload);
 
     setIsSubmitting(true);
     setError('');
     setSuccessMessage('');
 
     try {
-      const data = await profesionalTurnosApi.reservarStaff(payload);
+      await profesionalTurnosApi.reservarStaff(payload);
       setSuccessMessage('Turno reservado correctamente');
       router.push('/dashboard/profesional/agenda');
     } catch (e: unknown) {
@@ -420,41 +475,23 @@ export default function ReservarTurnoProfesionalPage() {
 
   const submitQr = async () => {
     if (!user?.empleado_id) {
-      setError('No se encontró el profesional asociado al usuario logueado');
+      setError('No se encontro el profesional asociado al usuario logueado');
       return;
     }
-    if (dniError || telefonoError || emailError || emailAsociado) {
-      setError('Revisá los datos del cliente antes de confirmar la reserva');
+    if (!puedeConfirmar || !servicioSeleccionado) {
+      setError('Completa los campos requeridos y elegi un horario disponible');
       return;
     }
-    if (!servicioSeleccionado || !fechaSeleccionada || !horarioSeleccionado) {
-      setError('Completa servicio, fecha y horario');
-      return;
-    }
-
-    const fechaStr = format(fechaSeleccionada, "yyyy-MM-dd'T'") + horarioSeleccionado + ':00';
 
     const payload: PreferenciaStaffPayload = {
       servicio_id: servicioSeleccionado.id,
       empleado_id: user.empleado_id,
-      fecha_hora: fechaStr,
+      fecha_hora: fechaHoraIso(),
       notas_cliente: notasCliente,
-      usar_sena: cobraSeniaFija,
-      tipo_pago: cobraSeniaFija ? 'SENIA' : 'PAGO_COMPLETO',
+      usar_sena: tipoPago === 'SENIA',
+      tipo_pago: tipoPago,
     };
-
-    if (clienteRegistrado && clienteData) {
-      payload.cliente_id = clienteData.id;
-      payload.dni = clienteData.user?.dni;
-      payload.email = clienteData.user?.email;
-      payload.nombre = clienteData.user?.full_name;
-      payload.telefono = clienteData.user?.phone;
-    } else {
-      payload.dni = dni || undefined;
-      payload.email = clienteEmail || undefined;
-      payload.nombre = clienteNombre || undefined;
-      payload.telefono = clienteTelefono || undefined;
-    }
+    buildClientePayload(payload);
 
     setIsSubmitting(true);
     setError('');
@@ -464,15 +501,12 @@ export default function ReservarTurnoProfesionalPage() {
       const pref = await profesionalTurnosApi.crearPreferenciaStaff(payload);
       setPreferenceId(pref.preference_id);
       setIsWaitingPayment(true);
-
       window.open(pref.init_point, '_blank');
 
       if (pollingRef.current) clearInterval(pollingRef.current);
       pollingRef.current = setInterval(async () => {
         try {
-          const res = await fetch(
-            `${API_BASE_URL}/mercadopago/verificar-pago/${pref.preference_id}/`,
-          );
+          const res = await fetch(`${API_BASE_URL}/mercadopago/verificar-pago/${pref.preference_id}/`);
           if (res.ok) {
             const body = await res.json();
             if (body.status === 'approved') {
@@ -484,7 +518,7 @@ export default function ReservarTurnoProfesionalPage() {
             }
           }
         } catch {
-          // ignorar en polling
+          // El polling reintenta hasta que Mercado Pago confirme o el usuario salga.
         }
       }, 3000);
     } catch (e: unknown) {
@@ -500,48 +534,37 @@ export default function ReservarTurnoProfesionalPage() {
     };
   }, []);
 
-  const puedeConfirmar = Boolean(
-    servicioSeleccionado &&
-    fechaSeleccionada &&
-    horarioSeleccionado &&
-    !dniError &&
-    !telefonoError &&
-    !emailError &&
-    !emailAsociado &&
-    (clienteRegistrado || clienteNombre || clienteEmail || clienteTelefono || dni),
-  );
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="border-b bg-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-center justify-between">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6 lg:px-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Reservar turno</h1>
-            <p className="text-gray-600 mt-1">
-              Generá un turno para tu cliente desde el salón.
-            </p>
+            <h1 className="text-2xl font-bold text-gray-900">Reserva Rapida</h1>
+            <p className="mt-1 text-gray-600">Genera un turno para tu cliente desde el salon.</p>
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         {servicioSeleccionado && (
-          <Alert>
+          <Alert className="border-red-200 bg-red-50 text-red-950">
             <AlertDescription>
-              El turno se reservará para tu servicio asociado:{' '}
-              <span className="font-semibold">{servicioSeleccionado.nombre}</span>.
+              <span className="block text-sm">El turno se reservara para el servicio seleccionado:</span>
+              <span className="mt-2 block font-semibold">{servicioSeleccionado.nombre}</span>
             </AlertDescription>
           </Alert>
         )}
+
         {!loadingServicios && profesionalInicializado && !servicioSeleccionado && !error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>
-              No se encontró un servicio asociado al profesional. Configuralo desde el panel de propietario.
+              No se encontro un servicio asociado al profesional. Configuralo desde el panel de propietario.
             </AlertDescription>
           </Alert>
         )}
+
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -552,55 +575,59 @@ export default function ReservarTurnoProfesionalPage() {
 
         {successMessage && (
           <Alert>
+            <CheckCircle2 className="h-4 w-4" />
             <AlertTitle>Listo</AlertTitle>
             <AlertDescription>{successMessage}</AlertDescription>
           </Alert>
         )}
 
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UserIcon className="w-4 h-4" />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="rounded-lg border-gray-200 bg-white shadow-sm">
+            <CardHeader className="space-y-3 pb-4">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserIcon className="h-4 w-4" />
                 Datos del cliente
               </CardTitle>
-              <CardDescription>
-                Buscá por DNI o completá los datos básicos.
-              </CardDescription>
+              <CardDescription>Busca por DNI o completa los datos manualmente</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <Label htmlFor="dni">DNI</Label>
+              <div className="space-y-2">
+                <Label htmlFor="dni">DNI</Label>
+                <div className="relative">
                   <Input
                     id="dni"
                     placeholder="Ej: 12345678"
                     value={dni}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '').slice(0, 8);
-                      setDni(val);
-                    }}
+                    onChange={(e) => setDni(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    className="h-10 pr-10"
                   />
-                  {dniError && <p className="text-xs text-red-600 mt-1">{dniError}</p>}
+                  <button
+                    type="button"
+                    onClick={handleBuscarPorDni}
+                    disabled={checkingDni || dni.replace(/\D/g, '').length !== 8}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Buscar DNI"
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleBuscarPorDni}
-                  disabled={checkingDni || (dni || '').replace(/\D/g, '').length !== 8}
-                  className="flex items-center gap-2"
-                >
-                  <Search className="w-4 h-4" />
-                  {checkingDni ? 'Buscando...' : 'Buscar'}
-                </Button>
+                {checkingDni && <p className="text-xs text-slate-500">Buscando cliente...</p>}
+                {dniError && <p className="text-xs text-red-600">{dniError}</p>}
               </div>
 
               {clienteRegistrado === true && clienteData && (
-                <Alert>
+                <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
+                  <CheckCircle2 className="h-4 w-4" />
                   <AlertTitle>Cliente registrado</AlertTitle>
-                  <AlertDescription>
-                    Se encontró un cliente con este DNI. Podés continuar o editar los datos si hace falta.
-                  </AlertDescription>
+                  <AlertDescription>Los datos se completaron desde la base y quedaron bloqueados.</AlertDescription>
+                </Alert>
+              )}
+
+              {clienteRegistrado === false && (
+                <Alert className="border-orange-200 bg-orange-50 text-orange-900">
+                  <AlertCircle className="h-4 w-4 text-orange-700" />
+                  <AlertTitle>Cliente no registrado</AlertTitle>
+                  <AlertDescription>Los beneficios de lealtad no se aplicaran</AlertDescription>
                 </Alert>
               )}
 
@@ -612,10 +639,7 @@ export default function ReservarTurnoProfesionalPage() {
                     <span className="font-semibold">
                       {format(new Date(turnoExistenteCliente.fecha_hora), "d 'de' MMMM yyyy HH:mm", { locale: es })}
                     </span>
-                    {turnoExistenteCliente.servicio_nombre
-                      ? ` (${turnoExistenteCliente.servicio_nombre})`
-                      : ''}
-                    .
+                    {turnoExistenteCliente.servicio_nombre ? ` (${turnoExistenteCliente.servicio_nombre})` : ''}.
                   </AlertDescription>
                   <div className="mt-3">
                     <Button
@@ -634,76 +658,85 @@ export default function ReservarTurnoProfesionalPage() {
                 </Alert>
               )}
 
-              {clienteRegistrado === false && (
-                <Alert>
-                  <AlertTitle>Cliente no encontrado</AlertTitle>
-                  <AlertDescription>
-                    Podés continuar como nuevo cliente (walk-in) completando los datos.
-                  </AlertDescription>
-                </Alert>
-              )}
-
               <div className="space-y-2">
-                <Label htmlFor="nombre">Nombre y apellido</Label>
-                <Input
-                  id="nombre"
-                  placeholder="Ej: Ana Pérez"
-                  value={clienteNombre}
-                  onChange={(e) => setClienteNombre(e.target.value)}
-                />
+                <Label htmlFor="nombre">Nombre y apellido *</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    id="nombre"
+                    placeholder="Nombre"
+                    value={clienteNombre}
+                    onChange={(e) => setClienteNombre(e.target.value)}
+                    disabled={clienteBloqueado}
+                    className={nombreIncompleto ? 'border-red-300 focus-visible:ring-red-200' : ''}
+                  />
+                  <Input
+                    id="apellido"
+                    placeholder="Apellido"
+                    value={clienteApellido}
+                    onChange={(e) => setClienteApellido(e.target.value)}
+                    disabled={clienteBloqueado}
+                    className={apellidoIncompleto ? 'border-red-300 focus-visible:ring-red-200' : ''}
+                  />
+                </div>
+                {(nombreIncompleto || apellidoIncompleto) && (
+                  <p className="text-xs text-red-600">Campo obligatorio para gestionar el turno</p>
+                )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="cliente@ejemplo.com"
-                  value={clienteEmail}
-                  onChange={(e) => setClienteEmail(e.target.value)}
-                />
-                {emailError && <p className="text-xs text-red-600 mt-1">{emailError}</p>}
+                <Label htmlFor="email">Email opcional</Label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="cliente@ejemplo.com"
+                    value={clienteEmail}
+                    onChange={(e) => setClienteEmail(e.target.value)}
+                    disabled={clienteBloqueado}
+                    className="pl-9"
+                  />
+                </div>
+                {emailError && <p className="mt-1 text-xs text-red-600">{emailError}</p>}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="telefono">Teléfono</Label>
-                <Input
-                  id="telefono"
-                  placeholder="Ej: 11 2345 6789"
-                  value={clienteTelefono}
-                  onChange={(e) => {
-                    const normalizado = e.target.value.replace(/[^\d+\s()-]/g, '');
-                    setClienteTelefono(normalizado);
-                  }}
-                />
-                {telefonoError && <p className="text-xs text-red-600 mt-1">{telefonoError}</p>}
+                <Label htmlFor="telefono">Telefono *</Label>
+                <div className="relative">
+                  <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    id="telefono"
+                    placeholder="+54 9 11 2345-6789"
+                    value={clienteTelefono}
+                    onChange={(e) => setClienteTelefono(e.target.value.replace(/[^\d+\s()-]/g, ''))}
+                    disabled={clienteBloqueado}
+                    className={`pl-9 ${telefonoIncompleto ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
+                  />
+                </div>
+                {telefonoIncompleto && <p className="text-xs text-red-600">Obligatorio para avisar en caso de imprevistos</p>}
+                {telefonoError && <p className="mt-1 text-xs text-red-600">{telefonoError}</p>}
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4" />
+          <Card className="rounded-lg border-gray-200 bg-white shadow-sm">
+            <CardHeader className="space-y-3 pb-4">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CalendarIcon className="h-4 w-4" />
                 Servicio y horario
               </CardTitle>
-              <CardDescription>
-                Elegí la fecha y un horario disponible para tu servicio asociado.
-              </CardDescription>
+              <CardDescription>Elige la fecha y horario disponible para el servicio seleccionado</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Fecha</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="w-full justify-start text-left font-normal"
-                    >
+                    <Button variant="outline" className="h-10 w-full justify-start text-left font-normal">
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {fechaSeleccionada
-                        ? format(fechaSeleccionada, "d 'de' MMMM yyyy", { locale: es })
-                        : 'Seleccioná una fecha'}
+                        ? format(fechaSeleccionada, 'dd/MM/yyyy')
+                        : 'Selecciona una fecha'}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -711,196 +744,182 @@ export default function ReservarTurnoProfesionalPage() {
                       mode="single"
                       selected={fechaSeleccionada}
                       onSelect={handleFechaChange}
-                      disabled={(date) => date < new Date()}
+                      disabled={isPastOrSunday}
                     />
                   </PopoverContent>
                 </Popover>
+                {fechaSeleccionada?.getDay() === 0 && (
+                  <p className="text-xs text-amber-700">Los domingos el salon permanece cerrado.</p>
+                )}
               </div>
 
               <div className="space-y-2">
                 <Label>Horario</Label>
-                <div className="grid grid-cols-3 gap-2 items-end">
-                  <div className="space-y-1">
-                    <span className="text-xs text-gray-500">Hora</span>
-                    <Select
-                      value={horaSeleccionada}
-                      onValueChange={(value) => {
-                        setHoraSeleccionada(value);
-                        setMinutoSeleccionado('');
-                        setHorarioSeleccionado('');
-                      }}
-                      disabled={!fechaSeleccionada || loadingHorarios}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="HH" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 24 }).map((_, idx) => {
-                          const h = idx.toString().padStart(2, '0');
-                          const horaHabilitada = horasDisponibles.includes(h);
-                          return (
-                            <SelectItem key={h} value={h} disabled={!horaHabilitada}>
-                              {h}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-xs text-gray-500">Minutos</span>
-                    <Select
-                      value={minutoSeleccionado}
-                      onValueChange={(value) => {
-                        setMinutoSeleccionado(value);
-                        setHorarioSeleccionado('');
-                      }}
-                      disabled={!horaSeleccionada || loadingHorarios}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="MM" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {['00', '15', '30', '45'].map((m) => (
-                          <SelectItem
-                            key={m}
-                            value={m}
-                            disabled={!horariosDisponibles.includes(`${horaSeleccionada || '00'}:${m}`)}
-                          >
-                            {m}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleConfirmarFechaHora}
-                      disabled={loadingHorarios}
-                      className="w-full flex items-center gap-2"
-                    >
-                      <Clock className="w-3 h-3" />
-                      {loadingHorarios ? 'Verificando...' : 'Confirmar fecha y hora'}
-                    </Button>
+                <div className="max-h-52 overflow-y-auto pr-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    {horariosParaMostrar.map((horario) => {
+                      const disponible = horariosDisponibles.includes(horario);
+                      const seleccionado = horarioSeleccionado === horario;
+
+                      return (
+                        <Button
+                          key={horario}
+                          type="button"
+                          variant="outline"
+                          disabled={!fechaSeleccionada || loadingHorarios || !disponible}
+                          onClick={() => handleHorarioClick(horario)}
+                          className={`h-9 rounded-md text-sm font-medium ${
+                            seleccionado
+                              ? 'border-emerald-500 bg-emerald-50 text-emerald-900 hover:bg-emerald-50'
+                              : disponible
+                                ? 'border-slate-300 bg-white text-slate-900 hover:bg-slate-50'
+                                : 'border-slate-200 bg-slate-100 text-slate-400'
+                          }`}
+                        >
+                          {horario}
+                        </Button>
+                      );
+                    })}
                   </div>
                 </div>
-                {horarioSeleccionado && (
-                  <p className="text-xs text-emerald-600 mt-1">
-                    Horario confirmado: {horarioSeleccionado} hs
+
+                {loadingHorarios && (
+                  <p className="flex items-center gap-2 text-xs text-gray-500">
+                    <Clock className="h-3 w-3" />
+                    Verificando disponibilidad...
                   </p>
                 )}
+                {horarioDisponible && (
+                  <p className="text-xs font-medium text-emerald-700">Disponible</p>
+                )}
+                {horarioNoDisponible && (
+                  <p className="text-xs font-medium text-red-600">No disponible</p>
+                )}
                 {!!fechaSeleccionada && !loadingHorarios && horariosDisponibles.length === 0 && (
-                  <p className="text-xs text-amber-700 mt-1">
-                    No hay horarios disponibles para esa fecha con este servicio.
-                  </p>
+                  <p className="text-xs text-amber-700">No hay horarios disponibles para esa fecha.</p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label>Notas para el turno</Label>
+                <Label htmlFor="notas">Notas para el turno</Label>
                 <Textarea
-                  placeholder="Ej: Prefiere rubio frío, viene con foto de referencia..."
+                  id="notas"
+                  placeholder="Ej: Prefiere rubio frio, viene con foto de referencia..."
                   value={notasCliente}
                   onChange={(e) => setNotasCliente(e.target.value)}
                   rows={3}
                 />
+                <p className="text-xs text-slate-500">Estas notas seran visibles en la agenda el dia del turno</p>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4" />
-              Pago en salón
+        <Card className="rounded-lg border-gray-200 bg-white shadow-sm">
+          <CardHeader className="space-y-3 pb-4">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <DollarSign className="h-4 w-4" />
+              Pago en salon
             </CardTitle>
-            <CardDescription>
-              Elegí si cobrás seña o el servicio completo y cómo se paga.
-            </CardDescription>
+            <CardDescription>Elige como quiere pagar el cliente y el monto</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="flex items-center gap-2">
-                  <DollarSign className="w-4 h-4" />
-                  Cobrar seña fija
-                </Label>
-                <p className="text-sm text-gray-500">
-                  Usa automáticamente el porcentaje de seña del servicio.
-                </p>
-              </div>
-              <Switch
-                checked={cobraSeniaFija}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    setCobraSeniaFija(true);
-                    setPagarServicioCompleto(false);
-                  } else {
-                    setCobraSeniaFija(false);
-                    setPagarServicioCompleto(true);
-                  }
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="flex items-center gap-2">
-                  <DollarSign className="w-4 h-4" />
-                  Cobrar servicio completo
-                </Label>
-                <p className="text-sm text-gray-500">
-                  Si lo activás, se registra que el cliente paga ahora el 100% del servicio.
-                </p>
-              </div>
-              <Switch
-                checked={pagarServicioCompleto}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    setPagarServicioCompleto(true);
-                    setCobraSeniaFija(false);
-                  } else {
-                    setPagarServicioCompleto(false);
-                    setCobraSeniaFija(true);
-                  }
-                }}
-              />
-            </div>
-
-            {cobraSeniaFija && (
-              <div className="space-y-2">
-                <Label>Monto de seña (fijo)</Label>
-                <Input value={formatCurrency(montoSeniaFijo)} readOnly disabled />
-              </div>
-            )}
-
-            {pagarServicioCompleto && (
-              <div className="space-y-2">
-                <Label>Monto total del servicio</Label>
-                <Input value={formatCurrency(precioServicio)} readOnly disabled />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Método de pago</Label>
-              <div className="flex flex-wrap gap-3">
-                <Button
+          <CardContent className="space-y-5">
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-3">
+                <Label>Metodo de pago</Label>
+                <button
                   type="button"
-                  variant={metodoPago === 'efectivo' ? 'default' : 'outline'}
                   onClick={() => setMetodoPago('efectivo')}
+                  className={`flex w-full items-center gap-3 rounded-md border p-4 text-left transition ${
+                    metodoPago === 'efectivo'
+                      ? 'border-violet-500 bg-violet-50 text-violet-900'
+                      : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
+                  }`}
                 >
-                  Efectivo / Caja
-                </Button>
-                <Button
+                  <CreditCard className="h-4 w-4" />
+                  <span className="font-medium">Efectivo / Caja</span>
+                </button>
+                <button
                   type="button"
-                  variant={metodoPago === 'mercadopago_qr' ? 'default' : 'outline'}
                   onClick={() => setMetodoPago('mercadopago_qr')}
+                  className={`flex w-full items-start gap-3 rounded-md border p-4 text-left transition ${
+                    metodoPago === 'mercadopago_qr'
+                      ? 'border-violet-500 bg-violet-50 text-violet-900'
+                      : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
+                  }`}
                 >
-                  QR Mercado Pago
-                </Button>
+                  <QrCode className="mt-0.5 h-4 w-4" />
+                  <span>
+                    <span className="block font-medium">QR Mercado Pago</span>
+                    <span className="text-xs text-slate-500">Transferencia o QR</span>
+                  </span>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Tipo de pago</Label>
+                <div className="rounded-md bg-slate-50 p-4">
+                  <p className="text-sm text-slate-600">Precio del servicio</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-950">{formatCurrency(precioServicio)}</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setTipoPago('PAGO_COMPLETO')}
+                  className={`flex w-full items-center justify-between rounded-md border p-4 text-left transition ${
+                    tipoPago === 'PAGO_COMPLETO'
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-950'
+                      : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>
+                    <span className="block font-medium">Cobrar servicio completo</span>
+                    <span className="text-sm text-slate-600">El cliente paga ahora el 100% del servicio</span>
+                  </span>
+                  <span className={`h-4 w-4 rounded-full border ${tipoPago === 'PAGO_COMPLETO' ? 'border-emerald-500 bg-emerald-500 ring-4 ring-emerald-100' : 'border-slate-300'}`} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTipoPago('SENIA')}
+                  className={`flex w-full items-center justify-between rounded-md border p-4 text-left transition ${
+                    tipoPago === 'SENIA'
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-950'
+                      : 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>
+                    <span className="block font-medium">Cobrar sena fija ({porcentajeSena || 50}%)</span>
+                    <span className="text-sm text-slate-600">Sena automatica de {formatCurrency(montoSenia)}</span>
+                  </span>
+                  <span className={`h-4 w-4 rounded-full border ${tipoPago === 'SENIA' ? 'border-emerald-500 bg-emerald-500 ring-4 ring-emerald-100' : 'border-slate-300'}`} />
+                </button>
+
+                {metodoPago === 'efectivo' && tipoPago === 'PAGO_COMPLETO' && (
+                  <div className="rounded-md border border-yellow-300 bg-yellow-50 p-4">
+                    <Label htmlFor="monto-recibido">Monto recibido</Label>
+                    <Input
+                      id="monto-recibido"
+                      inputMode="decimal"
+                      placeholder="Cuanto pago el cliente?"
+                      value={montoRecibido}
+                      onChange={(e) => setMontoRecibido(e.target.value.replace(/[^\d.,]/g, ''))}
+                      className="mt-2 border-yellow-300 bg-yellow-50 focus-visible:ring-yellow-200"
+                    />
+                    <div className="mt-3 flex items-center justify-between text-sm">
+                      <span className="text-slate-600">Vuelto</span>
+                      <span className="font-semibold text-slate-950">{formatCurrency(vuelto)}</span>
+                    </div>
+                    {pagoExacto && (
+                      <p className="mt-2 text-sm font-medium text-emerald-700">
+                        Pago exacto - Marcar como Pagado Total
+                      </p>
+                    )}
+                    {montoRecibidoNumerico > 0 && montoRecibidoNumerico < montoACobrar && (
+                      <p className="mt-2 text-sm text-red-600">El monto recibido no cubre el pago total.</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -908,33 +927,36 @@ export default function ReservarTurnoProfesionalPage() {
               <Alert>
                 <AlertTitle>Pago con QR</AlertTitle>
                 <AlertDescription>
-                  Se generará un link/QR para que el cliente lo escanee con la app de Mercado Pago. Cuando el pago se apruebe, el turno se crea automáticamente.
+                  Se generara un link para que el cliente pague con Mercado Pago. Cuando se apruebe, el turno se crea automaticamente.
+                  {preferenceId ? ` Preferencia: ${preferenceId}` : ''}
                 </AlertDescription>
               </Alert>
             )}
-
-            <div className="flex justify-end gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => router.push('/dashboard/profesional/agenda')}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                disabled={!puedeConfirmar || isSubmitting || isWaitingPayment}
-                onClick={metodoPago === 'efectivo' ? submitEfectivo : submitQr}
-              >
-                {isSubmitting || isWaitingPayment
-                  ? 'Procesando...'
-                  : metodoPago === 'efectivo'
-                    ? 'Reservar y registrar pago'
-                    : 'Generar QR y reservar'}
-              </Button>
-            </div>
           </CardContent>
         </Card>
+
+        <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.push('/dashboard/profesional/agenda')}
+            className="h-11 min-w-28 bg-slate-100"
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            disabled={!puedeConfirmar || isSubmitting || isWaitingPayment}
+            onClick={metodoPago === 'efectivo' ? submitEfectivo : submitQr}
+            className="h-11"
+          >
+            {isSubmitting || isWaitingPayment
+              ? 'Procesando...'
+              : metodoPago === 'efectivo'
+                ? 'Reservar y registrar pago'
+                : 'Generar QR y reservar'}
+          </Button>
+        </div>
       </div>
     </div>
   );

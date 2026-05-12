@@ -33,6 +33,40 @@ class UserCreateView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
 
 
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
+def precheck_dni_view(request):
+    dni = (request.query_params.get("dni") or "").strip()
+    if not dni:
+        return Response(
+            {"error": "Debe proporcionar el parametro 'dni'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = User.objects.filter(dni=dni, role="cliente").first()
+    if not user:
+        return Response({"exists": False, "cuenta_incompleta": False})
+
+    cuenta_incompleta = (
+        not user.is_active or not user.has_usable_password()
+    ) and hasattr(user, "cliente_profile")
+
+    email = user.email or ""
+    email_publico = "" if email.startswith("no-email-") and email.endswith("@example.com") else email
+
+    return Response(
+        {
+            "exists": True,
+            "cuenta_incompleta": cuenta_incompleta,
+            "first_name": user.first_name if cuenta_incompleta else "",
+            "last_name": user.last_name if cuenta_incompleta else "",
+            "phone": user.phone if cuenta_incompleta else "",
+            "email": email_publico if cuenta_incompleta else "",
+        }
+    )
+
+
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
     Vista para ver y actualizar el perfil del usuario autenticado

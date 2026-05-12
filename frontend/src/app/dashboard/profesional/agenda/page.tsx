@@ -14,6 +14,14 @@ import { Badge } from '@/components/ui/badge';
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
@@ -26,11 +34,12 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
-import { formatTime } from '@/lib/dateUtils';
-import { Turno } from '@/types';
-import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
+import { formatDate as formatShortDate, formatTime, getCurrentDateISO, toISODate } from '@/lib/dateUtils';
+import { turnosService } from '@/services/turnos';
+import { SolicitudReprogramacionFlexible, Turno } from '@/types';
+import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
   pendiente: 'bg-yellow-100 text-yellow-800',
@@ -39,6 +48,9 @@ const ESTADO_COLORS: { [key: string]: string } = {
   completado: 'bg-green-100 text-green-800',
   cancelado: 'bg-red-100 text-red-800',
   no_asistio: 'bg-gray-100 text-gray-800',
+  pendiente_manual: 'bg-blue-100 text-blue-800',
+  oferta_enviada: 'bg-indigo-100 text-indigo-800',
+  expirada: 'bg-slate-100 text-slate-800',
 };
 
 const ESTADO_LABELS: { [key: string]: string } = {
@@ -48,7 +60,31 @@ const ESTADO_LABELS: { [key: string]: string } = {
   completado: 'Completado',
   cancelado: 'Cancelado',
   no_asistio: 'No Asistio',
+  pendiente_manual: 'Pendiente manual',
+  oferta_enviada: 'Oferta enviada',
+  expirada: 'Expirada',
 };
+
+const HORARIOS_MANUALES = [
+  '08:00',
+  '08:30',
+  '09:00',
+  '09:30',
+  '10:00',
+  '10:30',
+  '11:00',
+  '11:30',
+  '12:00',
+  '12:30',
+  '13:00',
+  '13:30',
+  '14:00',
+  '14:30',
+  '15:00',
+  '15:30',
+  '16:00',
+  '16:30',
+];
 
 export default function AgendaEmpleadoPage() {
   const { user } = useAuth();
@@ -86,6 +122,24 @@ export default function AgendaEmpleadoPage() {
   const [datosPruebaActivos, setDatosPruebaActivos] = useState(false);
   const [cantidadDatosPrueba, setCantidadDatosPrueba] = useState(0);
   const [procesandoDatosPrueba, setProcesandoDatosPrueba] = useState(false);
+  const [solicitudesPendientes, setSolicitudesPendientes] = useState<SolicitudReprogramacionFlexible[]>([]);
+  const [solicitudesProcesadas, setSolicitudesProcesadas] = useState<SolicitudReprogramacionFlexible[]>([]);
+  const [loadingSolicitudes, setLoadingSolicitudes] = useState(false);
+  const [errorSolicitudes, setErrorSolicitudes] = useState<string | null>(null);
+  const [resumenSolicitudes, setResumenSolicitudes] = useState({
+    pendientes: 0,
+    atendidas: 0,
+    rechazadas: 0,
+    en_revision: 0,
+    total: 0,
+  });
+  const [solicitudSeleccionada, setSolicitudSeleccionada] = useState<SolicitudReprogramacionFlexible | null>(null);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [fechaAsignada, setFechaAsignada] = useState('');
+  const [horarioAsignado, setHorarioAsignado] = useState('');
+  const [observacionesAsignacion, setObservacionesAsignacion] = useState('');
+  const [procesandoSolicitud, setProcesandoSolicitud] = useState(false);
+  const [sobreturnoConfirmado, setSobreturnoConfirmado] = useState(false);
 
   useEffect(() => {
     const fechaParam = searchParams.get('fecha');
@@ -300,6 +354,96 @@ export default function AgendaEmpleadoPage() {
     }
   };
 
+  const loadSolicitudesFlexibles = async () => {
+    if (user?.role?.toLowerCase() !== 'profesional') {
+      setSolicitudesPendientes([]);
+      setSolicitudesProcesadas([]);
+      setResumenSolicitudes({
+        pendientes: 0,
+        atendidas: 0,
+        rechazadas: 0,
+        en_revision: 0,
+        total: 0,
+      });
+      return;
+    }
+
+    try {
+      setLoadingSolicitudes(true);
+      setErrorSolicitudes(null);
+
+      const [pendientes, procesadas, resumen] = await Promise.all([
+        turnosService.listarSolicitudesFlexibles({ estado: 'pendiente', page_size: 50 }),
+        turnosService.listarSolicitudesFlexibles({ estado: 'procesadas', page_size: 50 }),
+        turnosService.getSolicitudesFlexiblesResumen(),
+      ]);
+
+      setSolicitudesPendientes(pendientes.results || []);
+      setSolicitudesProcesadas(procesadas.results || []);
+      setResumenSolicitudes(resumen);
+    } catch (err: any) {
+      console.error('Error cargando solicitudes flexibles:', err);
+      setErrorSolicitudes(err.message || 'No se pudieron cargar las solicitudes');
+    } finally {
+      setLoadingSolicitudes(false);
+    }
+  };
+
+  const openAsignarDialog = (solicitud: SolicitudReprogramacionFlexible) => {
+    const fechaInicial = solicitud.preferencia_fecha || getCurrentDateISO();
+    const horarioInicial = solicitud.preferencia_horario || HORARIOS_MANUALES[0];
+    setSolicitudSeleccionada(solicitud);
+    setFechaAsignada(fechaInicial);
+    setHorarioAsignado(horarioInicial);
+    setObservacionesAsignacion('');
+    setSobreturnoConfirmado(false);
+    setAssignDialogOpen(true);
+  };
+
+  const handleAsignarSolicitud = async (permitirSobreturno = false) => {
+    if (!solicitudSeleccionada || !fechaAsignada || !horarioAsignado) {
+      setErrorSolicitudes('Debes seleccionar fecha y horario para asignar el turno.');
+      return;
+    }
+
+    try {
+      setProcesandoSolicitud(true);
+      setErrorSolicitudes(null);
+
+      const fechaHora = `${fechaAsignada}T${horarioAsignado}:00`;
+      await turnosService.asignarSolicitudFlexible(solicitudSeleccionada.id, {
+        fecha_hora: fechaHora,
+        observaciones: observacionesAsignacion.trim() || undefined,
+        motivo: solicitudSeleccionada.motivo || undefined,
+        permitir_sobreturno: permitirSobreturno,
+      });
+
+      setAssignDialogOpen(false);
+      setSolicitudSeleccionada(null);
+      setSobreturnoConfirmado(false);
+      await loadSolicitudesFlexibles();
+      await loadTurnos(selectedDate);
+    } catch (err: any) {
+      console.error('Error asignando solicitud:', err);
+      const message = err.message || 'No se pudo asignar el turno.';
+      const requiereSobreturno = /reservado por/i.test(message);
+
+      if (requiereSobreturno && !permitirSobreturno) {
+        setConfirmMessage(`${message} ¿Deseas sobre-turnar?`);
+        setConfirmAction(() => async () => {
+          setShowConfirmDialog(false);
+          setSobreturnoConfirmado(true);
+          await handleAsignarSolicitud(true);
+        });
+        setShowConfirmDialog(true);
+      } else {
+        setErrorSolicitudes(message);
+      }
+    } finally {
+      setProcesandoSolicitud(false);
+    }
+  };
+
   const toggleDatosPrueba = async () => {
     try {
       setProcesandoDatosPrueba(true);
@@ -375,6 +519,14 @@ export default function AgendaEmpleadoPage() {
       loadEstadoDatosPrueba();
     }
   }, [empleadoId]);
+
+  useEffect(() => {
+    if (user?.role?.toLowerCase() !== 'profesional') return;
+
+    loadSolicitudesFlexibles();
+    const interval = setInterval(loadSolicitudesFlexibles, 30000);
+    return () => clearInterval(interval);
+  }, [user?.role]);
 
   // Cargar resúmenes de Hoy (fecha actual) y Esta Semana (semana actual) independientes de la fecha seleccionada
   useEffect(() => {
@@ -740,6 +892,31 @@ export default function AgendaEmpleadoPage() {
   const resumenPendientes = turnosFiltrados.filter((t) => t.estado === 'pendiente').length;
 
   const totalTurnosPendientes = turnosPendientes.length;
+  const getVencimientoSolicitudLabel = (solicitud: SolicitudReprogramacionFlexible) => {
+    if (!solicitud.expires_at) return 'Sin vencimiento configurado';
+    if (solicitud.esta_vencida) return 'Vencida: requiere explicación al propietario';
+
+    const horas = solicitud.horas_restantes;
+    if (typeof horas === 'number') {
+      if (horas <= 0) return 'Vence en menos de 1 hora';
+      return `Vence en ${horas} h`;
+    }
+
+    const diffMs = new Date(solicitud.expires_at).getTime() - Date.now();
+    const fallbackHoras = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+    return fallbackHoras <= 0 ? 'Vence en menos de 1 hora' : `Vence en ${fallbackHoras} h`;
+  };
+
+  const fechasDisponibles = Array.from({ length: 14 }, (_, index) => {
+    const base = new Date();
+    base.setHours(0, 0, 0, 0);
+    const fecha = new Date(base);
+    fecha.setDate(base.getDate() + index);
+    return {
+      date: fecha,
+      iso: toISODate(fecha),
+    };
+  });
 
   const pendientesAgrupados = (() => {
     const mapa: Record<string, Turno[]> = {};
@@ -860,7 +1037,7 @@ export default function AgendaEmpleadoPage() {
         {!modoCompletar && (
           <>
             {/* Tarjetas de resumen */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Hoy</CardTitle>
@@ -900,14 +1077,186 @@ export default function AgendaEmpleadoPage() {
 
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Pendientes</CardTitle>
+                  <CardTitle className="text-sm font-medium">Turnos pendientes</CardTitle>
                   <CardDescription>A la espera de confirmación</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <p className="text-3xl font-semibold text-amber-500">{resumenPendientes}</p>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Pendientes</CardTitle>
+                  <CardDescription>Solicitudes flexibles por atender</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-semibold text-rose-500">{resumenSolicitudes.pendientes}</p>
+                </CardContent>
+              </Card>
             </div>
+
+            {/* Solicitudes pendientes */}
+            <Card id="solicitudes-pendientes" className="scroll-mt-24">
+              <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <ClipboardList className="h-5 w-5 text-slate-500" />
+                    Solicitudes Pendientes
+                  </CardTitle>
+                  <CardDescription>
+                    Reprogramaciones flexibles enviadas por clientes
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Pendientes</span>
+                  <span className="inline-flex min-w-8 items-center justify-center rounded-full bg-red-500 px-2 py-1 text-xs font-semibold text-white">
+                    {resumenSolicitudes.pendientes}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingSolicitudes && (
+                  <BeautifulSpinner label="Cargando solicitudes pendientes..." />
+                )}
+
+                {errorSolicitudes && !loadingSolicitudes && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <p>{errorSolicitudes}</p>
+                    <Button variant="outline" size="sm" className="mt-3" onClick={loadSolicitudesFlexibles}>
+                      Reintentar
+                    </Button>
+                  </div>
+                )}
+
+                {!loadingSolicitudes && !errorSolicitudes && solicitudesPendientes.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-6 py-8 text-center text-sm text-muted-foreground">
+                    No hay solicitudes pendientes por revisar.
+                  </div>
+                )}
+
+                {!loadingSolicitudes && !errorSolicitudes && solicitudesPendientes.length > 0 && (
+                  <div className="space-y-4">
+                    {solicitudesPendientes.map((solicitud) => {
+                      const turno = solicitud.turno;
+                      const fechaOriginal = `${formatShortDate(turno.fecha_hora)} • ${formatTime(turno.fecha_hora)} hs`;
+                      const preferenciaFecha = solicitud.preferencia_fecha
+                        ? formatShortDate(solicitud.preferencia_fecha)
+                        : 'Sin preferencia';
+                      const preferenciaHorario = solicitud.preferencia_horario
+                        ? `${solicitud.preferencia_horario} hs`
+                        : '';
+                      const fechaSolicitud = `${formatShortDate(solicitud.created_at)} ${formatTime(solicitud.created_at)} hs`;
+
+                      return (
+                        <div
+                          key={solicitud.id}
+                          className={`rounded-xl border bg-white p-4 shadow-sm ${solicitud.esta_vencida ? 'border-amber-300' : 'border-slate-200'}`}
+                        >
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-slate-900">
+                                  {solicitud.cliente_nombre}
+                                </p>
+                                <Badge variant="outline" className="text-xs">
+                                  {solicitud.servicio_nombre}
+                                </Badge>
+                                <Badge
+                                  variant={solicitud.requiere_senia_nueva ? 'destructive' : 'secondary'}
+                                  className="text-xs"
+                                >
+                                  {solicitud.requiere_senia_nueva
+                                    ? 'Seña: Perdida (Multa aplicada)'
+                                    : 'Seña: Vigente'}
+                                </Badge>
+                                <Badge
+                                  variant={solicitud.esta_vencida ? 'destructive' : 'outline'}
+                                  className="text-xs"
+                                >
+                                  {getVencimientoSolicitudLabel(solicitud)}
+                                </Badge>
+                              </div>
+
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                                  <p className="text-xs font-semibold uppercase text-red-500">Turno original</p>
+                                  <p className="text-sm font-semibold text-red-700">{fechaOriginal}</p>
+                                </div>
+                                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                                  <p className="text-xs font-semibold uppercase text-blue-500">Fecha solicitada</p>
+                                  <p className="text-sm font-semibold text-blue-700">
+                                    {preferenciaFecha}
+                                    {preferenciaHorario ? ` • ${preferenciaHorario}` : ''}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="text-sm text-slate-700">
+                                <span className="font-medium text-slate-900">Motivo:</span>{' '}
+                                {solicitud.motivo || 'Sin motivo registrado'}
+                              </div>
+
+                              <div className="text-xs text-slate-500">
+                                Solicitud creada: {fechaSolicitud}
+                              </div>
+                              {solicitud.esta_vencida && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                                  Esta solicitud superó el tiempo configurado. El propietario deberá poder revisar la demora.
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                              <Button onClick={() => openAsignarDialog(solicitud)}>
+                                Asignar Turno Manualmente
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Solicitudes procesadas */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Solicitudes Procesadas</CardTitle>
+                <CardDescription>Solicitudes atendidas</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {solicitudesProcesadas.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay solicitudes procesadas aún.</p>
+                ) : (
+                  solicitudesProcesadas.map((solicitud) => {
+                    const estadoLabel = solicitud.estado === 'atendida' ? 'Atendida' : solicitud.estado_display;
+                    const badgeClass = solicitud.estado === 'atendida'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-red-100 text-red-700';
+
+                    return (
+                      <div
+                        key={solicitud.id}
+                        className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {solicitud.cliente_nombre} · {solicitud.servicio_nombre}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Solicitada {formatShortDate(solicitud.created_at)} {formatTime(solicitud.created_at)} hs
+                          </p>
+                        </div>
+                        <Badge className={badgeClass}>{estadoLabel}</Badge>
+                      </div>
+                    );
+                  })
+                )}
+              </CardContent>
+            </Card>
 
             {/* Filtros */}
             <Card>
@@ -1126,7 +1475,7 @@ export default function AgendaEmpleadoPage() {
                           const startGrid = new Date(firstOfMonth);
                           startGrid.setDate(firstOfMonth.getDate() - firstWeekDay);
 
-                          const cells: JSX.Element[] = [];
+                          const cells: ReactElement[] = [];
                           for (let i = 0; i < 42; i++) {
                             const cellDate = new Date(startGrid);
                             cellDate.setDate(startGrid.getDate() + i);
@@ -1861,12 +2210,14 @@ export default function AgendaEmpleadoPage() {
               {confirmMessage}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>
-              Esto se usa solo para testeo. El producto final tendrá activa esta restricción.
-            </span>
-          </div>
+          {!/sobre-turnar|reservado por/i.test(confirmMessage) && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                Esto se usa solo para testeo. El producto final tendrá activa esta restricción.
+              </span>
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setShowConfirmDialog(false)}>
               Cancelar
@@ -1884,6 +2235,129 @@ export default function AgendaEmpleadoPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Asignar Turno Manualmente</DialogTitle>
+            <DialogDescription>
+              {solicitudSeleccionada
+                ? `${solicitudSeleccionada.cliente_nombre} · ${solicitudSeleccionada.servicio_nombre}`
+                : 'Selecciona fecha y horario para asignar el turno.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div>
+              <p className="text-sm font-semibold text-slate-900 mb-3">Selecciona fecha (próximos 14 días)</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {fechasDisponibles.map(({ date, iso }) => {
+                  const selected = fechaAsignada === iso;
+                  const weekday = date.toLocaleDateString('es-AR', { weekday: 'short' }).toUpperCase();
+                  const day = date.getDate().toString().padStart(2, '0');
+                  const month = date.toLocaleDateString('es-AR', { month: 'short' }).toUpperCase();
+
+                  return (
+                    <button
+                      key={iso}
+                      type="button"
+                      onClick={() => setFechaAsignada(iso)}
+                      className={`rounded-2xl border px-3 py-2 text-center transition ${selected
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300'
+                        }`}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide">{weekday}</p>
+                      <p className="text-xl font-bold leading-none">{day}</p>
+                      <p className="text-xs uppercase">{month}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-slate-900 mb-3">Selecciona horario (18 opciones)</p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                {HORARIOS_MANUALES.map((hora) => {
+                  const selected = horarioAsignado === hora;
+                  return (
+                    <button
+                      key={hora}
+                      type="button"
+                      onClick={() => setHorarioAsignado(hora)}
+                      className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${selected
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300'
+                        }`}
+                    >
+                      {hora}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase text-slate-500">Preview del turno</p>
+              <p className="mt-1 text-base font-semibold text-slate-900">
+                {fechaAsignada ? formatShortDate(fechaAsignada) : 'Sin fecha'}
+                {horarioAsignado ? ` • ${horarioAsignado} hs` : ' • Sin horario'}
+              </p>
+              {solicitudSeleccionada && (
+                <div className="mt-2 space-y-2">
+                  <p className="text-sm text-slate-600">
+                    Cliente: {solicitudSeleccionada.cliente_nombre} · Servicio: {solicitudSeleccionada.servicio_nombre}
+                  </p>
+                  <Badge
+                    variant={solicitudSeleccionada.requiere_senia_nueva ? 'destructive' : 'secondary'}
+                    className="text-xs"
+                  >
+                    {solicitudSeleccionada.requiere_senia_nueva
+                      ? 'Seña: Perdida (Multa aplicada)'
+                      : 'Seña: Vigente'}
+                  </Badge>
+                  {sobreturnoConfirmado && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Sobre-turno autorizado para este horario.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-slate-900 mb-2">Observaciones internas (opcional)</p>
+              <Textarea
+                value={observacionesAsignacion}
+                onChange={(e) => setObservacionesAsignacion(e.target.value)}
+                placeholder="Notas sobre la reasignación..."
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignDialogOpen(false)} disabled={procesandoSolicitud}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => handleAsignarSolicitud(false)}
+              disabled={procesandoSolicitud || !fechaAsignada || !horarioAsignado}
+            >
+              {procesandoSolicitud ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Asignando...
+                </>
+              ) : (
+                'Confirmar asignación'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

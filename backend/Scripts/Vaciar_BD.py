@@ -13,6 +13,7 @@ import os
 import sys
 import django
 from django.conf import settings
+from django.db import connection
 
 # Configurar Django si aún no está inicializado
 # (cuando se ejecuta como script directo; runscript ya lo hace antes)
@@ -39,6 +40,57 @@ def run(force=False):
             return
 
     print("\n🗑️  Vaciando base de datos...\n")
+
+    def limpiar_tablas_fk_a_user_sqlite():
+        """Limpia tablas con FK a users_user que no estén contempladas explícitamente.
+
+        En SQLite, muchas tablas externas (authtoken, social_auth, simple_history, etc.)
+        quedan con referencias a users_user y pueden bloquear el delete final de User.
+        """
+
+        tablas_referencia_user = []
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tablas = [row[0] for row in cursor.fetchall()]
+
+            for tabla in tablas:
+                if tabla == "users_user" or tabla.startswith("sqlite_"):
+                    continue
+                try:
+                    cursor.execute(f"PRAGMA foreign_key_list({tabla})")
+                    fks = cursor.fetchall()
+                except Exception:
+                    continue
+
+                for fk in fks:
+                    # PRAGMA foreign_key_list: (id, seq, table, from, to, on_update, on_delete, match)
+                    if len(fk) >= 3 and fk[2] == "users_user":
+                        tablas_referencia_user.append(tabla)
+                        break
+
+            tablas_referencia_user = sorted(set(tablas_referencia_user))
+
+            total_limpiadas = 0
+            total_registros = 0
+            for tabla in tablas_referencia_user:
+                try:
+                    cursor.execute(f'SELECT COUNT(*) FROM "{tabla}"')
+                    cantidad = cursor.fetchone()[0]
+                    if cantidad > 0:
+                        cursor.execute(f'DELETE FROM "{tabla}"')
+                        total_registros += cantidad
+                    total_limpiadas += 1
+                except Exception:
+                    # Si alguna tabla falla, dejamos que el resumen principal
+                    # muestre el problema cuando intente borrar User.
+                    continue
+
+        if tablas_referencia_user:
+            print(
+                f"  ℹ️  Tablas con FK a User limpiadas: {total_limpiadas} "
+                f"(registros eliminados: {total_registros})"
+            )
 
     # ── Paso 2: importar modelos ──────────────────────────────────────────
     # Leaf tables primero (las que referencian a otras)
@@ -108,8 +160,6 @@ def run(force=False):
         ("ConfiguracionSSO", ConfiguracionSSO),
         ("ConfiguracionGlobal", ConfiguracionGlobal),
         ("Configuracion", Configuracion),
-        # Usuarios (tabla raíz)
-        ("User", User),
     ]
 
     total_eliminados = 0
@@ -126,6 +176,18 @@ def run(force=False):
         except Exception as exc:
             errores.append((nombre, str(exc)))
             print(f"  ❌  {nombre:<25} → ERROR: {exc}")
+
+    # Limpiar referencias externas a User (authtoken, social_auth, simple_history, etc.)
+    limpiar_tablas_fk_a_user_sqlite()
+
+    # Intentar borrar usuarios al final, cuando ya no quedan referencias
+    try:
+        eliminados, _ = User.objects.all().delete()
+        total_eliminados += eliminados
+        print(f"  ✅  {'User':<25} → {eliminados} registros")
+    except Exception as exc:
+        errores.append(("User", str(exc)))
+        print(f"  ❌  {'User':<25} → ERROR: {exc}")
 
     # ── Paso 5: resumen ───────────────────────────────────────────────────
     print(f"\n{'─' * 50}")

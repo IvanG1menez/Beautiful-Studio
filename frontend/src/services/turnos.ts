@@ -1,6 +1,7 @@
 import {
   ApiResponse,
   HistorialTurno,
+  SolicitudReprogramacionFlexible,
   Turno,
   TurnoFormData
 } from '@/types';
@@ -118,6 +119,98 @@ export const turnosService = {
   // Cancelar turno
   cancel: async (id: number, motivo?: string): Promise<Turno> => {
     return await turnosService.changeStatus(id, 'cancelado', motivo);
+  },
+
+  // Reprogramar turno (solo cambia fecha/hora)
+  reprogramar: async (
+    id: number,
+    payload: {
+      nueva_fecha_hora: string;
+      motivo?: string;
+      nuevo_empleado_id?: number;
+      aceptar_penalidad_fuera_rango?: boolean;
+    }
+  ): Promise<{
+    message: string;
+    turno: Turno;
+    fecha_hora_anterior: string;
+    fecha_hora_nueva: string;
+    sena_reiniciada?: boolean;
+    penalidad_aplicada?: boolean;
+    estado_pago_reprogramacion?: 'SENIA_PENDIENTE_LOCAL' | 'SIN_PENALIDAD';
+    brecha_horas?: number;
+    mensaje_penalidad?: string;
+  }> => {
+    return await post(`/turnos/${id}/reprogramar/`, payload);
+  },
+
+  // Solicitar reprogramación flexible para revisión manual
+  solicitarReprogramacionFlexible: async (
+    id: number,
+    payload: { motivo?: string; preferencia_fecha?: string; preferencia_horario?: string }
+  ): Promise<{ message: string; solicitud: SolicitudReprogramacionFlexible }> => {
+    return await post<{ message: string; solicitud: SolicitudReprogramacionFlexible }>(`/turnos/${id}/solicitar-reprogramacion-flexible/`, payload);
+  },
+
+  // Listar solicitudes flexibles
+  listarSolicitudesFlexibles: async (params?: {
+    estado?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<ApiResponse<SolicitudReprogramacionFlexible>> => {
+    return await getWithPagination<SolicitudReprogramacionFlexible>('/turnos/solicitudes-flexibles/', params);
+  },
+
+  // Resumen de solicitudes flexibles
+  getSolicitudesFlexiblesResumen: async (): Promise<{
+    pendientes: number;
+    atendidas: number;
+    rechazadas: number;
+    en_revision: number;
+    vencidas?: number;
+    total: number;
+  }> => {
+    return await get('/turnos/solicitudes-flexibles/resumen/');
+  },
+
+  // Registrar explicación para una solicitud flexible vencida
+  registrarExplicacionSolicitudFlexible: async (
+    id: number,
+    payload: { explicacion: string }
+  ): Promise<{ message: string; solicitud: SolicitudReprogramacionFlexible }> => {
+    return await post(`/turnos/solicitudes-flexibles/${id}/registrar-explicacion/`, payload);
+  },
+
+  // Asignar turno manualmente a una solicitud flexible
+  asignarSolicitudFlexible: async (
+    id: number,
+    payload: {
+      fecha_hora: string;
+      observaciones?: string;
+      motivo?: string;
+      aceptar_penalidad_fuera_rango?: boolean;
+      permitir_sobreturno?: boolean;
+    }
+  ): Promise<{
+    message: string;
+    solicitud: SolicitudReprogramacionFlexible;
+    turno: Turno;
+    fecha_hora_anterior: string;
+    fecha_hora_nueva: string;
+    sena_reiniciada?: boolean;
+    penalidad_aplicada?: boolean;
+    estado_pago_reprogramacion?: 'SENIA_PENDIENTE_LOCAL' | 'SIN_PENALIDAD';
+    mensaje_penalidad?: string;
+  }> => {
+    return await post(`/turnos/solicitudes-flexibles/${id}/asignar/`, payload);
+  },
+
+  // Rechazar solicitud flexible
+  rechazarSolicitudFlexible: async (
+    id: number,
+    payload?: { observaciones?: string }
+  ): Promise<{ message: string; solicitud: SolicitudReprogramacionFlexible }> => {
+    return await post(`/turnos/solicitudes-flexibles/${id}/rechazar/`, payload || {});
   },
 
   // Marcar como no asistió

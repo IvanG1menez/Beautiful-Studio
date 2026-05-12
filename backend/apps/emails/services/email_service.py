@@ -996,6 +996,84 @@ class EmailService:
             return False
 
     @staticmethod
+    def enviar_email_modificacion_turno_cliente(turno, cambios: Dict) -> bool:
+        """Envía email al cliente cuando se modifica su turno."""
+        try:
+            cambios_html = ""
+            for campo, valores in cambios.items():
+                cambios_html += f"""
+                    <div class="info-row">
+                        <span class="info-label">{campo}:</span>
+                        <span class="info-value">{valores['anterior']} → {valores['nuevo']}</span>
+                    </div>
+                """
+
+            nombre_cliente = (
+                turno.cliente.user.first_name
+                or turno.cliente.user.get_full_name()
+                or turno.cliente.user.username
+            )
+
+            contenido = f"""
+                <h2 style="color: #667eea; margin-bottom: 20px;">Tu turno fue actualizado</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+
+                <div class="alert alert-info">
+                    Hubo una modificación en tu turno. Revisá los nuevos datos a continuación.
+                </div>
+
+                <h3 style="margin-top: 20px;">Cambios realizados:</h3>
+                <div class="info-box">
+                    {cambios_html}
+                </div>
+
+                <h3 style="margin-top: 20px;">Información del turno:</h3>
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{turno.empleado.user.get_full_name()}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{turno.servicio.nombre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Fecha y Hora:</span>
+                        <span class="info-value">{turno.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
+                    </div>
+                </div>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Turno Modificado",
+                header_titulo="Turno Modificado",
+                contenido=contenido,
+            )
+
+            plain_message = strip_tags(html_message)
+
+            email_destino = EmailService._get_email_destinatario(turno.cliente.user.email)
+
+            send_mail(
+                subject=f'Tu turno fue modificado - {turno.fecha_hora.strftime("%d/%m/%Y %H:%M")}',
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                f"Email de modificación enviado a cliente {email_destino} (original: {turno.cliente.user.email})"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error enviando email de modificación al cliente: {str(e)}")
+            return False
+
+    @staticmethod
     def enviar_email_recordatorio_turno(turno) -> bool:
         """
         Envía email recordatorio al profesional sobre un turno próximo

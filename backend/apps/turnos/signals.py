@@ -10,6 +10,7 @@ from django.utils import timezone
 from .models import Turno
 from apps.emails.models import Notificacion, NotificacionConfig
 from apps.emails.services import EmailService
+from apps.turnos.services.streak_service import process_turno_state_transition
 import logging
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,13 @@ def manejar_modificacion_turno(sender, instance, created, **kwargs):
                     # Turno completado - podría enviar notificación de pago pendiente
                     manejar_turno_completado(instance)
 
+                # PA3: evaluar transición de estado para racha y bonos.
+                process_turno_state_transition(
+                    turno=instance,
+                    previous_state=anterior["estado"],
+                    actor_user=getattr(instance, "_streak_actor_user", None),
+                )
+
                 cambios["Estado"] = {
                     "anterior": anterior["estado"],
                     "nuevo": instance.estado,
@@ -232,6 +240,35 @@ def manejar_modificacion_turno(sender, instance, created, **kwargs):
                 # Enviar email solo si está configurado
                 if config_profesional.email_modificacion_turno:
                     EmailService.enviar_email_modificacion_turno(instance, cambios)
+
+                # Notificar al cliente sobre el cambio de turno
+                config_cliente, _ = NotificacionConfig.objects.get_or_create(
+                    user=instance.cliente.user,
+                    defaults={
+                        "notificar_modificacion_turno": True,
+                        "email_modificacion_turno": True,
+                    },
+                )
+
+                if config_cliente.notificar_modificacion_turno:
+                    Notificacion.objects.create(
+                        usuario=instance.cliente.user,
+                        tipo="modificacion_turno",
+                        titulo="Tu turno fue reprogramado",
+                        mensaje=(
+                            f"Tu turno con {instance.empleado.user.get_full_name()} fue actualizado."
+                        ),
+                        data={
+                            "turno_id": instance.id,
+                            "cambios": cambios,
+                        },
+                    )
+
+                if config_cliente.email_modificacion_turno:
+                    EmailService.enviar_email_modificacion_turno_cliente(
+                        instance,
+                        cambios,
+                    )
 
             # Limpiar del tracking
             del _turno_anterior[instance.pk]

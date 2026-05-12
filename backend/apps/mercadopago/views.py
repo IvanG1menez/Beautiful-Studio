@@ -12,11 +12,13 @@ Endpoints:
 import json
 import logging
 import uuid
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 
 from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -39,10 +41,15 @@ from .models import PagoMercadoPago
 from .serializers import (
     CrearPreferenciaSerializer,
     CrearPreferenciaSinTurnoSerializer,
+    CrearPreferenciaReprogramacionSerializer,
     CrearPreferenciaStaffSerializer,
     PagoMercadoPagoSerializer,
 )
 from . import services
+from apps.turnos.services.reprogramacion_service import (
+    reprogramar_turno,
+    validar_limite_reprogramacion_cliente_servicio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,18 +83,16 @@ class CrearPreferenciaView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # No duplicar si ya existe un pago aprobado
-        if hasattr(turno, "pago_mercadopago"):
-            pago_existente = turno.pago_mercadopago
-            if pago_existente.estado == "approved":
-                return Response(
-                    {
-                        "detail": "Este turno ya tiene un pago aprobado.",
-                        "preference_id": pago_existente.preference_id,
-                        "init_point": pago_existente.init_point,
-                    },
-                    status=status.HTTP_200_OK,
-                )
+        pago_existente = turno.pagos_mercadopago.filter(estado="approved").first()
+        if pago_existente:
+            return Response(
+                {
+                    "detail": "Este turno ya tiene un pago aprobado.",
+                    "preference_id": pago_existente.preference_id,
+                    "init_point": pago_existente.init_point,
+                },
+                status=status.HTTP_200_OK,
+            )
 
         descripcion = turno.servicio.nombre if turno.servicio else "Servicio"
         monto = (
@@ -98,17 +103,15 @@ class CrearPreferenciaView(APIView):
         descripcion_pago = f"Turno #{turno.pk} — {descripcion}"
 
         # 1. Persistir como pending antes de llamar al SDK
-        pago, _ = PagoMercadoPago.objects.update_or_create(
+        pago = PagoMercadoPago.objects.create(
             turno=turno,
-            defaults={
-                "cliente": turno.cliente,
-                "preference_id": f"PENDING-TURNO-{turno.pk}",
-                "init_point": "",
-                "monto": monto,
-                "moneda": settings.MP_CURRENCY_ID,
-                "descripcion": descripcion_pago,
-                "estado": "pending",
-            },
+            cliente=turno.cliente,
+            preference_id=f"PENDING-TURNO-{turno.pk}-{uuid.uuid4().hex[:8]}",
+            init_point="",
+            monto=monto,
+            moneda=settings.MP_CURRENCY_ID,
+            descripcion=descripcion_pago,
+            estado="pending",
         )
 
         payer_email = ""
@@ -362,6 +365,140 @@ class CrearPreferenciaSinTurnoView(APIView):
                 "init_point": resultado["init_point"],
                 "sandbox_init_point": resultado["sandbox_init_point"],
                 "public_key": getattr(settings, "MP_PUBLIC_KEY", ""),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CrearPreferenciaReprogramacionView(APIView):
+    """Crea una preferencia MP para reprogramar un turno existente fuera de rango."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = CrearPreferenciaReprogramacionSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+
+        try:
+            turno = Turno.objects.select_related("cliente__user", "servicio", "empleado").get(
+                pk=data["turno_id"]
+            )
+        except Turno.DoesNotExist:
+            return Response(
+                {"detail": "No se encontró el turno a reprogramar."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        es_cliente_duenio = hasattr(request.user, "cliente_profile") and (
+            turno.cliente_id == request.user.cliente_profile.id
+        )
+        es_admin = request.user.is_staff or request.user.role in ["propietario", "superusuario"]
+        if not (es_cliente_duenio or es_admin):
+            return Response(
+                {"detail": "No tiene permisos para pagar esta reprogramación."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        from apps.authentication.models import ConfiguracionGlobal
+
+        config = ConfiguracionGlobal.get_config()
+        brecha_horas = max(1, int(config.min_horas_cancelacion_credito or 24))
+        ahora = timezone.now()
+        dentro_de_rango_pago = ahora > turno.fecha_hora - timedelta(hours=brecha_horas)
+        if not dentro_de_rango_pago:
+            return Response(
+                {"detail": "Este turno aún puede reprogramarse sin penalidad de pago."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if data["nueva_fecha_hora"] <= ahora:
+            return Response(
+                {"detail": "La nueva fecha y hora debe ser futura."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if es_cliente_duenio:
+            try:
+                validar_limite_reprogramacion_cliente_servicio(turno, ahora)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        precio_total = Decimal(str(turno.servicio.precio or turno.precio_final or 0))
+        monto_sena = Decimal(str(getattr(turno.servicio, "monto_sena_fijo", 0) or 0))
+        if monto_sena <= 0 and precio_total > 0:
+            monto_sena = (precio_total / Decimal("2")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
+        tipo_pago = data["tipo_pago"]
+        monto_final_decimal = monto_sena if tipo_pago == "SENIA" else precio_total
+        monto_final = round(float(monto_final_decimal), 2)
+
+        min_mp_amount = float(getattr(settings, "MP_MIN_AMOUNT", 100))
+        if monto_final < min_mp_amount:
+            return Response(
+                {
+                    "detail": (
+                        f"El monto a cobrar (${monto_final:.2f}) es inferior al mínimo "
+                        f"permitido por Mercado Pago (${min_mp_amount:.2f} ARS)."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        empleado_destino_id = data.get("nuevo_empleado_id") or turno.empleado_id
+        payload = {
+            "tipo_movimiento": "reprogramacion_turno",
+            "turno_id": turno.id,
+            "cliente_id": turno.cliente_id,
+            "servicio_id": turno.servicio_id,
+            "empleado_id": empleado_destino_id,
+            "nueva_fecha_hora": data["nueva_fecha_hora"].isoformat(),
+            "motivo": data.get("motivo") or "",
+            "tipo_pago": tipo_pago,
+            "monto_cobrado": str(monto_final_decimal),
+        }
+
+        descripcion = f"Reprogramación turno #{turno.pk} — {turno.servicio.nombre}"
+        notification_url = getattr(settings, "MERCADO_PAGO_WEBHOOK_URL", "")
+
+        try:
+            resultado = services.crear_preferencia(
+                titulo=f"Reprogramación — {turno.servicio.nombre}",
+                descripcion=descripcion,
+                monto=monto_final,
+                external_reference=json.dumps(payload),
+                notification_url=notification_url,
+                payer_email=turno.cliente.user.email or "",
+            )
+        except ValueError as exc:
+            logger.error("Error creando preferencia MP reprogramación: %s", exc)
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        PagoMercadoPago.objects.create(
+            preference_id=resultado["preference_id"],
+            turno=turno,
+            cliente=turno.cliente,
+            payment_id=None,
+            init_point=resultado["init_point"],
+            monto=monto_final_decimal,
+            moneda=settings.MP_CURRENCY_ID,
+            descripcion=descripcion,
+            estado="pending",
+        )
+
+        return Response(
+            {
+                "status": "pending",
+                "preference_id": resultado["preference_id"],
+                "init_point": resultado["init_point"],
+                "sandbox_init_point": resultado["sandbox_init_point"],
+                "public_key": getattr(settings, "MP_PUBLIC_KEY", ""),
+                "tipo_pago": tipo_pago,
+                "monto": str(monto_final_decimal),
             },
             status=status.HTTP_201_CREATED,
         )
@@ -706,57 +843,23 @@ class WebhookMercadoPagoView(APIView):
                     turno_wh.senia_pagada = max(Decimal("0"), senia_total)
                     turno_wh.save(update_fields=["senia_pagada"])
 
-            # Búsqueda en dos pasos para evitar conflicto en la OneToOne turno_id:
-            #   1. Por preference_id  → reintento exacto del mismo webhook.
-            #   2. Por turno          → el turno ya tiene un pago (p.ej. el topic
-            #                           opuesto llegó primero y creó el registro).
             pago_por_preference = PagoMercadoPago.objects.filter(
                 preference_id=mp_preference_id
             ).first()
             if pago_por_preference is not None:
-                logger.info(
-                    "Webhook MP: PagoMercadoPago ya registrado preference_id=%s, ignorando.",
-                    mp_preference_id,
-                )
-                return
-
-            pago_por_turno = PagoMercadoPago.objects.filter(turno=turno_wh).first()
-            if pago_por_turno is not None:
-                if not pago_por_turno.preference_id:
-                    # El turno tiene un PagoMercadoPago con preference_id vacío
-                    # (creado por un webhook payment cuya respuesta de API no
-                    # incluía preference_id). Actualizamos al ID correcto para
-                    # que el polling pueda resolverse.
-                    logger.info(
-                        "Webhook MP: actualizando preference_id vacío → %s (turno pk=%s).",
-                        mp_preference_id,
-                        turno_wh.pk,
+                if pago_por_preference.estado != "approved":
+                    pago_por_preference.estado = "approved"
+                    pago_por_preference.payment_id = str(payment_id)
+                    pago_por_preference.save(
+                        update_fields=["estado", "payment_id", "actualizado_en"]
                     )
-                    pago_por_turno.preference_id = mp_preference_id
-                    pago_por_turno.estado = "approved"
-                    pago_por_turno.payment_id = str(payment_id)
-                    pago_por_turno.save(
-                        update_fields=[
-                            "preference_id",
-                            "estado",
-                            "payment_id",
-                            "actualizado_en",
-                        ]
-                    )
-                    # El signal post_save del Turno ya se disparó cuando se creó
-                    # el turno (on_commit). Como ahora el pago fue actualizado
-                    # DESPUÉS de ese commit, los emails no se enviaron aún.
-                    # Los enviamos explícitamente aquí.
                     from apps.turnos.signals import _enviar_notificaciones_nuevo_turno
 
                     _enviar_notificaciones_nuevo_turno(turno_wh.pk)
                 else:
                     logger.info(
-                        "Webhook MP: PagoMercadoPago pk=%s ya registrado para "
-                        "turno pk=%s (preference_id=%s), ignorando.",
-                        pago_por_turno.pk,
-                        turno_wh.pk,
-                        pago_por_turno.preference_id,
+                        "Webhook MP: PagoMercadoPago ya registrado preference_id=%s, ignorando.",
+                        mp_preference_id,
                     )
                 return
 
@@ -795,11 +898,115 @@ class WebhookMercadoPagoView(APIView):
             mp_preference_id,
         )
 
+    def _reprogramar_turno_desde_payload(
+        self,
+        payload: dict,
+        payment_id: str,
+        mp_preference_id: str,
+        monto_cobrado_override: float | None = None,
+    ) -> None:
+        """Aplica una reprogramación ya pagada por Mercado Pago."""
+        if not mp_preference_id:
+            logger.warning(
+                "Webhook MP reprogramación: preference_id vacío para payment_id=%s.",
+                payment_id,
+            )
+            return
+
+        pago = PagoMercadoPago.objects.filter(preference_id=mp_preference_id).first()
+        if pago and pago.estado == "approved":
+            logger.info(
+                "Webhook MP reprogramación: pago ya aprobado preference_id=%s, ignorando.",
+                mp_preference_id,
+            )
+            return
+
+        turno = Turno.objects.select_related("cliente", "servicio", "empleado").get(
+            pk=payload["turno_id"]
+        )
+        nueva_fecha_hora = parse_datetime(payload["nueva_fecha_hora"])
+        if nueva_fecha_hora is None:
+            raise ValueError("Fecha de reprogramación inválida")
+        if timezone.is_naive(nueva_fecha_hora):
+            nueva_fecha_hora = timezone.make_aware(nueva_fecha_hora, timezone.get_current_timezone())
+
+        tipo_pago = (payload.get("tipo_pago") or "SENIA").upper()
+        if tipo_pago not in {"SENIA", "PAGO_COMPLETO"}:
+            tipo_pago = "SENIA"
+
+        monto_cobrado = Decimal(
+            str(monto_cobrado_override or payload.get("monto_cobrado") or 0)
+        )
+
+        with transaction.atomic():
+            resultado = reprogramar_turno(
+                turno=turno,
+                usuario=turno.cliente.user,
+                fecha_hora_nueva=nueva_fecha_hora,
+                nuevo_empleado_id=payload.get("empleado_id") or None,
+                aceptar_penalidad_fuera_rango=True,
+                motivo=payload.get("motivo") or "Reprogramación abonada por Mercado Pago",
+                reiniciar_pago_cliente=False,
+            )
+
+            turno = resultado.turno
+            turno.senia_pagada = monto_cobrado
+            turno.tipo_pago = tipo_pago
+            turno.metodo_pago = "mercadopago"
+            turno.fecha_pago_registrado = timezone.now()
+            turno.estado = "confirmado"
+            turno.save(
+                update_fields=[
+                    "senia_pagada",
+                    "tipo_pago",
+                    "metodo_pago",
+                    "fecha_pago_registrado",
+                    "estado",
+                    "updated_at",
+                ]
+            )
+
+            if pago is None:
+                pago = PagoMercadoPago.objects.create(
+                    preference_id=mp_preference_id,
+                    turno=turno,
+                    cliente=turno.cliente,
+                    init_point="",
+                    monto=monto_cobrado,
+                    moneda=settings.MP_CURRENCY_ID,
+                    descripcion=f"Reprogramación turno #{turno.pk} — {turno.servicio.nombre}",
+                    estado="pending",
+                )
+
+            pago.turno = turno
+            pago.cliente = turno.cliente
+            pago.payment_id = str(payment_id)
+            pago.monto = monto_cobrado
+            pago.estado = "approved"
+            pago.save(
+                update_fields=[
+                    "turno",
+                    "cliente",
+                    "payment_id",
+                    "monto",
+                    "estado",
+                    "actualizado_en",
+                ]
+            )
+
+        logger.info(
+            "Webhook MP reprogramación: turno=%s reprogramado y pago aprobado preference_id=%s",
+            turno.pk,
+            mp_preference_id,
+        )
+
     def _parse_turno_payload(self, external_reference: str) -> dict | None:
         """Intenta parsear el external_reference como JSON. Devuelve None si no es el nuevo flujo."""
         try:
             parsed = json.loads(external_reference)
-            if isinstance(parsed, dict) and "cliente_id" in parsed:
+            if isinstance(parsed, dict) and (
+                "cliente_id" in parsed or parsed.get("tipo_movimiento") == "reprogramacion_turno"
+            ):
                 return parsed
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
@@ -853,12 +1060,17 @@ class WebhookMercadoPagoView(APIView):
                 # ── nuevo flujo ──
                 if nuevo_estado == "approved":
                     try:
-                        self._crear_turno_desde_payload(
-                            turno_payload, resource_id, mp_preference_id
-                        )
+                        if turno_payload.get("tipo_movimiento") == "reprogramacion_turno":
+                            self._reprogramar_turno_desde_payload(
+                                turno_payload, resource_id, mp_preference_id
+                            )
+                        else:
+                            self._crear_turno_desde_payload(
+                                turno_payload, resource_id, mp_preference_id
+                            )
                     except Exception as exc:
                         logger.error(
-                            "Webhook MP (payment): error creando turno: %s", exc
+                            "Webhook MP (payment): error procesando pago: %s", exc
                         )
                 else:
                     logger.info(
@@ -869,7 +1081,13 @@ class WebhookMercadoPagoView(APIView):
                 # ── flujo clásico ──
                 try:
                     turno_id_clasico = int(external_reference)
-                    pago = PagoMercadoPago.objects.get(turno_id=turno_id_clasico)
+                    pago = (
+                        PagoMercadoPago.objects.filter(turno_id=turno_id_clasico)
+                        .order_by("-creado_en")
+                        .first()
+                    )
+                    if not pago:
+                        raise PagoMercadoPago.DoesNotExist
                     pago.payment_id = str(resource_id)
                     pago.estado = nuevo_estado
                     pago.save(update_fields=["payment_id", "estado", "actualizado_en"])
@@ -933,15 +1151,23 @@ class WebhookMercadoPagoView(APIView):
                     or 0
                 )
                 try:
-                    self._crear_turno_desde_payload(
-                        turno_payload,
-                        payment_id_aprobado,
-                        mp_preference_id,
-                        monto_cobrado_override=monto_cobrado or None,
-                    )
+                    if turno_payload.get("tipo_movimiento") == "reprogramacion_turno":
+                        self._reprogramar_turno_desde_payload(
+                            turno_payload,
+                            payment_id_aprobado,
+                            mp_preference_id,
+                            monto_cobrado_override=monto_cobrado or None,
+                        )
+                    else:
+                        self._crear_turno_desde_payload(
+                            turno_payload,
+                            payment_id_aprobado,
+                            mp_preference_id,
+                            monto_cobrado_override=monto_cobrado or None,
+                        )
                 except Exception as exc:
                     logger.error(
-                        "Webhook MP (merchant_order): error creando turno: %s", exc
+                        "Webhook MP (merchant_order): error procesando pago: %s", exc
                     )
             else:
                 logger.info(
@@ -971,10 +1197,12 @@ class VerificarPagoView(APIView):
 
     def get(self, request, preference_id: str, *args, **kwargs):
         try:
-            pago = PagoMercadoPago.objects.select_related("turno").get(
+            pago = PagoMercadoPago.objects.select_related("turno").filter(
                 preference_id=preference_id,
                 estado="approved",
-            )
+            ).order_by("-actualizado_en").first()
+            if not pago:
+                raise PagoMercadoPago.DoesNotExist
             return Response(
                 {"status": "approved", "turno_id": pago.turno.pk},
                 status=status.HTTP_200_OK,
@@ -1017,12 +1245,21 @@ class VerificarPagoView(APIView):
             )
 
             try:
-                WebhookMercadoPagoView()._crear_turno_desde_payload(
-                    turno_payload,
-                    payment_id,
-                    preference_id,
-                    monto_cobrado_override=monto_cobrado or None,
-                )
+                webhook = WebhookMercadoPagoView()
+                if turno_payload.get("tipo_movimiento") == "reprogramacion_turno":
+                    webhook._reprogramar_turno_desde_payload(
+                        turno_payload,
+                        payment_id,
+                        preference_id,
+                        monto_cobrado_override=monto_cobrado or None,
+                    )
+                else:
+                    webhook._crear_turno_desde_payload(
+                        turno_payload,
+                        payment_id,
+                        preference_id,
+                        monto_cobrado_override=monto_cobrado or None,
+                    )
             except Exception as exc:
                 logger.error(
                     "VerificarPago fallback: error registrando pago/turno preference_id=%s: %s",

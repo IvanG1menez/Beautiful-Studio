@@ -11,8 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatDate, formatDateTimeReadable, formatTime } from '@/lib/dateUtils';
-import { Calendar, CalendarDays, CheckCircle, Clock, Filter, Loader2, Plus, Search, User, X, XCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { AlertCircle, Calendar, CalendarDays, CheckCircle, Clock, Filter, Loader2, Plus, Search, User, X, XCircle } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 interface Turno {
@@ -27,6 +27,7 @@ interface Turno {
   servicio_nombre: string;
   servicio_duracion: string;
   categoria_nombre: string;
+  sala_nombre?: string;
   fecha_hora: string;
   fecha_hora_fin: string;
   estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio';
@@ -50,6 +51,7 @@ interface Turno {
 
 export default function TurnosClientePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Estados
   const [turnos, setTurnos] = useState<Turno[]>([]);
@@ -120,6 +122,67 @@ export default function TurnosClientePage() {
   useEffect(() => {
     fetchTurnos();
   }, []);
+
+  useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    if (filterParam === 'pasados' || filterParam === 'proximos' || filterParam === 'todos') {
+      setFilter(filterParam);
+    }
+  }, [searchParams]);
+
+  const handleDescargarComprobantePDF = () => {
+    if (!comprobanteData) return;
+
+    const popup = window.open('', '_blank', 'width=900,height=1100');
+    if (!popup) return;
+
+    const html = `
+      <html>
+        <head>
+          <title>Comprobante de pago</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+            h1 { margin: 0 0 12px 0; font-size: 24px; }
+            .box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+            .label { color: #6b7280; font-size: 12px; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+            p { margin: 4px 0; }
+          </style>
+        </head>
+        <body>
+          <h1>Comprobante de pago</h1>
+          <div class="box">
+            <div class="label">Empresa</div>
+            <p><strong>${comprobanteData.empresa?.nombre_empresa || 'Beautiful Studio'}</strong></p>
+            ${comprobanteData.empresa?.razon_social ? `<p>Razón social: ${comprobanteData.empresa.razon_social}</p>` : ''}
+            ${comprobanteData.empresa?.cuit ? `<p>CUIT: ${comprobanteData.empresa.cuit}</p>` : ''}
+          </div>
+          <div class="box">
+            <div class="label">Detalle del turno</div>
+            <p>Cliente: ${comprobanteData.turno?.cliente_nombre || '-'}</p>
+            <p>Profesional: ${comprobanteData.turno?.profesional_nombre || '-'}</p>
+            <p>Servicio: ${comprobanteData.turno?.servicio_nombre || '-'}</p>
+            <p>Fecha y hora: ${comprobanteData.turno?.fecha_hora ? formatDateTimeReadable(comprobanteData.turno.fecha_hora) : '-'}</p>
+          </div>
+          <div class="box">
+            <div class="label">Pago</div>
+            <p>Monto cobrado: <strong>$${comprobanteData.pago?.monto || '-'}</strong> ${comprobanteData.pago?.moneda || ''}</p>
+            ${comprobanteData.turno?.senia_pagada ? `<p>Seña pagada: $${comprobanteData.turno.senia_pagada}</p>` : ''}
+            ${comprobanteData.turno?.precio_final ? `<p>Precio final turno: $${comprobanteData.turno.precio_final}</p>` : ''}
+            ${comprobanteData.pago?.payment_id ? `<p>ID de pago: ${comprobanteData.pago.payment_id}</p>` : ''}
+          </div>
+          <script>
+            window.onload = function () {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
+  };
 
   // Función para abrir el diálogo de cancelación con mensaje según crédito
   const showConfirmDialog = (turno: Turno) => {
@@ -380,6 +443,50 @@ export default function TurnosClientePage() {
     }
   };
 
+  const getCancelDeadline = (fechaHora: string) => {
+    const turnoDate = new Date(fechaHora);
+    const cancelBefore = new Date(turnoDate.getTime() - 24 * 60 * 60 * 1000);
+    return formatDateTimeReadable(cancelBefore.toISOString());
+  };
+
+  const getDiasBadge = (fechaHora: string) => {
+    const now = new Date();
+    const fecha = new Date(fechaHora);
+    now.setHours(0, 0, 0, 0);
+    fecha.setHours(0, 0, 0, 0);
+    const diff = Math.round((fecha.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    if (diff <= 0) return 'Hoy';
+    if (diff === 1) return 'Mañana';
+    return `${diff} días`;
+  };
+
+  const getPagoDetalle = (turno: Turno) => {
+    const precioTotal = parseFloat(turno.precio_final || turno.servicio_precio || '0');
+    const senia = parseFloat(turno.senia_pagada || '0');
+    const restante = parseFloat(
+      turno.monto_pendiente || String(Math.max(0, precioTotal - senia))
+    );
+
+    if (turno.pagado_completo || restante <= 0) {
+      return {
+        badge: 'Pago completo',
+        texto: 'Este turno ya está abonado por completo.',
+      };
+    }
+
+    if (senia > 0) {
+      return {
+        badge: 'Seña abonada',
+        texto: `Seña: $${senia.toFixed(2)} · Resta en local: $${restante.toFixed(2)}`,
+      };
+    }
+
+    return {
+      badge: 'Sin pago previo',
+      texto: `Monto a abonar en local: $${precioTotal.toFixed(2)}`,
+    };
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -555,6 +662,18 @@ export default function TurnosClientePage() {
         </CardHeader>
 
         <CardContent>
+          {filter === 'proximos' && (
+            <div className="mb-4 rounded-2xl border border-orange-300 bg-orange-50 p-4 text-orange-900">
+              <div className="mb-1 flex items-center gap-2 text-xl font-semibold">
+                <AlertCircle className="h-4 w-4" />
+                Política de Cancelación
+              </div>
+              <p className="text-base">
+                Las cancelaciones deben realizarse con al menos 24 horas de anticipación para evitar cargos.
+              </p>
+            </div>
+          )}
+
           {/* Lista de turnos */}
           <div className="space-y-4">
             {filteredTurnos.map((turno) => {
@@ -562,6 +681,97 @@ export default function TurnosClientePage() {
               const isConfirmado = turno.estado === 'confirmado';
               const isCompletado = turno.estado === 'completado';
               const isCancelado = turno.estado === 'cancelado' || turno.estado === 'no_asistio';
+
+              if (filter === 'proximos') {
+                const badgeDia = getDiasBadge(turno.fecha_hora);
+                const pagoDetalle = getPagoDetalle(turno);
+                return (
+                  <div
+                    key={turno.id}
+                    className="rounded-3xl border border-slate-300 bg-white p-6 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <h3 className="text-2xl font-bold text-slate-900">{turno.servicio_nombre}</h3>
+                            <Badge className={`${getEstadoColor(turno.estado)} rounded-full px-4 py-1 text-sm font-semibold text-white`}>
+                              {turno.estado_display}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-xl text-slate-700">👩‍🔧 {turno.empleado_nombre}</p>
+                        </div>
+
+                        <p className="text-4xl font-extrabold text-purple-600">
+                          ${parseFloat(turno.monto_pendiente || turno.precio_final || '0').toFixed(0)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900">
+                        <p className="font-semibold">{pagoDetalle.badge}</p>
+                        <p>{pagoDetalle.texto}</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-base text-slate-700 md:grid-cols-2">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-5 w-5 text-purple-600" />
+                          <span>{formatDate(turno.fecha_hora)}</span>
+                          <Badge variant="outline" className="rounded-lg border-purple-200 bg-purple-50 px-3 py-1 text-sm font-semibold text-purple-700">
+                            {badgeDia}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-5 w-5 text-purple-600" />
+                          <span>{formatTime(turno.fecha_hora)} ({turno.servicio_duracion})</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CalendarDays className="h-5 w-5 text-purple-600" />
+                          <span>{turno.sala_nombre || turno.categoria_nombre}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-orange-700">
+                          <AlertCircle className="h-5 w-5 text-orange-500" />
+                          <span>Cancelar antes: {getCancelDeadline(turno.fecha_hora)}</span>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-slate-200" />
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <Button
+                          className="h-11 rounded-2xl bg-linear-to-r from-purple-700 to-violet-600 text-base font-semibold text-white hover:opacity-95"
+                          onClick={() => router.push('/dashboard/cliente/turnos')}
+                        >
+                          Confirmar asistencia
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-11 rounded-2xl border-slate-300 bg-white text-base font-semibold text-slate-700 hover:bg-slate-50"
+                          onClick={() => router.push(`/dashboard/cliente/turnos/nuevo?servicio=${turno.servicio}`)}
+                        >
+                          Reprogramar
+                        </Button>
+                        {turno.puede_cancelar ? (
+                          <Button
+                            variant="outline"
+                            className="h-11 rounded-2xl border-red-300 bg-white text-base font-semibold text-red-600 hover:bg-red-50"
+                            onClick={() => handleCancelarTurno(turno)}
+                          >
+                            Cancelar
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            className="h-11 rounded-2xl border-slate-300 bg-slate-100 text-base font-semibold text-slate-500"
+                            disabled
+                          >
+                            Cancelar
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -632,11 +842,9 @@ export default function TurnosClientePage() {
 
                             return <span>${montoPendiente.toFixed(2)}</span>;
                           })()}
-                          {turno.pagado_completo && (
-                            <span className="mt-1 text-xs font-semibold text-green-700">
-                              Servicio pagado completo
-                            </span>
-                          )}
+                          <span className="mt-1 rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-800">
+                            {getPagoDetalle(turno).texto}
+                          </span>
                         </span>
                       </div>
                     </div>
@@ -679,6 +887,15 @@ export default function TurnosClientePage() {
                       >
                         <CheckCircle className="w-4 h-4 mr-1 text-green-600" />
                         Ver comprobante
+                      </Button>
+                    )}
+                    {(filter === 'pasados' || turno.estado === 'completado') && turno.estado !== 'cancelado' && (
+                      <Button
+                        variant="outline"
+                        className="h-10 whitespace-nowrap rounded-xl border-purple-200 bg-purple-100 px-5 text-base font-semibold text-purple-700 hover:bg-purple-200"
+                        onClick={() => router.push(`/dashboard/cliente/turnos/nuevo?servicio=${turno.servicio}`)}
+                      >
+                        Reservar de nuevo
                       </Button>
                     )}
                     {turno.puede_cancelar && (
@@ -792,6 +1009,9 @@ export default function TurnosClientePage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleDescargarComprobantePDF}>
+              Descargar PDF
+            </AlertDialogCancel>
             <AlertDialogAction onClick={() => setComprobanteDialogOpen(false)}>
               Cerrar
             </AlertDialogAction>

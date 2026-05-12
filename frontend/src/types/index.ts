@@ -128,6 +128,50 @@ export interface Empleado {
   user_dni: string;
 }
 
+export interface Professional {
+  id: string;
+  name: string;
+}
+
+export interface TimeSlot {
+  time: string;
+  available: boolean;
+  professionalIds: string[];
+}
+
+export interface Appointment {
+  date: Date;
+  time: string;
+  professional: Professional;
+  service: string;
+  salon: string;
+}
+
+export type ReprogramacionViewMode = 'single' | 'all';
+
+export type ReprogramacionStep = 'calendar' | 'time' | 'loading' | 'select-professional' | 'flexible' | 'confirmation' | 'result';
+
+export interface SolicitudReprogramacionFlexible {
+  id: number;
+  turno: Turno;
+  cliente_nombre: string;
+  empleado_nombre: string;
+  servicio_nombre: string;
+  motivo?: string | null;
+  preferencia_fecha?: string | null;
+  preferencia_horario?: string | null;
+  estado: 'pendiente' | 'en_revision' | 'atendida' | 'rechazada' | 'cancelada';
+  estado_display: string;
+  requiere_senia_nueva: boolean;
+  observaciones?: string | null;
+  expires_at?: string | null;
+  esta_vencida?: boolean;
+  horas_restantes?: number | null;
+  explicacion_vencimiento?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EmpleadoServicio {
   id: number;
   empleado: Empleado;
@@ -144,7 +188,7 @@ export interface Turno {
   sala?: number;
   sala_nombre?: string;
   fecha_hora: string;
-  estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio';
+  estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio' | 'pendiente_manual' | 'oferta_enviada' | 'expirada';
   notas_cliente?: string;
   notas_empleado?: string;
   precio_final?: string;
@@ -154,6 +198,9 @@ export interface Turno {
   tipo_pago?: 'SIN_PAGO' | 'SENIA' | 'PAGO_COMPLETO' | null;
   monto_pendiente?: string;
   pagado_completo?: boolean;
+  puede_reprogramar?: boolean;
+  motivo_no_reprogramable?: string;
+  reprogramacion_bloqueada_codigo?: string | null;
   created_at: string;
   updated_at: string;
   fecha_hora_fin?: string;

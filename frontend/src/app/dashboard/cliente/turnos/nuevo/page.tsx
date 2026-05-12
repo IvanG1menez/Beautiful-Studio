@@ -153,22 +153,22 @@ export default function NuevoTurnoPage() {
   useEffect(() => {
     if (!searchParams) return;
 
+    const servicioIdParam = searchParams.get('servicio');
+    if (servicioIdParam) {
+      const id = parseInt(servicioIdParam, 10);
+      if (!Number.isNaN(id)) {
+        setServicioIdFromQuery(id);
+      }
+    }
+
     const fromFidelizacion = searchParams.get('fromFidelizacion');
     if (fromFidelizacion === '1') {
       setIsFromFidelizacion(true);
 
-      const servicioIdParam = searchParams.get('servicio');
       const empleadoIdParam = searchParams.get('empleado');
       const fechaParam = searchParams.get('fecha');
       const horaParam = searchParams.get('hora');
       const beneficioParam = searchParams.get('beneficio');
-
-      if (servicioIdParam) {
-        const id = parseInt(servicioIdParam, 10);
-        if (!Number.isNaN(id)) {
-          setServicioIdFromQuery(id);
-        }
-      }
 
       if (empleadoIdParam) {
         const id = parseInt(empleadoIdParam, 10);
@@ -201,7 +201,7 @@ export default function NuevoTurnoPage() {
   // Si venimos desde fidelización y tenemos un servicio en la URL, cargarlo directamente
   useEffect(() => {
     const loadServicioFromQuery = async () => {
-      if (!isFromFidelizacion || !servicioIdFromQuery || servicioSeleccionado) return;
+      if (!servicioIdFromQuery || servicioSeleccionado) return;
 
       try {
         const response = await fetch(`${API_BASE_URL}/servicios/${servicioIdFromQuery}/`, {
@@ -219,7 +219,7 @@ export default function NuevoTurnoPage() {
     };
 
     loadServicioFromQuery();
-  }, [isFromFidelizacion, servicioIdFromQuery, servicioSeleccionado]);
+  }, [servicioIdFromQuery, servicioSeleccionado]);
 
   // Polling: verificar si el pago de MP fue aprobado (cada 3 segundos).
   // Se usa useRef para el intervalo: evita que el re-render destruya y re-cree

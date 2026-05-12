@@ -6,6 +6,7 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   CalendarDays,
+  ClipboardList,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -95,9 +96,10 @@ export default function DashboardPropietarioLayout({
       label: "Reportes",
       icon: PieChart,
       active:
-        pathname?.startsWith("/dashboard/propietario/reportes") ||
-        pathname?.startsWith("/dashboard/propietario/historial") ||
-        pathname?.startsWith("/dashboard/propietario/turnos"),
+    pathname?.startsWith("/dashboard/propietario/reportes") ||
+    pathname?.startsWith("/dashboard/propietario/historial") ||
+    pathname?.startsWith("/dashboard/propietario/reprogramaciones") ||
+    pathname?.startsWith("/dashboard/propietario/turnos"),
       submenu: [
         {
           label: "Resumen Financiero",
@@ -110,6 +112,12 @@ export default function DashboardPropietarioLayout({
           icon: CalendarDays,
           href: "/dashboard/propietario/turnos",
           active: pathname?.startsWith("/dashboard/propietario/turnos"),
+        },
+        {
+          label: "Reprogramaciones",
+          icon: ClipboardList,
+          href: "/dashboard/propietario/reprogramaciones",
+          active: pathname?.startsWith("/dashboard/propietario/reprogramaciones"),
         },
         {
           label: "Rendimiento de Servicios",

@@ -6,6 +6,7 @@ app_name = "users"  # Namespace para evitar conflictos de nombres
 urlpatterns = [
     # Autenticación
     path("register/", views.UserCreateView.as_view(), name="register"),
+    path("precheck-dni/", views.precheck_dni_view, name="precheck-dni"),
     path("login/", views.login_view, name="login"),
     path("logout/", views.logout_view, name="logout"),
     # Perfil de usuario

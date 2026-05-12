@@ -6,6 +6,15 @@ import {
 } from '@/types';
 import { get, post } from './api';
 
+export interface DniPrecheckResponse {
+  exists: boolean;
+  cuenta_incompleta: boolean;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  email?: string;
+}
+
 export const authService = {
   // Iniciar sesión
   login: async (credentials: LoginCredentials): Promise<LoginResponse> => {
@@ -25,11 +34,15 @@ export const authService = {
     return await post<LoginResponse>('/users/register/', data);
   },
 
+  precheckDni: async (dni: string): Promise<DniPrecheckResponse> => {
+    return await get<DniPrecheckResponse>(`/users/precheck-dni/?dni=${encodeURIComponent(dni)}`);
+  },
+
   // Cerrar sesión
   logout: async (): Promise<void> => {
     try {
       await post('/users/logout/', {});
-    } catch (error) {
+    } catch {
       // Continuar incluso si falla la petición al servidor
     } finally {
       // Limpiar datos locales

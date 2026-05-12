@@ -11,23 +11,46 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.utils import timezone
 from django.db.models import Q
 from datetime import datetime, timedelta
-from .models import Turno, HistorialTurno, LogReasignacion
+from .models import Turno, HistorialTurno, LogReasignacion, SolicitudReprogramacionFlexible
 from .serializers import (
     TurnoListSerializer,
     TurnoDetailSerializer,
     TurnoCreateSerializer,
     TurnoUpdateSerializer,
+    ReprogramarTurnoSerializer,
+    SolicitudReprogramacionFlexibleCreateSerializer,
+    SolicitudReprogramacionFlexibleSerializer,
     HistorialTurnoSerializer,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
+from apps.authentication.models import AuditoriaAcciones
 
 from apps.turnos.services.reasignacion_service import (
     responder_oferta_reasignacion,
     obtener_detalles_oferta_reasignacion,
 )
 from apps.turnos.services.cancelacion_service import cancelar_turno_para_cliente
+from apps.turnos.services.reprogramacion_service import (
+    reprogramar_turno,
+    validar_limite_reprogramacion_cliente_servicio,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _registrar_auditoria_turno(request, accion: str, turno: Turno, detalles: dict) -> None:
+    try:
+        AuditoriaAcciones.objects.create(
+            usuario=request.user if request.user.is_authenticated else None,
+            accion=accion,
+            modelo_afectado="Turno",
+            objeto_id=turno.id,
+            detalles=detalles,
+            ip_address=request.META.get("REMOTE_ADDR"),
+            user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+    except Exception as exc:
+        logger.warning("No se pudo registrar auditoria de turno: %s", exc)
 
 
 class TurnoViewSet(viewsets.ModelViewSet):
@@ -119,6 +142,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
             "partial_update",
             "destroy",
             "cambiar_estado",
+            "reprogramar",
         ]:
             return queryset  # Sin filtros de rol, solo permisos generales
 
@@ -153,6 +177,22 @@ class TurnoViewSet(viewsets.ModelViewSet):
             if fecha_hasta:
                 # Filtrar turnos hasta el final del día
                 queryset = queryset.filter(fecha_hora__date__lte=fecha_hasta)
+
+        return queryset
+
+    def _get_solicitudes_flexibles_queryset(self):
+        user = self.request.user
+        queryset = SolicitudReprogramacionFlexible.objects.select_related(
+            "turno",
+            "cliente",
+            "turno__empleado",
+            "turno__servicio",
+        )
+
+        if hasattr(user, "cliente_profile"):
+            queryset = queryset.filter(cliente=user.cliente_profile)
+        elif hasattr(user, "profesional_profile"):
+            queryset = queryset.filter(turno__empleado=user.profesional_profile)
 
         return queryset
 
@@ -213,6 +253,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
         user.role = "cliente"
         user.dni = dni or None
         user.phone = telefono
+        user.is_active = False
         user.set_unusable_password()
         user.save()
 
@@ -268,6 +309,8 @@ class TurnoViewSet(viewsets.ModelViewSet):
         turno_anterior = self.get_object()
         estado_anterior = turno_anterior.estado
 
+        if serializer.instance is not None:
+            serializer.instance._streak_actor_user = self.request.user
         turno = serializer.save()
 
         # Registrar cambio de estado en historial
@@ -581,26 +624,177 @@ class TurnoViewSet(viewsets.ModelViewSet):
         serializer = TurnoListSerializer(turnos, many=True)
         return Response(serializer.data)
 
+    def _calcular_horarios_disponibles(self, empleado, servicio, fecha_obj):
+        from apps.empleados.models import HorarioEmpleado
+
+        dia_semana = fecha_obj.weekday()
+        horarios_dia = HorarioEmpleado.objects.filter(
+            empleado=empleado, dia_semana=dia_semana, is_active=True
+        ).order_by("hora_inicio")
+
+        if not horarios_dia.exists():
+            dias_trabajo = empleado.dias_trabajo.split(",")
+            dias_map = {"L": 0, "M": 1, "Mi": 2, "J": 3, "V": 4, "S": 5, "D": 6}
+            dias_numericos = []
+            for dia in dias_trabajo:
+                dia = dia.strip()
+                if dia == "X":
+                    dias_numericos.append(2)
+                elif dia in dias_map:
+                    dias_numericos.append(dias_map[dia])
+
+            if dia_semana not in dias_numericos:
+                return []
+
+            class HorarioLegacy:
+                def __init__(self, hora_inicio, hora_fin):
+                    self.hora_inicio = hora_inicio
+                    self.hora_fin = hora_fin
+
+            horarios_dia = [
+                HorarioLegacy(empleado.horario_entrada, empleado.horario_salida)
+            ]
+
+        horarios_disponibles = []
+        incremento = timedelta(minutes=15)
+        turnos_dia = list(
+            Turno.objects.select_related("servicio").filter(
+                empleado=empleado,
+                fecha_hora__date=fecha_obj,
+                estado__in=[
+                    "pendiente",
+                    "confirmado",
+                    "en_proceso",
+                    "pendiente_manual",
+                ],
+            )
+        )
+
+        for horario_rango in horarios_dia:
+            hora_actual = timezone.make_aware(
+                datetime.combine(fecha_obj, horario_rango.hora_inicio)
+            )
+            hora_fin = timezone.make_aware(
+                datetime.combine(fecha_obj, horario_rango.hora_fin)
+            )
+
+            while hora_actual + timedelta(minutes=servicio.duracion_minutos) <= hora_fin:
+                hora_fin_turno = hora_actual + timedelta(
+                    minutes=servicio.duracion_minutos
+                )
+                conflicto = False
+                for turno_existente in turnos_dia:
+                    if not turno_existente.fecha_hora or not turno_existente.servicio:
+                        continue
+                    inicio_existente = turno_existente.fecha_hora
+                    fin_existente = inicio_existente + timedelta(
+                        minutes=turno_existente.servicio.duracion_minutos
+                    )
+                    if hora_actual < fin_existente and hora_fin_turno > inicio_existente:
+                        conflicto = True
+                        break
+
+                if not conflicto and hora_actual > timezone.now():
+                    hora_str = hora_actual.strftime("%H:%M")
+                    if hora_str not in horarios_disponibles:
+                        horarios_disponibles.append(hora_str)
+
+                hora_actual += incremento
+
+        return sorted(horarios_disponibles)
+
+    def _buscar_conflicto_sobreturno(self, turno: Turno, fecha_hora_nueva):
+        hora_fin_nueva = fecha_hora_nueva + timedelta(
+            minutes=turno.servicio.duracion_minutos
+        )
+        turnos_conflicto = (
+            Turno.objects.select_related("cliente", "cliente__user", "servicio")
+            .filter(
+                empleado=turno.empleado,
+                estado__in=["pendiente", "confirmado", "en_proceso"],
+            )
+            .exclude(pk=turno.pk)
+        )
+
+        for turno_existente in turnos_conflicto:
+            fin_existente = turno_existente.fecha_hora + timedelta(
+                minutes=turno_existente.servicio.duracion_minutos
+            )
+            if fecha_hora_nueva < fin_existente and hora_fin_nueva > turno_existente.fecha_hora:
+                return turno_existente
+
+        return None
+
     @action(detail=False, methods=["get"])
     def disponibilidad(self, request):
         """Verificar disponibilidad de horarios para un empleado y servicio"""
-        empleado_id = request.query_params.get("empleado")
+        empleado_id = (
+            request.query_params.get("profesional_id")
+            or request.query_params.get("empleado")
+            or request.query_params.get("empleado_id")
+        )
         servicio_id = request.query_params.get("servicio")
         fecha = request.query_params.get("fecha")  # Formato: YYYY-MM-DD
 
-        if not all([empleado_id, servicio_id, fecha]):
+        if not all([servicio_id, fecha]):
             return Response(
-                {"error": "Debe proporcionar empleado, servicio y fecha"},
+                {"error": "Debe proporcionar servicio y fecha"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            from apps.empleados.models import Empleado, HorarioEmpleado
+            from apps.empleados.models import Empleado, EmpleadoServicio, HorarioEmpleado
             from apps.servicios.models import Servicio
 
-            empleado = Empleado.objects.get(id=empleado_id)
             servicio = Servicio.objects.get(id=servicio_id)
             fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
+            empleado_id_normalizado = str(empleado_id or "").strip().lower()
+            buscar_todos = empleado_id_normalizado in ["", "null", "none", "todos", "all"]
+
+            if buscar_todos:
+                empleados = Empleado.objects.filter(
+                    id__in=EmpleadoServicio.objects.filter(servicio=servicio).values(
+                        "empleado_id"
+                    ),
+                    is_disponible=True,
+                ).select_related("user")
+                slots_por_hora = {}
+                profesionales = []
+
+                for empleado in empleados:
+                    horarios = self._calcular_horarios_disponibles(
+                        empleado, servicio, fecha_obj
+                    )
+                    if not horarios:
+                        continue
+                    profesionales.append(
+                        {"id": empleado.id, "nombre": empleado.nombre_completo}
+                    )
+                    for hora in horarios:
+                        slots_por_hora.setdefault(hora, []).append(str(empleado.id))
+
+                slots = [
+                    {
+                        "time": hora,
+                        "professionalIds": professional_ids,
+                        "available": bool(professional_ids),
+                    }
+                    for hora, professional_ids in sorted(slots_por_hora.items())
+                ]
+
+                return Response(
+                    {
+                        "disponible": len(slots) > 0,
+                        "empleado": None,
+                        "servicio": servicio.nombre,
+                        "fecha": fecha,
+                        "horarios": [slot["time"] for slot in slots],
+                        "slots": slots,
+                        "profesionales": profesionales,
+                    }
+                )
+
+            empleado = Empleado.objects.get(id=empleado_id)
 
             # Obtener día de la semana (0 = Lunes, 6 = Domingo)
             dia_semana = fecha_obj.weekday()
@@ -657,7 +851,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 Turno.objects.select_related("servicio").filter(
                     empleado=empleado,
                     fecha_hora__date=fecha_obj,
-                    estado__in=["pendiente", "confirmado", "en_proceso"],
+                    estado__in=["pendiente", "confirmado", "en_proceso", "pendiente_manual"],
                 )
             )
 
@@ -716,6 +910,14 @@ class TurnoViewSet(viewsets.ModelViewSet):
                     "horarios": sorted(
                         horarios_disponibles
                     ),  # Ordenar cronológicamente
+                    "slots": [
+                        {
+                            "time": hora,
+                            "professionalIds": [str(empleado.id)],
+                            "available": True,
+                        }
+                        for hora in sorted(horarios_disponibles)
+                    ],
                 }
             )
 
@@ -831,6 +1033,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         estado_anterior = turno.estado
         turno.estado = nuevo_estado
+        turno._streak_actor_user = request.user
 
         try:
             turno.full_clean()
@@ -852,6 +1055,549 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=["post"], url_path="reprogramar")
+    def reprogramar(self, request, pk=None):
+        """Reprogramar un turno confirmado manteniendo pagos y datos comerciales."""
+        turno = self.get_object()
+        user = request.user
+
+        es_admin = user.is_staff or user.role in ["propietario", "superusuario"]
+        es_cliente_duenio = hasattr(user, "cliente_profile") and (
+            turno.cliente_id == user.cliente_profile.id
+        )
+        es_profesional_asignado = hasattr(user, "profesional_profile") and (
+            turno.empleado_id == user.profesional_profile.id
+        )
+
+        if not (es_admin or es_cliente_duenio or es_profesional_asignado):
+            return Response(
+                {"error": "No tiene permisos para reprogramar este turno."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ReprogramarTurnoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            resultado = reprogramar_turno(
+                turno=turno,
+                usuario=user,
+                fecha_hora_nueva=serializer.validated_data["nueva_fecha_hora"],
+                nuevo_empleado_id=serializer.validated_data.get("nuevo_empleado_id"),
+                aceptar_penalidad_fuera_rango=serializer.validated_data.get(
+                    "aceptar_penalidad_fuera_rango", False
+                ),
+                motivo=serializer.validated_data.get("motivo", ""),
+                permitir_sobreturno=serializer.validated_data.get(
+                    "permitir_sobreturno", False
+                ),
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        _registrar_auditoria_turno(
+            request,
+            "editar",
+            resultado.turno,
+            {
+                "tipo_movimiento": "reprogramacion_turno",
+                "fecha_hora_anterior": resultado.fecha_hora_anterior.isoformat(),
+                "fecha_hora_nueva": resultado.fecha_hora_nueva.isoformat(),
+                "sena_reiniciada": resultado.sena_reiniciada,
+                "penalidad_aplicada": resultado.penalidad_aplicada,
+                "estado_pago_reprogramacion": (
+                    "SENIA_PENDIENTE_LOCAL"
+                    if resultado.penalidad_aplicada
+                    else "SIN_PENALIDAD"
+                ),
+                "brecha_horas": resultado.brecha_horas,
+                "mensaje_penalidad_cliente": resultado.mensaje_penalidad,
+                "motivo": serializer.validated_data.get("motivo", ""),
+                "nuevo_empleado_id": serializer.validated_data.get("nuevo_empleado_id"),
+            },
+        )
+
+        return Response(
+            {
+                "message": "Turno reprogramado exitosamente",
+                "fecha_hora_anterior": resultado.fecha_hora_anterior,
+                "fecha_hora_nueva": resultado.fecha_hora_nueva,
+                "sena_reiniciada": resultado.sena_reiniciada,
+                "penalidad_aplicada": resultado.penalidad_aplicada,
+                "estado_pago_reprogramacion": (
+                    "SENIA_PENDIENTE_LOCAL"
+                    if resultado.penalidad_aplicada
+                    else "SIN_PENALIDAD"
+                ),
+                "brecha_horas": resultado.brecha_horas,
+                "mensaje_penalidad": resultado.mensaje_penalidad,
+                "turno": TurnoDetailSerializer(resultado.turno).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="solicitar-reprogramacion-flexible")
+    def solicitar_reprogramacion_flexible(self, request, pk=None):
+        """Crear una solicitud flexible para revisión manual del estudio."""
+        turno = self.get_object()
+        user = request.user
+
+        es_admin = user.is_staff or user.role in ["propietario", "superusuario"]
+        es_cliente_duenio = hasattr(user, "cliente_profile") and (
+            turno.cliente_id == user.cliente_profile.id
+        )
+        es_profesional_asignado = hasattr(user, "profesional_profile") and (
+            turno.empleado_id == user.profesional_profile.id
+        )
+
+        if not (es_admin or es_cliente_duenio or es_profesional_asignado):
+            return Response(
+                {"error": "No tiene permisos para solicitar esta reprogramación."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = SolicitudReprogramacionFlexibleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        from .models import SolicitudReprogramacionFlexible
+
+        try:
+            validar_limite_reprogramacion_cliente_servicio(turno)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        ahora = timezone.now()
+        fuera_de_termino = not (
+            ahora <= turno.fecha_hora - timedelta(hours=24)
+        )
+        from apps.authentication.models import ConfiguracionGlobal
+
+        config_global = ConfiguracionGlobal.get_config()
+        horas_vencimiento = max(
+            1,
+            int(config_global.horas_vencimiento_solicitud_reprogramacion or 48),
+        )
+
+        solicitud = SolicitudReprogramacionFlexible.objects.create(
+            turno=turno,
+            cliente=turno.cliente,
+            motivo=serializer.validated_data.get("motivo", ""),
+            preferencia_fecha=serializer.validated_data.get("preferencia_fecha"),
+            preferencia_horario=serializer.validated_data.get("preferencia_horario", ""),
+            requiere_senia_nueva=fuera_de_termino,
+            expires_at=ahora + timedelta(hours=horas_vencimiento),
+        )
+
+        estado_anterior = turno.estado
+        turno.estado = "pendiente_manual"
+        update_fields = ["estado", "updated_at"]
+        if fuera_de_termino:
+            turno.senia_pagada = Decimal("0.00")
+            turno.tipo_pago = "SIN_PAGO"
+            turno.metodo_pago = None
+            turno.fecha_pago_registrado = None
+            update_fields.extend(
+                [
+                    "senia_pagada",
+                    "tipo_pago",
+                    "metodo_pago",
+                    "fecha_pago_registrado",
+                ]
+            )
+        turno.save(update_fields=update_fields)
+
+        HistorialTurno.objects.create(
+            turno=turno,
+            usuario=request.user,
+            accion="Solicitud reprogramacion flexible",
+            estado_anterior=estado_anterior,
+            estado_nuevo=turno.estado,
+            observaciones=(
+                f"Solicitud flexible creada por {request.user.full_name}. "
+                f"Motivo: {solicitud.motivo or 'Sin motivo'}. "
+                f"Seña: {'perdida por multa aplicada' if fuera_de_termino else 'vigente'}."
+            ),
+        )
+
+        _registrar_auditoria_turno(
+            request,
+            "crear",
+            turno,
+            {
+                "tipo_movimiento": "solicitud_reprogramacion_flexible",
+                "solicitud_id": solicitud.id,
+                "cliente_id": turno.cliente_id,
+                "empleado_id": turno.empleado_id,
+                "servicio_id": turno.servicio_id,
+                "estado_anterior": estado_anterior,
+                "estado_nuevo": turno.estado,
+                "senia_perdida": fuera_de_termino,
+                "motivo": solicitud.motivo,
+                "preferencia_fecha": (
+                    solicitud.preferencia_fecha.isoformat()
+                    if solicitud.preferencia_fecha
+                    else None
+                ),
+                "preferencia_horario": solicitud.preferencia_horario,
+            },
+        )
+
+        return Response(
+            {
+                "message": "Solicitud flexible creada exitosamente",
+                "solicitud": SolicitudReprogramacionFlexibleSerializer(solicitud).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["get"], url_path="solicitudes-flexibles")
+    def listar_solicitudes_flexibles(self, request):
+        """Listar solicitudes flexibles para revisión manual."""
+        user = request.user
+
+        if not (
+            user.is_staff
+            or user.role in ["propietario", "superusuario", "profesional"]
+            or hasattr(user, "cliente_profile")
+        ):
+            return Response(
+                {"error": "No tiene permisos para ver las solicitudes."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        queryset = self._get_solicitudes_flexibles_queryset()
+        estado = request.query_params.get("estado")
+        if estado == "procesadas":
+            queryset = queryset.filter(estado__in=["atendida", "rechazada"])
+        elif estado == "vencidas":
+            queryset = queryset.filter(
+                estado__in=["pendiente", "en_revision"],
+                expires_at__lt=timezone.now(),
+            )
+        elif estado:
+            queryset = queryset.filter(estado=estado)
+
+        queryset = queryset.order_by("-created_at")
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = SolicitudReprogramacionFlexibleSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = SolicitudReprogramacionFlexibleSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="solicitudes-flexibles/resumen")
+    def resumen_solicitudes_flexibles(self, request):
+        """Obtener resumen de solicitudes flexibles por estado."""
+        queryset = self._get_solicitudes_flexibles_queryset()
+
+        pendientes = queryset.filter(estado="pendiente").count()
+        atendidas = queryset.filter(estado="atendida").count()
+        rechazadas = queryset.filter(estado="rechazada").count()
+        en_revision = queryset.filter(estado="en_revision").count()
+        vencidas = queryset.filter(
+            estado__in=["pendiente", "en_revision"],
+            expires_at__lt=timezone.now(),
+        ).count()
+
+        return Response(
+            {
+                "pendientes": pendientes,
+                "atendidas": atendidas,
+                "rechazadas": rechazadas,
+                "en_revision": en_revision,
+                "vencidas": vencidas,
+                "total": pendientes + atendidas + rechazadas + en_revision,
+            }
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="solicitudes-flexibles/(?P<solicitud_id>[^/.]+)/asignar",
+    )
+    def asignar_solicitud_flexible(self, request, solicitud_id=None):
+        """Asignar manualmente un turno para una solicitud flexible."""
+        user = request.user
+
+        try:
+            solicitud = SolicitudReprogramacionFlexible.objects.select_related(
+                "turno", "turno__empleado"
+            ).get(pk=solicitud_id)
+        except SolicitudReprogramacionFlexible.DoesNotExist:
+            return Response(
+                {"error": "Solicitud no encontrada"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        es_admin = user.is_staff or user.role in ["propietario", "superusuario"]
+        es_profesional_asignado = hasattr(user, "profesional_profile") and (
+            solicitud.turno.empleado_id == user.profesional_profile.id
+        )
+
+        if not (es_admin or es_profesional_asignado):
+            return Response(
+                {"error": "No tiene permisos para atender esta solicitud."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if solicitud.estado not in ["pendiente", "en_revision"]:
+            return Response(
+                {"error": "La solicitud ya fue procesada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        fecha_hora_raw = request.data.get("fecha_hora") or request.data.get("nueva_fecha_hora")
+        if not fecha_hora_raw:
+            return Response(
+                {"error": "Debe indicar fecha_hora para asignar el turno."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        observaciones = request.data.get("observaciones")
+        aceptar_penalidad = bool(request.data.get("aceptar_penalidad_fuera_rango", True))
+        permitir_sobreturno = bool(request.data.get("permitir_sobreturno", False))
+
+        serializer = ReprogramarTurnoSerializer(
+            data={
+                "nueva_fecha_hora": fecha_hora_raw,
+                "motivo": request.data.get("motivo") or solicitud.motivo or "",
+                "aceptar_penalidad_fuera_rango": aceptar_penalidad,
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+        fecha_hora = serializer.validated_data["nueva_fecha_hora"]
+        motivo = serializer.validated_data.get("motivo") or ""
+
+        conflicto = self._buscar_conflicto_sobreturno(solicitud.turno, fecha_hora)
+        if conflicto and not permitir_sobreturno:
+            return Response(
+                {
+                    "error": (
+                        f"Este horario ya esta reservado por {conflicto.cliente.nombre_completo}."
+                    ),
+                    "requiere_confirmacion_sobreturno": True,
+                    "conflicto": {
+                        "turno_id": conflicto.id,
+                        "cliente_nombre": conflicto.cliente.nombre_completo,
+                        "servicio_nombre": conflicto.servicio.nombre,
+                        "fecha_hora": conflicto.fecha_hora,
+                    },
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            resultado = reprogramar_turno(
+                turno=solicitud.turno,
+                usuario=user,
+                fecha_hora_nueva=fecha_hora,
+                motivo=motivo,
+                aceptar_penalidad_fuera_rango=aceptar_penalidad,
+                reiniciar_pago_cliente=True,
+                permitir_sobreturno=permitir_sobreturno,
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        solicitud.estado = "atendida"
+        solicitud.requiere_senia_nueva = resultado.sena_reiniciada
+        if observaciones:
+            solicitud.observaciones = observaciones
+        solicitud.save(
+            update_fields=[
+                "estado",
+                "requiere_senia_nueva",
+                "observaciones",
+                "updated_at",
+            ]
+        )
+
+        HistorialTurno.objects.create(
+            turno=solicitud.turno,
+            usuario=request.user,
+            accion="Solicitud flexible atendida",
+            estado_anterior=solicitud.turno.estado,
+            estado_nuevo=solicitud.turno.estado,
+            observaciones=(
+                f"Solicitud flexible atendida por {request.user.full_name}. "
+                f"Observaciones: {observaciones or 'Sin observaciones'}"
+            ),
+        )
+
+        try:
+            from apps.emails.models import Notificacion
+
+            Notificacion.objects.create(
+                usuario=solicitud.turno.cliente.user,
+                tipo="modificacion_turno",
+                titulo="Tu profesional ya te asignó un nuevo horario",
+                mensaje=(
+                    "Tu profesional ya te asignó un nuevo horario: "
+                    f"{resultado.fecha_hora_nueva.strftime('%d/%m/%Y %H:%M')} hs."
+                ),
+                data={
+                    "turno_id": solicitud.turno.id,
+                    "solicitud_id": solicitud.id,
+                    "fecha_hora_nueva": resultado.fecha_hora_nueva.isoformat(),
+                },
+            )
+        except Exception as exc:
+            logger.warning("No se pudo crear notificacion de asignacion flexible: %s", exc)
+
+        _registrar_auditoria_turno(
+            request,
+            "editar",
+            solicitud.turno,
+            {
+                "tipo_movimiento": "solicitud_reprogramacion_flexible_atendida",
+                "solicitud_id": solicitud.id,
+                "fecha_hora_anterior": resultado.fecha_hora_anterior.isoformat(),
+                "fecha_hora_nueva": resultado.fecha_hora_nueva.isoformat(),
+                "empleado_id": solicitud.turno.empleado_id,
+                "sena_reiniciada": resultado.sena_reiniciada,
+                "penalidad_aplicada": resultado.penalidad_aplicada,
+                "mensaje_penalidad_cliente": resultado.mensaje_penalidad,
+                "sobreturno_autorizado": permitir_sobreturno,
+                "conflicto_turno_id": conflicto.id if conflicto else None,
+                "observaciones": observaciones or "",
+                "motivo": motivo,
+            },
+        )
+
+        return Response(
+            {
+                "message": "Solicitud atendida y turno reprogramado",
+                "solicitud": SolicitudReprogramacionFlexibleSerializer(solicitud).data,
+                "turno": TurnoDetailSerializer(resultado.turno).data,
+                "fecha_hora_anterior": resultado.fecha_hora_anterior,
+                "fecha_hora_nueva": resultado.fecha_hora_nueva,
+                "sena_reiniciada": resultado.sena_reiniciada,
+                "penalidad_aplicada": resultado.penalidad_aplicada,
+                "mensaje_penalidad": resultado.mensaje_penalidad,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="solicitudes-flexibles/(?P<solicitud_id>[^/.]+)/rechazar",
+    )
+    def rechazar_solicitud_flexible(self, request, solicitud_id=None):
+        """Rechazar una solicitud flexible."""
+        user = request.user
+
+        try:
+            solicitud = SolicitudReprogramacionFlexible.objects.select_related(
+                "turno", "turno__empleado"
+            ).get(pk=solicitud_id)
+        except SolicitudReprogramacionFlexible.DoesNotExist:
+            return Response(
+                {"error": "Solicitud no encontrada"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        es_admin = user.is_staff or user.role in ["propietario", "superusuario"]
+        es_profesional_asignado = hasattr(user, "profesional_profile") and (
+            solicitud.turno.empleado_id == user.profesional_profile.id
+        )
+
+        if not (es_admin or es_profesional_asignado):
+            return Response(
+                {"error": "No tiene permisos para rechazar esta solicitud."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if solicitud.estado not in ["pendiente", "en_revision"]:
+            return Response(
+                {"error": "La solicitud ya fue procesada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "error": "Las solicitudes flexibles no se rechazan. Deben asignarse manualmente o quedar vencidas para revisión del propietario."
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="solicitudes-flexibles/(?P<solicitud_id>[^/.]+)/registrar-explicacion",
+    )
+    def registrar_explicacion_solicitud_flexible(self, request, solicitud_id=None):
+        """Registrar explicación operativa para una solicitud flexible vencida."""
+        user = request.user
+
+        try:
+            solicitud = SolicitudReprogramacionFlexible.objects.select_related(
+                "turno", "turno__empleado"
+            ).get(pk=solicitud_id)
+        except SolicitudReprogramacionFlexible.DoesNotExist:
+            return Response(
+                {"error": "Solicitud no encontrada"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        es_admin = user.is_staff or user.role in ["propietario", "superusuario"]
+        es_profesional_asignado = hasattr(user, "profesional_profile") and (
+            solicitud.turno.empleado_id == user.profesional_profile.id
+        )
+
+        if not (es_admin or es_profesional_asignado):
+            return Response(
+                {"error": "No tiene permisos para explicar esta solicitud."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not solicitud.esta_vencida:
+            return Response(
+                {"error": "Solo se puede registrar explicación en solicitudes vencidas."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        explicacion = (request.data.get("explicacion") or "").strip()
+        if not explicacion:
+            return Response(
+                {"error": "Debe indicar una explicación."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        solicitud.explicacion_vencimiento = explicacion
+        solicitud.save(update_fields=["explicacion_vencimiento", "updated_at"])
+
+        HistorialTurno.objects.create(
+            turno=solicitud.turno,
+            usuario=request.user,
+            accion="Explicacion solicitud flexible vencida",
+            estado_anterior=solicitud.turno.estado,
+            estado_nuevo=solicitud.turno.estado,
+            observaciones=explicacion,
+        )
+
+        _registrar_auditoria_turno(
+            request,
+            "editar",
+            solicitud.turno,
+            {
+                "tipo_movimiento": "solicitud_reprogramacion_flexible_vencida_explicada",
+                "solicitud_id": solicitud.id,
+                "cliente_id": solicitud.cliente_id,
+                "empleado_id": solicitud.turno.empleado_id,
+                "explicacion": explicacion,
+            },
+        )
+
+        return Response(
+            {
+                "message": "Explicación registrada",
+                "solicitud": SolicitudReprogramacionFlexibleSerializer(solicitud).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=["get"])
     def estadisticas(self, request):

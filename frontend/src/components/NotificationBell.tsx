@@ -15,6 +15,7 @@ import {
   obtenerNotificacionesNoLeidas,
   obtenerNotificacionesRecientes,
 } from '@/services/notificacionesService';
+import { turnosService } from '@/services/turnos';
 import { Bell, Check, Settings } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -22,6 +23,7 @@ import { useEffect, useState } from 'react';
 export function NotificationBell() {
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [contador, setContador] = useState(0);
+  const [solicitudesPendientes, setSolicitudesPendientes] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -44,10 +46,30 @@ export function NotificationBell() {
   useEffect(() => {
     loadNotificaciones();
 
+    const loadSolicitudes = async () => {
+      const role = user?.role?.toLowerCase();
+      if (role !== 'profesional') {
+        setSolicitudesPendientes(0);
+        return;
+      }
+
+      try {
+        const resumen = await turnosService.getSolicitudesFlexiblesResumen();
+        setSolicitudesPendientes(resumen.pendientes || 0);
+      } catch (error) {
+        console.error('Error cargando solicitudes pendientes:', error);
+      }
+    };
+
+    loadSolicitudes();
+
     // Actualizar cada 30 segundos
-    const interval = setInterval(loadNotificaciones, 30000);
+    const interval = setInterval(() => {
+      loadNotificaciones();
+      loadSolicitudes();
+    }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user?.role]);
 
   // Marcar notificación como leída
   const handleMarcarLeida = async (id: number) => {
@@ -115,6 +137,11 @@ export function NotificationBell() {
     return '/configuracion';
   };
 
+  const isProfesional = user?.role?.toLowerCase() === 'profesional';
+  const badgeCount = isProfesional
+    ? (solicitudesPendientes > 0 ? solicitudesPendientes : contador)
+    : contador;
+
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
@@ -125,9 +152,9 @@ export function NotificationBell() {
           aria-label="Notificaciones"
         >
           <Bell className="h-5 w-5" />
-          {contador > 0 && (
+          {badgeCount > 0 && (
             <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-              {contador > 9 ? '9+' : contador}
+              {badgeCount > 9 ? '9+' : badgeCount}
             </span>
           )}
         </Button>

@@ -24,10 +24,10 @@ class PagoMercadoPago(models.Model):
         ("charged_back", "Contracargo"),
     ]
 
-    turno = models.OneToOneField(
+    turno = models.ForeignKey(
         "turnos.Turno",
         on_delete=models.CASCADE,
-        related_name="pago_mercadopago",
+        related_name="pagos_mercadopago",
         verbose_name="Turno",
     )
     cliente = models.ForeignKey(

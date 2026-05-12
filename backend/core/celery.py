@@ -28,6 +28,11 @@ app.conf.beat_schedule = {
         'task': 'apps.notificaciones.tasks.enviar_reporte_diario_propietarios',
         'schedule': crontab(hour=20, minute=0),  # Todos los días a las 8:00 PM
     },
+    # Alertas preventivas de vencimiento de racha (PA3)
+    'enviar-alertas-vencimiento-racha': {
+        'task': 'apps.emails.tasks.enviar_alertas_vencimiento_racha',
+        'schedule': crontab(hour=10, minute=0),
+    },
 }
 
 @app.task(bind=True, ignore_result=True)

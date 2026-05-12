@@ -5,6 +5,9 @@ from .models import User
 
 
 class UserSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(validators=[])
+    email = serializers.EmailField(validators=[])
+    dni = serializers.CharField(required=False, allow_blank=True, allow_null=True, validators=[])
     password = serializers.CharField(write_only=True, validators=[validate_password])
 
     class Meta:
@@ -22,8 +25,61 @@ class UserSerializer(serializers.ModelSerializer):
         )
         extra_kwargs = {"password": {"write_only": True}}
 
+    def validate(self, attrs):
+        dni = (attrs.get("dni") or "").strip()
+        email = (attrs.get("email") or "").strip().lower()
+        username = (attrs.get("username") or "").strip()
+
+        claim_user = None
+        if dni:
+            claim_user = (
+                User.objects.filter(dni=dni, role="cliente")
+                .select_related("cliente_profile")
+                .first()
+            )
+
+            if claim_user:
+                puede_reclamar = (
+                    (not claim_user.is_active or not claim_user.has_usable_password())
+                    and hasattr(claim_user, "cliente_profile")
+                )
+                if not puede_reclamar:
+                    raise serializers.ValidationError(
+                        {"dni": "Este DNI ya esta registrado."}
+                    )
+
+        usuario_email = User.objects.filter(email=email).first() if email else None
+        if usuario_email and usuario_email != claim_user:
+            raise serializers.ValidationError(
+                {"email": "Este correo electronico ya esta registrado."}
+            )
+
+        usuario_username = (
+            User.objects.filter(username=username).first() if username else None
+        )
+        if usuario_username and usuario_username != claim_user:
+            raise serializers.ValidationError(
+                {"username": "Este nombre de usuario ya esta en uso."}
+            )
+
+        attrs["_claim_user"] = claim_user
+        return attrs
+
     def create(self, validated_data):
+        claim_user = validated_data.pop("_claim_user", None)
         password = validated_data.pop("password")
+
+        if claim_user:
+            for field, value in validated_data.items():
+                setattr(claim_user, field, value)
+
+            claim_user.email = claim_user.email.lower().strip()
+            claim_user.role = "cliente"
+            claim_user.is_active = True
+            claim_user.set_password(password)
+            claim_user.save()
+            return claim_user
+
         user = User.objects.create(**validated_data)
         user.set_password(password)
         user.save()

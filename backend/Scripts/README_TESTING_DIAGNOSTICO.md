@@ -52,6 +52,19 @@ Este directorio contiene scripts para probar los procesos automáticos de diagn�
 - ❌ Servicios de testing
 - ❌ Categorías de testing
 
+### 4. Scripts de Reprogramación
+
+**Propósito:** Crea escenarios repetibles para probar la reprogramación de turnos cliente.
+
+**Scripts disponibles:**
+
+- `limpiar_tests_reprogramacion.py` → elimina los turnos y logs creados por los scripts de reprogramación.
+- `test_reprogramacion_24h.py` → crea un turno dentro de la ventana de 24 horas, valida que el bloqueo aparezca y luego reintenta con aceptación explícita.
+- `test_reprogramacion_senia.py` → crea un turno con seña abonada y verifica que al reprogramar vuelve a `SIN_PAGO`.
+- `test_reprogramacion_pago_completo.py` → crea un turno con pago completo y verifica que la reprogramación también resetea el pago.
+
+**Regla de limpieza:** cada script borra primero los datos generados por los escenarios anteriores para no acumular turnos de prueba.
+
 ---
 
 ## 🚀 Uso Rápido
@@ -116,6 +129,22 @@ python Scripts/limpiar_tests_diagnostico.py
 # Confirmar con: SI
 ```
 
+### Reprogramación de Turnos
+
+```bash
+# Caso 1: validación por ventana de 24 horas
+python Scripts/test_reprogramacion_24h.py
+
+# Caso 2: turno con seña
+python Scripts/test_reprogramacion_senia.py
+
+# Caso 3: turno con pago completo
+python Scripts/test_reprogramacion_pago_completo.py
+
+# Limpieza manual de todos los escenarios de reprogramación
+python Scripts/limpiar_tests_reprogramacion.py
+```
+
 ---
 
 ## 🎯 Casos de Prueba Avanzados
@@ -174,6 +203,12 @@ python Scripts/limpiar_tests_diagnostico.py
 - `Test Coloración (60 días)` → Frecuencia: 60 días
 - `Test Tratamiento (Global)` → Usa config global
 
+### Reprogramación
+
+- `cliente1@beautifulstudio.com` → Cliente base para los escenarios
+- `profesional@beautifulstudio.com` → Profesional base para los escenarios
+- `Color completo + Brushing` → Servicio base usado por los scripts
+
 ---
 
 ## ⚠️ Notas Importantes
@@ -181,8 +216,9 @@ python Scripts/limpiar_tests_diagnostico.py
 1. **Prerequisitos:** Ejecuta `python Scripts/poblar_usuarios_base.py` primero para tener empleados
 2. **Limpieza:** Usa `limpiar_tests_diagnostico.py` entre pruebas para evitar duplicados
 3. **Emails:** Los emails de testing son ficticios (`@test.com`)
-4. **Seguridad:** Los scripts solo afectan datos con prefijo `test_opt_` y `test_fid_`
+4. **Seguridad:** Los scripts solo afectan datos con prefijo `test_opt_`, `test_fid_` y `test_reprogramacion_`
 5. **Fechas:** Los scripts usan fechas relativas (días desde hoy)
+6. **Reprogramación:** Los scripts nuevos usan el prefijo `test_reprogramacion_` y limpian su propio rastro antes de crear datos.
 
 ---
 
@@ -212,6 +248,12 @@ python Scripts/limpiar_tests_diagnostico.py
 - Verificar que `permite_reacomodamiento=True` en el servicio
 - Asegurarse que el turno candidato sea POSTERIOR al cancelado
 - Verificar que ambos turnos usen el MISMO servicio
+
+### Los scripts de reprogramación fallan por usuario o servicio faltante
+
+- Ejecutar `python Scripts/reset_datos_demo.py` primero.
+- Si el entorno ya estaba sucio, correr `python Scripts/limpiar_tests_reprogramacion.py` y volver a ejecutar el escenario.
+- Confirmar que exista el servicio `Color completo + Brushing` y el cliente `cliente1@beautifulstudio.com`.
 
 ---
 

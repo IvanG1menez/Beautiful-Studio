@@ -11,7 +11,7 @@ import { authService } from '@/services/auth';
 import { CheckCircle, Eye, EyeOff, Loader2, Scissors } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 export default function RegisterPage() {
@@ -29,6 +29,8 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingDni, setIsCheckingDni] = useState(false);
+  const [cuentaPresencialDetectada, setCuentaPresencialDetectada] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -38,9 +40,47 @@ export default function RegisterPage() {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: name === 'dni' ? value.replace(/\D/g, '').slice(0, 20) : value
     }));
+
+    if (name === 'dni') {
+      setCuentaPresencialDetectada(false);
+    }
   };
+
+  useEffect(() => {
+    const dni = formData.dni.replace(/\D/g, '');
+
+    if (dni.length < 7) {
+      setCuentaPresencialDetectada(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsCheckingDni(true);
+      try {
+        const data = await authService.precheckDni(dni);
+        if (data.exists && data.cuenta_incompleta) {
+          setCuentaPresencialDetectada(true);
+          setFormData(prev => ({
+            ...prev,
+            first_name: prev.first_name || data.first_name || '',
+            last_name: prev.last_name || data.last_name || '',
+            phone: prev.phone || data.phone || '',
+            email: prev.email || data.email || '',
+          }));
+        } else {
+          setCuentaPresencialDetectada(false);
+        }
+      } catch {
+        setCuentaPresencialDetectada(false);
+      } finally {
+        setIsCheckingDni(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [formData.dni]);
 
   const validateForm = () => {
     // Validar que todos los campos requeridos estén llenos
@@ -124,18 +164,19 @@ export default function RegisterPage() {
         router.push('/login');
       }, 2000);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error al registrar:', error);
+      const apiError = error as { errors?: Record<string, unknown>; message?: string };
 
       // Manejar diferentes tipos de errores
-      if (error.errors) {
+      if (apiError.errors) {
         // Si hay errores específicos de campos
-        const errorMessages = Object.entries(error.errors)
+        const errorMessages = Object.entries(apiError.errors)
           .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(', ') : messages}`)
           .join('; ');
         setError(errorMessages);
-      } else if (error.message) {
-        setError(error.message);
+      } else if (apiError.message) {
+        setError(apiError.message);
       } else {
         setError('Error al crear la cuenta. Por favor, intenta nuevamente.');
       }
@@ -219,6 +260,14 @@ export default function RegisterPage() {
                 </Alert>
               )}
 
+              {cuentaPresencialDetectada && (
+                <Alert className="border-emerald-200 bg-emerald-50 text-emerald-900">
+                  <AlertDescription>
+                    Encontramos tus datos de visitas presenciales. Completa email y contrasena para activar tu cuenta.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* Nombre y Apellido */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -265,6 +314,9 @@ export default function RegisterPage() {
                     className="focus:ring-purple-500 focus:border-purple-500"
                     disabled={isLoading}
                   />
+                  {isCheckingDni && (
+                    <p className="text-xs text-gray-500">Buscando datos presenciales...</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">Teléfono</Label>

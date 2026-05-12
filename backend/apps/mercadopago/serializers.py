@@ -37,6 +37,16 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
     )
 
 
+class CrearPreferenciaReprogramacionSerializer(serializers.Serializer):
+    """Valida el pago de una reprogramación fuera de rango para un turno existente."""
+
+    turno_id = serializers.IntegerField(min_value=1)
+    nueva_fecha_hora = serializers.DateTimeField()
+    motivo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    nuevo_empleado_id = serializers.IntegerField(required=False, allow_null=True)
+    tipo_pago = serializers.ChoiceField(choices=["SENIA", "PAGO_COMPLETO"])
+
+
 class CrearPreferenciaStaffSerializer(serializers.Serializer):
     """Datos para crear una preferencia de MP iniciada desde el panel.
 

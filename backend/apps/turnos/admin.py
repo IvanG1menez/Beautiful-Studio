@@ -3,7 +3,16 @@ from simple_history.admin import SimpleHistoryAdmin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
-from .models import Turno, HistorialTurno, LogReasignacion
+from .models import (
+    Turno,
+    HistorialTurno,
+    LogReasignacion,
+    SolicitudReprogramacionFlexible,
+    ClienteStreakStats,
+    StreakRewardEvent,
+    StreakExpiryAlertLog,
+    StreakAuditLog,
+)
 
 
 class HistorialTurnoInline(admin.TabularInline):
@@ -210,6 +219,27 @@ class TurnoAdmin(SimpleHistoryAdmin):
     created_at_formateado.short_description = "Creado"
     created_at_formateado.admin_order_field = "created_at"
 
+
+@admin.register(SolicitudReprogramacionFlexible)
+class SolicitudReprogramacionFlexibleAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "turno",
+        "cliente",
+        "estado",
+        "requiere_senia_nueva",
+        "created_at",
+    ]
+    list_filter = ["estado", "requiere_senia_nueva", "created_at"]
+    search_fields = [
+        "turno__cliente__user__first_name",
+        "turno__cliente__user__last_name",
+        "turno__empleado__user__first_name",
+        "turno__empleado__user__last_name",
+        "motivo",
+    ]
+    readonly_fields = ["created_at", "updated_at"]
+
     # Acciones masivas
     def confirmar_turnos(self, request, queryset):
         """Confirmar turnos seleccionados"""
@@ -316,9 +346,60 @@ class TurnoAdmin(SimpleHistoryAdmin):
                 estado_nuevo=obj.estado,
                 observaciones=f"Creado por {request.user.full_name}",
             )
-            return
 
-        super().save_model(request, obj, form, change)
+
+@admin.register(ClienteStreakStats)
+class ClienteStreakStatsAdmin(admin.ModelAdmin):
+    list_display = [
+        "cliente",
+        "streak_count",
+        "last_completed_at",
+        "next_expiration_at",
+        "updated_at",
+    ]
+    search_fields = ["cliente__user__email", "cliente__user__first_name"]
+    list_filter = ["updated_at"]
+
+
+@admin.register(StreakRewardEvent)
+class StreakRewardEventAdmin(admin.ModelAdmin):
+    list_display = [
+        "cliente",
+        "turno",
+        "milestone_number",
+        "status",
+        "bonus_amount",
+        "applied_discount_amount",
+        "created_at",
+    ]
+    list_filter = ["status", "milestone_number", "created_at"]
+    search_fields = ["cliente__user__email", "turno__id"]
+
+
+@admin.register(StreakExpiryAlertLog)
+class StreakExpiryAlertLogAdmin(admin.ModelAdmin):
+    list_display = [
+        "cliente",
+        "threshold_days",
+        "expiration_date_reference",
+        "created_at",
+    ]
+    list_filter = ["threshold_days", "expiration_date_reference"]
+    search_fields = ["cliente__user__email"]
+
+
+@admin.register(StreakAuditLog)
+class StreakAuditLogAdmin(admin.ModelAdmin):
+    list_display = [
+        "cliente",
+        "turno",
+        "accion",
+        "event_type",
+        "actor",
+        "created_at",
+    ]
+    list_filter = ["accion", "event_type", "created_at"]
+    search_fields = ["cliente__user__email", "detalle"]
 
 
 @admin.register(LogReasignacion)

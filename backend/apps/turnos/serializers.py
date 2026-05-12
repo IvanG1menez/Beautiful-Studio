@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from rest_framework import serializers
-from .models import Turno, HistorialTurno
+from .models import Turno, HistorialTurno, SolicitudReprogramacionFlexible
 from apps.clientes.serializers import ClienteListSerializer
 from apps.empleados.serializers import EmpleadoListSerializer
 from apps.servicios.serializers import ServicioSerializer
@@ -45,6 +45,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
     pagado_completo = serializers.SerializerMethodField()
     elegible_credito_cancelacion = serializers.SerializerMethodField()
     monto_credito_cancelacion = serializers.SerializerMethodField()
+    puede_reprogramar = serializers.SerializerMethodField()
+    motivo_no_reprogramable = serializers.SerializerMethodField()
+    reprogramacion_bloqueada_codigo = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
@@ -87,6 +90,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "pagado_completo",
             "elegible_credito_cancelacion",
             "monto_credito_cancelacion",
+            "puede_reprogramar",
+            "motivo_no_reprogramable",
+            "reprogramacion_bloqueada_codigo",
             "notas_cliente",
             "notas_empleado",
             "reacomodamiento_exitoso",
@@ -96,6 +102,37 @@ class TurnoListSerializer(serializers.ModelSerializer):
 
     def get_puede_cancelar(self, obj):
         return obj.puede_cancelar()
+
+    def _get_estado_reprogramacion(self, obj):
+        estados_finales = ["completado", "cancelado", "no_asistio", "pendiente_manual", "oferta_enviada", "expirada"]
+        if obj.estado in estados_finales:
+            return {
+                "puede_reprogramar": False,
+                "codigo": f"estado_{obj.estado}",
+                "motivo": "Este turno no se puede reprogramar por su estado actual.",
+            }
+
+        try:
+            from apps.turnos.services.reprogramacion_service import obtener_estado_limite_reprogramacion_cliente_servicio
+
+            return obtener_estado_limite_reprogramacion_cliente_servicio(obj)
+        except Exception:
+            return {
+                "puede_reprogramar": True,
+                "codigo": "disponible",
+                "motivo": "",
+            }
+
+    def get_puede_reprogramar(self, obj):
+        return self._get_estado_reprogramacion(obj)["puede_reprogramar"]
+
+    def get_motivo_no_reprogramable(self, obj):
+        estado = self._get_estado_reprogramacion(obj)
+        return "" if estado["puede_reprogramar"] else estado["motivo"]
+
+    def get_reprogramacion_bloqueada_codigo(self, obj):
+        estado = self._get_estado_reprogramacion(obj)
+        return None if estado["puede_reprogramar"] else estado["codigo"]
 
     def get_reacomodamiento_exitoso(self, obj):
         from .models import LogReasignacion
@@ -107,10 +144,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
     def get_tiene_pago_mp(self, obj):
         """Indica si el turno tiene un pago de Mercado Pago aprobado asociado."""
         try:
-            pago = obj.pago_mercadopago
+            return obj.pagos_mercadopago.filter(estado="approved").exists()
         except Exception:
             return False
-        return pago is not None and getattr(pago, "estado", "") == "approved"
 
     def _get_descuento_reacomodamiento(self, obj: Turno) -> Decimal:
         """Obtiene el monto de descuento aplicado por reacomodamiento (si lo hubo).
@@ -457,13 +493,15 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
 
             # Definir transiciones válidas
             transiciones_validas = {
-                "pendiente": ["confirmado", "cancelado"],
+                "pendiente": ["confirmado", "cancelado", "pendiente_manual"],
                 "confirmado": [
                     "en_proceso",
                     "cancelado",
                     "no_asistio",
+                    "pendiente_manual",
                     "oferta_enviada",
                 ],
+                "pendiente_manual": ["pendiente", "confirmado", "cancelado"],
                 "en_proceso": ["completado", "cancelado"],
                 "completado": [],  # No se puede cambiar
                 "cancelado": [],  # No se puede cambiar
@@ -483,6 +521,62 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
             # En producción deberá volver a activarse para respetar fecha/hora programadas.
 
         return value
+
+
+class ReprogramarTurnoSerializer(serializers.Serializer):
+    """Serializer de entrada para reprogramación de turnos."""
+
+    nueva_fecha_hora = serializers.DateTimeField(required=True)
+    motivo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    nuevo_empleado_id = serializers.IntegerField(required=False, allow_null=True)
+    aceptar_penalidad_fuera_rango = serializers.BooleanField(required=False, default=False)
+    permitir_sobreturno = serializers.BooleanField(required=False, default=False)
+
+
+class SolicitudReprogramacionFlexibleCreateSerializer(serializers.Serializer):
+    motivo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    preferencia_fecha = serializers.DateField(required=False, allow_null=True)
+    preferencia_horario = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class SolicitudReprogramacionFlexibleSerializer(serializers.ModelSerializer):
+    turno = TurnoListSerializer(read_only=True)
+    cliente_nombre = serializers.CharField(source="cliente.nombre_completo", read_only=True)
+    empleado_nombre = serializers.CharField(source="turno.empleado.nombre_completo", read_only=True)
+    servicio_nombre = serializers.CharField(source="turno.servicio.nombre", read_only=True)
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    esta_vencida = serializers.BooleanField(read_only=True)
+    horas_restantes = serializers.SerializerMethodField()
+
+    def get_horas_restantes(self, obj):
+        if not obj.expires_at or obj.estado not in ["pendiente", "en_revision"]:
+            return None
+        seconds = (obj.expires_at - timezone.now()).total_seconds()
+        return max(0, int(seconds // 3600))
+
+    class Meta:
+        model = SolicitudReprogramacionFlexible
+        fields = [
+            "id",
+            "turno",
+            "cliente_nombre",
+            "empleado_nombre",
+            "servicio_nombre",
+            "motivo",
+            "preferencia_fecha",
+            "preferencia_horario",
+            "estado",
+            "estado_display",
+            "requiere_senia_nueva",
+            "observaciones",
+            "expires_at",
+            "esta_vencida",
+            "horas_restantes",
+            "explicacion_vencimiento",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at", "estado_display"]
 
 
 class HistorialTurnoSerializer(serializers.ModelSerializer):
