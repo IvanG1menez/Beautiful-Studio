@@ -7,6 +7,8 @@ import {
   Clock,
   CreditCard,
   DollarSign,
+  ExternalLink,
+  Loader2,
   Mail,
   Phone,
   QrCode,
@@ -19,9 +21,27 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -62,7 +82,6 @@ type ServicioReserva = Servicio & {
   monto_sena_fijo?: string | number;
 };
 
-const API_BASE_URL = '/api';
 const HORARIOS_REFERENCIA = [
   '09:00',
   '09:30',
@@ -142,6 +161,16 @@ export default function ReservarTurnoProfesionalPage() {
   const [successMessage, setSuccessMessage] = useState('');
   const [isWaitingPayment, setIsWaitingPayment] = useState(false);
   const [preferenceId, setPreferenceId] = useState('');
+  const [paymentLink, setPaymentLink] = useState('');
+  const [paymentCode, setPaymentCode] = useState('');
+  const [paymentCodeError, setPaymentCodeError] = useState('');
+  const [isConfirmingPaymentCode, setIsConfirmingPaymentCode] = useState(false);
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [cancelPaymentDialogOpen, setCancelPaymentDialogOpen] = useState(false);
+  const [mpEnv, setMpEnv] = useState('prod');
+  const [qrNative, setQrNative] = useState(false);
+  const [paymentStatusMessage, setPaymentStatusMessage] = useState('');
+  const [qrLinkKind, setQrLinkKind] = useState('');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clienteBloqueado = clienteRegistrado === true && Boolean(clienteData);
@@ -171,6 +200,8 @@ export default function ReservarTurnoProfesionalPage() {
   const nombreIncompleto = clienteRegistrado === false && !clienteNombre.trim();
   const apellidoIncompleto = clienteRegistrado === false && !clienteApellido.trim();
   const telefonoIncompleto = clienteRegistrado === false && !clienteTelefono.trim();
+  const emailRequeridoQr = metodoPago === 'mercadopago_qr' && clienteRegistrado === false;
+  const emailIncompletoQr = emailRequeridoQr && !clienteEmail.trim();
   const horariosParaMostrar = Array.from(new Set([...HORARIOS_REFERENCIA, ...horariosDisponibles])).sort();
 
   useEffect(() => {
@@ -407,7 +438,7 @@ export default function ReservarTurnoProfesionalPage() {
     }
 
     payload.dni = dni || undefined;
-    payload.email = clienteEmail || undefined;
+    payload.email = clienteEmail.trim().toLowerCase() || undefined;
     payload.nombre = `${clienteNombre} ${clienteApellido}`.trim() || undefined;
     payload.telefono = clienteTelefono || undefined;
   };
@@ -429,6 +460,7 @@ export default function ReservarTurnoProfesionalPage() {
     fechaSeleccionada &&
     horarioDisponible &&
     datosClienteCompletos &&
+    !emailIncompletoQr &&
     pagoCompletoValido &&
     !dniError &&
     !telefonoError &&
@@ -499,32 +531,145 @@ export default function ReservarTurnoProfesionalPage() {
 
     try {
       const pref = await profesionalTurnosApi.crearPreferenciaStaff(payload);
+      const qrLink = pref.qr_data || pref.qr_init_point || pref.init_point || '';
       setPreferenceId(pref.preference_id);
+      setPaymentLink(qrLink);
+      setMpEnv(pref.mp_env || 'prod');
+      setQrLinkKind(pref.qr_link_kind || '');
+      setQrNative(Boolean(pref.qr_native));
+      setPaymentCode('');
+      setPaymentCodeError('');
+      setPaymentStatusMessage('Esperando confirmacion de Mercado Pago...');
       setIsWaitingPayment(true);
-      window.open(pref.init_point, '_blank');
+      setQrDialogOpen(true);
 
       if (pollingRef.current) clearInterval(pollingRef.current);
+      let pollingAttempts = 0;
       pollingRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/mercadopago/verificar-pago/${pref.preference_id}/`);
-          if (res.ok) {
-            const body = await res.json();
-            if (body.status === 'approved') {
-              clearInterval(pollingRef.current!);
-              pollingRef.current = null;
-              setIsWaitingPayment(false);
-              setSuccessMessage('Pago aprobado y turno creado');
-              router.push('/dashboard/profesional/agenda');
-            }
+          pollingAttempts += 1;
+          if (pollingAttempts > 100) {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setIsWaitingPayment(false);
+            setPaymentStatusMessage('No se confirmo el pago despues de 5 minutos. Si el cliente pago, valida el ID de operacion o genera un nuevo QR.');
+            return;
           }
-        } catch {
-          // El polling reintenta hasta que Mercado Pago confirme o el usuario salga.
+          const body = await profesionalTurnosApi.verificarPagoStaff(pref.preference_id);
+          if (body.status === 'approved') {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setIsWaitingPayment(false);
+            setPaymentStatusMessage('Pago aprobado. Creando turno...');
+            setQrDialogOpen(false);
+            setSuccessMessage('Pago aprobado y turno creado');
+            router.push('/dashboard/profesional/agenda');
+          }
+          if (body.status === 'cancelled') {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setIsWaitingPayment(false);
+            setQrDialogOpen(false);
+            setPaymentStatusMessage('');
+            setError('La transaccion fue cancelada. Genera un nuevo QR para continuar.');
+          }
+          if (body.status === 'rejected') {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setIsWaitingPayment(false);
+            setQrDialogOpen(false);
+            setPaymentStatusMessage('');
+            setError(
+              `Mercado Pago rechazo el pago${body.mp_status_detail ? `: ${body.mp_status_detail}` : ''}. Genera un nuevo QR o valida otro medio de pago.`,
+            );
+          }
+          if (body.status === 'pending') {
+            const detalle = body.mp_status
+              ? ` Estado MP: ${body.mp_status}${body.mp_status_detail ? ` (${body.mp_status_detail})` : ''}.`
+              : body.detail
+                ? ` ${body.detail}`
+                : '';
+            setPaymentStatusMessage(`Esperando confirmacion de Mercado Pago... (${pollingAttempts}).${detalle}`);
+          }
+        } catch (pollingError: unknown) {
+          clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setIsWaitingPayment(false);
+          setQrDialogOpen(false);
+          setPaymentStatusMessage('');
+          setError(getErrorMessage(pollingError, 'No se pudo verificar el pago. Volve a iniciar sesion o genera un nuevo QR.'));
         }
       }, 3000);
     } catch (e: unknown) {
       setError(getErrorMessage(e, 'Error al iniciar pago por QR'));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const confirmarPagoPorCodigo = async () => {
+    const codigoLimpio = paymentCode.trim();
+    if (!preferenceId || !codigoLimpio) {
+      setPaymentCodeError('Ingresa el ID de operacion que figura en Mercado Pago.');
+      return;
+    }
+
+    setIsConfirmingPaymentCode(true);
+    setPaymentCodeError('');
+    setError('');
+
+    try {
+      const result = await profesionalTurnosApi.confirmarPagoStaff({
+        preference_id: preferenceId,
+        payment_id: codigoLimpio,
+      });
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      setIsWaitingPayment(false);
+      setQrDialogOpen(false);
+      setSuccessMessage(`Pago aprobado y turno creado #${result.turno_id}`);
+      router.push('/dashboard/profesional/agenda');
+    } catch (e: unknown) {
+      setPaymentCodeError(getErrorMessage(e, 'No se pudo validar el codigo de pago.'));
+    } finally {
+      setIsConfirmingPaymentCode(false);
+    }
+  };
+
+  const handleQrDialogOpenChange = (open: boolean) => {
+    if (!open && isWaitingPayment) {
+      setCancelPaymentDialogOpen(true);
+      return;
+    }
+    setQrDialogOpen(open);
+  };
+
+  const cancelarTransaccionQr = async () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    const preferenceCancelada = preferenceId;
+    setIsWaitingPayment(false);
+    setIsSubmitting(false);
+    setQrDialogOpen(false);
+    setCancelPaymentDialogOpen(false);
+    setPreferenceId('');
+    setPaymentLink('');
+    setQrNative(false);
+    setQrLinkKind('');
+    setPaymentCode('');
+    setPaymentCodeError('');
+    setPaymentStatusMessage('');
+    try {
+      if (preferenceCancelada) {
+        await profesionalTurnosApi.cancelarPagoStaff({ preference_id: preferenceCancelada });
+      }
+      setError('Transaccion cancelada. Para cobrar por QR tenes que generar un nuevo codigo de pago.');
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, 'No se pudo cancelar la transaccion en el backend. Revisá el pago antes de generar otro QR.'));
     }
   };
 
@@ -684,7 +829,7 @@ export default function ReservarTurnoProfesionalPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">Email opcional</Label>
+                <Label htmlFor="email">{emailRequeridoQr ? 'Email *' : 'Email opcional'}</Label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <Input
@@ -697,6 +842,7 @@ export default function ReservarTurnoProfesionalPage() {
                     className="pl-9"
                   />
                 </div>
+                {emailIncompletoQr && <p className="mt-1 text-xs text-red-600">Obligatorio para registrar al cliente y enviar la confirmacion del pago.</p>}
                 {emailError && <p className="mt-1 text-xs text-red-600">{emailError}</p>}
               </div>
 
@@ -927,7 +1073,7 @@ export default function ReservarTurnoProfesionalPage() {
               <Alert>
                 <AlertTitle>Pago con QR</AlertTitle>
                 <AlertDescription>
-                  Se generara un link para que el cliente pague con Mercado Pago. Cuando se apruebe, el turno se crea automaticamente.
+                  Se mostrara un QR para que el cliente pague con Mercado Pago. Cuando se apruebe, el turno se crea automaticamente.
                   {preferenceId ? ` Preferencia: ${preferenceId}` : ''}
                 </AlertDescription>
               </Alert>
@@ -957,6 +1103,108 @@ export default function ReservarTurnoProfesionalPage() {
                 : 'Generar QR y reservar'}
           </Button>
         </div>
+
+        <Dialog open={qrDialogOpen} onOpenChange={handleQrDialogOpenChange}>
+          <DialogContent className="sm:max-w-md" showCloseButton={!isWaitingPayment}>
+            <DialogHeader>
+              <DialogTitle>Escanear QR de Mercado Pago</DialogTitle>
+              <DialogDescription>
+                Pedile al cliente que escanee el QR y complete el pago desde su celular.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-slate-50 p-4 text-center">
+                <p className="text-sm text-slate-600">Monto a cobrar</p>
+                <p className="mt-1 text-3xl font-bold text-slate-950">{formatCurrency(montoACobrar)}</p>
+                <p className="mt-1 text-sm text-slate-600">{servicioSeleccionado?.nombre}</p>
+              </div>
+
+              {paymentLink && (
+                <div className="flex justify-center rounded-lg border bg-white p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(paymentLink)}`}
+                    alt="QR de pago Mercado Pago"
+                    className="h-64 w-64"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {isWaitingPayment && <Loader2 className="h-4 w-4 animate-spin" />}
+                <span>{paymentStatusMessage || (isWaitingPayment ? 'Esperando confirmacion de Mercado Pago...' : 'Pago pendiente de confirmacion.')}</span>
+              </div>
+
+              <Alert className="border-blue-200 bg-blue-50 text-blue-950">
+                <AlertTitle>{mpEnv === 'test' || mpEnv === 'sandbox' ? 'Modo prueba Mercado Pago' : 'Pago Mercado Pago'}</AlertTitle>
+                <AlertDescription>
+                  {qrNative
+                    ? 'Este es un QR nativo para la app de Mercado Pago. El lector interno deberia mostrar el concepto de la orden.'
+                    : `Usando ${qrLinkKind || 'link de pago'}. Si el lector interno de Mercado Pago muestra Producto o falla, escanea con la camara del celular o usa Abrir link.`}
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2 rounded-lg border p-3">
+                <Label htmlFor="payment-code">ID de operacion (opcional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="payment-code"
+                    placeholder="Ej: 1234567890"
+                    value={paymentCode}
+                    onChange={(e) => setPaymentCode(e.target.value.replace(/\D/g, ''))}
+                    disabled={isConfirmingPaymentCode}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={confirmarPagoPorCodigo}
+                    disabled={!paymentCode.trim() || isConfirmingPaymentCode}
+                  >
+                    {isConfirmingPaymentCode ? 'Validando...' : 'Validar'}
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Usalo solo si el cliente ya pago y la pantalla todavia no se actualizo. El sistema valida el ID contra Mercado Pago antes de crear el turno.
+                </p>
+                {paymentCodeError && <p className="text-xs text-red-600">{paymentCodeError}</p>}
+              </div>
+            </div>
+
+            <DialogFooter>
+              {paymentLink && !qrNative && (
+                <Button type="button" variant="outline" onClick={() => window.open(paymentLink, '_blank')}>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Abrir link
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant={isWaitingPayment ? 'destructive' : 'secondary'}
+                onClick={() => (isWaitingPayment ? setCancelPaymentDialogOpen(true) : setQrDialogOpen(false))}
+              >
+                {isWaitingPayment ? 'Cancelar transaccion' : 'Cerrar'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={cancelPaymentDialogOpen} onOpenChange={setCancelPaymentDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Cancelar transaccion?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Si cancelas, el sistema deja de esperar este pago y vas a tener que generar un nuevo QR para continuar. No se crea el turno ni se registra el cliente hasta que Mercado Pago confirme un pago aprobado.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Seguir esperando</AlertDialogCancel>
+              <AlertDialogAction onClick={cancelarTransaccionQr} className="bg-red-600 text-white hover:bg-red-700">
+                Cancelar transaccion
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

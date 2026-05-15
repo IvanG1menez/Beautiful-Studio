@@ -375,6 +375,23 @@ FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 MP_ACCESS_TOKEN = config("MP_ACCESS_TOKEN", default="")
 MP_PUBLIC_KEY = config("MP_PUBLIC_KEY", default="")
 MP_CURRENCY_ID = config("MP_CURRENCY_ID", default="ARS")
+MP_ENV = config("MP_ENV", default="prod")
+MP_QR_NATIVE_ENABLED = config("MP_QR_NATIVE_ENABLED", default=False, cast=bool)
+MP_QR_ACCESS_TOKEN = config("MP_QR_ACCESS_TOKEN", default=MP_ACCESS_TOKEN)
+MP_QR_PUBLIC_KEY = config("MP_QR_PUBLIC_KEY", default=MP_PUBLIC_KEY)
+MP_QR_COLLECTOR_ID = config("MP_QR_COLLECTOR_ID", default="3180702838")
+MP_QR_STORE_ID = config("MP_QR_STORE_ID", default="")
+MP_QR_EXTERNAL_STORE_ID = config("MP_QR_EXTERNAL_STORE_ID", default="")
+MP_QR_SELLER_COLLECTOR_ID = config("MP_QR_SELLER_COLLECTOR_ID", default="3180702838")
+MP_QR_POS_EXTERNAL_ID = config("MP_QR_POS_EXTERNAL_ID", default="BeautifulStudioProfesional")
+MP_QR_STORE_NAME = config("MP_QR_STORE_NAME", default="Beautiful Studio")
+MP_QR_STORE_STREET_NAME = config("MP_QR_STORE_STREET_NAME", default="Av Corrientes")
+MP_QR_STORE_STREET_NUMBER = config("MP_QR_STORE_STREET_NUMBER", default="1234")
+MP_QR_STORE_CITY_NAME = config("MP_QR_STORE_CITY_NAME", default="Palermo")
+MP_QR_STORE_STATE_NAME = config("MP_QR_STORE_STATE_NAME", default="Capital Federal")
+MP_QR_STORE_LATITUDE = config("MP_QR_STORE_LATITUDE", default="-34.603722")
+MP_QR_STORE_LONGITUDE = config("MP_QR_STORE_LONGITUDE", default="-58.381592")
+MP_QR_STORE_REFERENCE = config("MP_QR_STORE_REFERENCE", default="Beautiful Studio")
 
 MERCADO_PAGO_WEBHOOK_URL = env(
     "MERCADO_PAGO_WEBHOOK_URL",
@@ -390,7 +407,7 @@ MERCADO_PAGO_FAILURE_URL = env(
 MERCADO_PAGO_PENDING_URL = env(
     "MERCADO_PAGO_PENDING_URL", default="http://localhost:3000/pago-pendiente"
 )  # Monto mínimo permitido por Mercado Pago (en ARS). MP rechaza montos menores.
-MP_MIN_AMOUNT = config("MP_MIN_AMOUNT", default=100, cast=float)
+MP_MIN_AMOUNT = config("MP_MIN_AMOUNT", default=50, cast=float)
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── Telegram Bot ─────────────────────────────────────────────────────────────

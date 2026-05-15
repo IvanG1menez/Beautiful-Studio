@@ -17,6 +17,10 @@ DEMO_SERVICE_NAME = "Color completo + Brushing"
 def bootstrap_django() -> None:
     """Inicializa Django para ejecucion directa de scripts."""
 
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     if os.environ.get("DJANGO_SETTINGS_MODULE"):
         return
 
@@ -39,11 +43,13 @@ def ensure_demo_base() -> None:
     crear_usuarios_base()
 
 
-def cleanup_previous_reprogramming_tests() -> dict[str, int]:
+def cleanup_previous_reprogramming_tests(reset_monthly_limit: bool = True) -> dict[str, int]:
     """Elimina turnos y relaciones generadas por los scripts de reprogramacion."""
 
     from django.db.models import Q
+    from django.utils import timezone
 
+    from apps.mercadopago.models import PagoMercadoPago
     from apps.turnos.models import (
         HistorialTurno,
         LogReasignacion,
@@ -57,27 +63,50 @@ def cleanup_previous_reprogramming_tests() -> dict[str, int]:
     deleted = {
         "turnos": 0,
         "historial": 0,
+        "historial_limite_mensual": 0,
         "logs_reasignacion": 0,
+        "pagos_mercadopago": 0,
         "solicitudes_flexibles": 0,
     }
 
-    if not turno_ids:
-        return deleted
+    if turno_ids:
+        solicitudes_qs = SolicitudReprogramacionFlexible.objects.filter(
+            turno_id__in=turno_ids
+        )
+        deleted["solicitudes_flexibles"] = solicitudes_qs.count()
+        solicitudes_qs.delete()
 
-    deleted["solicitudes_flexibles"], _ = SolicitudReprogramacionFlexible.objects.filter(
-        turno_id__in=turno_ids
-    ).delete()
+        historial_qs = HistorialTurno.objects.filter(turno_id__in=turno_ids)
+        deleted["historial"] = historial_qs.count()
+        historial_qs.delete()
 
-    deleted["historial"] = HistorialTurno.objects.filter(turno_id__in=turno_ids).count()
-    HistorialTurno.objects.filter(turno_id__in=turno_ids).delete()
+        logs_qs = LogReasignacion.objects.filter(
+            Q(turno_cancelado_id__in=turno_ids) | Q(turno_ofrecido_id__in=turno_ids)
+        )
+        deleted["logs_reasignacion"] = logs_qs.count()
+        logs_qs.delete()
 
-    logs_qs = LogReasignacion.objects.filter(
-        Q(turno_cancelado_id__in=turno_ids) | Q(turno_ofrecido_id__in=turno_ids)
-    )
-    deleted["logs_reasignacion"] = logs_qs.count()
-    logs_qs.delete()
+        pagos_qs = PagoMercadoPago.objects.filter(turno_id__in=turno_ids)
+        deleted["pagos_mercadopago"] = pagos_qs.count()
+        pagos_qs.delete()
 
-    deleted["turnos"], _ = turnos_qs.delete()
+        deleted["turnos"], _ = turnos_qs.delete()
+
+    if reset_monthly_limit:
+        inicio_mes = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        acciones_reprogramacion = [
+            "Reprogramacion de turno",
+            "Solicitud reprogramacion flexible",
+        ]
+        historial_limite_qs = HistorialTurno.objects.filter(
+            turno__cliente__user__email=DEMO_CLIENT_EMAIL,
+            turno__servicio__nombre=DEMO_SERVICE_NAME,
+            accion__in=acciones_reprogramacion,
+            created_at__gte=inicio_mes,
+        )
+        deleted["historial_limite_mensual"] = historial_limite_qs.count()
+        historial_limite_qs.delete()
+
     return deleted
 
 

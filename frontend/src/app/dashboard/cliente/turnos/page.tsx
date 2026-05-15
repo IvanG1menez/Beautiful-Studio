@@ -30,7 +30,7 @@ interface Turno {
   sala_nombre?: string;
   fecha_hora: string;
   fecha_hora_fin: string;
-  estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio';
+  estado: 'pendiente' | 'confirmado' | 'en_proceso' | 'completado' | 'cancelado' | 'no_asistio' | 'pendiente_manual' | 'oferta_enviada' | 'expirada';
   estado_display: string;
   precio_final: string | null;
   servicio_precio?: string;
@@ -38,7 +38,12 @@ interface Turno {
   monto_pendiente?: string;
   monto_pendiente_original?: string;
   descuento_aplicado?: string;
+  tipo_pago?: string;
+  metodo_pago?: string | null;
   puede_cancelar: boolean;
+  puede_reprogramar?: boolean;
+  motivo_no_reprogramable?: string;
+  reprogramacion_bloqueada_codigo?: string | null;
   tiene_pago_mp?: boolean;
   pagado_completo?: boolean;
   elegible_credito_cancelacion?: boolean;
@@ -369,7 +374,7 @@ export default function TurnosClientePage() {
         case 'fecha':
           return new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime();
         case 'precio':
-          return parseFloat(b.precio_final) - parseFloat(a.precio_final);
+          return parseMoney(b.precio_final) - parseMoney(a.precio_final);
         case 'servicio':
           return a.servicio_nombre.localeCompare(b.servicio_nombre);
         default:
@@ -404,12 +409,45 @@ export default function TurnosClientePage() {
     filterProfesional !== 'all',
     filterFecha !== 'all'
   ].filter(Boolean).length;
+
+  const parseMoney = (value?: string | null) => {
+    const parsed = parseFloat(value || '0');
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const getEstadoLabel = (turno: Turno) => {
+    if (turno.estado === 'pendiente_manual') return 'Reprogramación en revisión';
+    if (turno.estado === 'oferta_enviada') return 'Oferta enviada';
+    if (turno.estado === 'expirada') return 'Solicitud expirada';
+    return turno.estado_display || turno.estado;
+  };
+
+  const puedeReprogramarTurno = (turno: Turno) => {
+    if (turno.puede_reprogramar === false) return false;
+    return !['cancelado', 'completado', 'no_asistio', 'pendiente_manual', 'oferta_enviada', 'expirada'].includes(turno.estado);
+  };
+
+  const getMotivoNoReprogramable = (turno: Turno) => {
+    if (turno.motivo_no_reprogramable) return turno.motivo_no_reprogramable;
+    if (turno.estado === 'pendiente_manual') return 'Ya tenés una solicitud de reprogramación en revisión.';
+    if (turno.estado === 'oferta_enviada') return 'Tenés una oferta de reprogramación pendiente de respuesta.';
+    if (turno.estado === 'expirada') return 'La solicitud de reprogramación expiró.';
+    return 'Este turno no se puede reprogramar por su estado actual.';
+  };
+
+  const abrirReprogramacion = (turno: Turno) => {
+    if (!puedeReprogramarTurno(turno)) return;
+    router.push(`/dashboard/cliente?reprogramar=${turno.id}`);
+  };
+
   // Obtener color del badge según estado
   const getEstadoBadgeVariant = (estado: string) => {
     switch (estado) {
       case 'confirmado':
         return 'default';
       case 'pendiente':
+      case 'pendiente_manual':
+      case 'oferta_enviada':
         return 'secondary';
       case 'en_proceso':
         return 'default';
@@ -418,6 +456,7 @@ export default function TurnosClientePage() {
       case 'cancelado':
         return 'destructive';
       case 'no_asistio':
+      case 'expirada':
         return 'destructive';
       default:
         return 'secondary';
@@ -430,6 +469,12 @@ export default function TurnosClientePage() {
         return 'bg-green-500';
       case 'pendiente':
         return 'bg-yellow-500';
+      case 'pendiente_manual':
+        return 'bg-blue-500';
+      case 'oferta_enviada':
+        return 'bg-indigo-500';
+      case 'expirada':
+        return 'bg-orange-600';
       case 'en_proceso':
         return 'bg-blue-500';
       case 'completado':
@@ -543,7 +588,7 @@ export default function TurnosClientePage() {
               onClick={() => setFilter('pasados')}
             >
               <Clock className="w-4 h-4 mr-2" />
-              Auditoría
+              Historial
             </Button>
             <Button
               variant={filter === 'todos' ? 'default' : 'outline'}
@@ -593,6 +638,9 @@ export default function TurnosClientePage() {
                   <SelectItem value="all">Todos los estados</SelectItem>
                   <SelectItem value="pendiente">⏳ Pendiente</SelectItem>
                   <SelectItem value="confirmado">✅ Confirmado</SelectItem>
+                  <SelectItem value="pendiente_manual">Reprogramación en revisión</SelectItem>
+                  <SelectItem value="oferta_enviada">Oferta enviada</SelectItem>
+                  <SelectItem value="expirada">Solicitud expirada</SelectItem>
                   <SelectItem value="en_proceso">🔄 En Proceso</SelectItem>
                   <SelectItem value="completado">✔️ Completado</SelectItem>
                   <SelectItem value="cancelado">❌ Cancelado</SelectItem>
@@ -696,14 +744,14 @@ export default function TurnosClientePage() {
                           <div className="flex flex-wrap items-center gap-3">
                             <h3 className="text-2xl font-bold text-slate-900">{turno.servicio_nombre}</h3>
                             <Badge className={`${getEstadoColor(turno.estado)} rounded-full px-4 py-1 text-sm font-semibold text-white`}>
-                              {turno.estado_display}
+                              {getEstadoLabel(turno)}
                             </Badge>
                           </div>
                           <p className="mt-2 text-xl text-slate-700">👩‍🔧 {turno.empleado_nombre}</p>
                         </div>
 
                         <p className="text-4xl font-extrabold text-purple-600">
-                          ${parseFloat(turno.monto_pendiente || turno.precio_final || '0').toFixed(0)}
+                          ${parseMoney(turno.monto_pendiente || turno.precio_final).toFixed(0)}
                         </p>
                       </div>
 
@@ -711,6 +759,13 @@ export default function TurnosClientePage() {
                         <p className="font-semibold">{pagoDetalle.badge}</p>
                         <p>{pagoDetalle.texto}</p>
                       </div>
+
+                      {!puedeReprogramarTurno(turno) && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          <p className="font-semibold">Reprogramación no disponible</p>
+                          <p>{getMotivoNoReprogramable(turno)}</p>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-base text-slate-700 md:grid-cols-2">
                         <div className="flex items-center gap-2">
@@ -737,18 +792,23 @@ export default function TurnosClientePage() {
                       <div className="border-t border-slate-200" />
 
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <Button
-                          className="h-11 rounded-2xl bg-linear-to-r from-purple-700 to-violet-600 text-base font-semibold text-white hover:opacity-95"
-                          onClick={() => router.push('/dashboard/cliente/turnos')}
-                        >
-                          Confirmar asistencia
-                        </Button>
+                        {turno.tiene_pago_mp && (
+                          <Button
+                            variant="outline"
+                            className="h-11 rounded-2xl border-emerald-300 bg-white text-base font-semibold text-emerald-700 hover:bg-emerald-50"
+                            onClick={() => handleVerComprobante(turno.id)}
+                          >
+                            Ver comprobante
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           className="h-11 rounded-2xl border-slate-300 bg-white text-base font-semibold text-slate-700 hover:bg-slate-50"
-                          onClick={() => router.push(`/dashboard/cliente/turnos/nuevo?servicio=${turno.servicio}`)}
+                          onClick={() => abrirReprogramacion(turno)}
+                          disabled={!puedeReprogramarTurno(turno)}
+                          title={!puedeReprogramarTurno(turno) ? getMotivoNoReprogramable(turno) : undefined}
                         >
-                          Reprogramar
+                          {puedeReprogramarTurno(turno) ? 'Reprogramar' : 'No se puede reprogramar'}
                         </Button>
                         {turno.puede_cancelar ? (
                           <Button
@@ -799,7 +859,7 @@ export default function TurnosClientePage() {
                         variant={getEstadoBadgeVariant(turno.estado)}
                         className={`${getEstadoColor(turno.estado)} text-white font-medium`}
                       >
-                        {turno.estado_display}
+                        {getEstadoLabel(turno)}
                       </Badge>
                     </div>
 
@@ -826,9 +886,9 @@ export default function TurnosClientePage() {
                       <div className="flex items-center gap-2 text-gray-700">
                         <span className="text-lg font-bold text-primary flex flex-col items-start">
                           {(() => {
-                            const montoPendiente = parseFloat(turno.monto_pendiente || turno.precio_final || '0');
-                            const montoOriginal = parseFloat(turno.monto_pendiente_original || turno.monto_pendiente || turno.precio_final || '0');
-                            const descuento = parseFloat(turno.descuento_aplicado || '0');
+                            const montoPendiente = parseMoney(turno.monto_pendiente || turno.precio_final);
+                            const montoOriginal = parseMoney(turno.monto_pendiente_original || turno.monto_pendiente || turno.precio_final);
+                            const descuento = parseMoney(turno.descuento_aplicado);
 
                             if (descuento > 0 && montoOriginal > 0) {
                               return (
@@ -848,6 +908,13 @@ export default function TurnosClientePage() {
                         </span>
                       </div>
                     </div>
+
+                    {!puedeReprogramarTurno(turno) && filter !== 'pasados' && (
+                      <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        <p className="font-semibold">Reprogramación no disponible</p>
+                        <p>{getMotivoNoReprogramable(turno)}</p>
+                      </div>
+                    )}
 
                     {/* Nota del cliente - Siempre visible pero con diseño mejorado */}
                     {turno.notas_cliente && (
@@ -887,6 +954,18 @@ export default function TurnosClientePage() {
                       >
                         <CheckCircle className="w-4 h-4 mr-1 text-green-600" />
                         Ver comprobante
+                      </Button>
+                    )}
+                    {filter !== 'pasados' && !isCompletado && !isCancelado && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => abrirReprogramacion(turno)}
+                        disabled={!puedeReprogramarTurno(turno)}
+                        title={!puedeReprogramarTurno(turno) ? getMotivoNoReprogramable(turno) : undefined}
+                        className="whitespace-nowrap"
+                      >
+                        {puedeReprogramarTurno(turno) ? 'Reprogramar' : 'No disponible'}
                       </Button>
                     )}
                     {(filter === 'pasados' || turno.estado === 'completado') && turno.estado !== 'cancelado' && (

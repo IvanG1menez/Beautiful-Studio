@@ -55,15 +55,17 @@ apiClient.interceptors.response.use(
 );
 
 // Función helper para manejar errores de API
-export const handleApiError = (error: any): ApiError => {
-  console.error('🔴 API Error:', error);
+export const handleApiError = (error: unknown): ApiError => {
+  console.warn('API Error:', error);
 
-  if (error.response?.data) {
+  const axiosError = axios.isAxiosError(error) ? error : null;
+
+  if (axiosError?.response?.data) {
     // Manejar diferentes formatos de error del backend Django
     let message = 'Error en la solicitud';
     let errors = undefined;
 
-    const data = error.response.data;
+    const data = axiosError.response.data;
 
     console.log('📦 Error Response Data:', data);
 
@@ -72,28 +74,29 @@ export const handleApiError = (error: any): ApiError => {
       message = data;
     }
     // Formato 2: { error: "mensaje", error_code: "codigo" } (nuestro backend personalizado)
-    else if (data.error) {
+    else if (typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string') {
       message = data.error;
     }
     // Formato 3: { message: "mensaje" }
-    else if (data.message) {
+    else if (typeof data === 'object' && data !== null && 'message' in data && typeof data.message === 'string') {
       message = data.message;
     }
     // Formato 4: { detail: "mensaje" } (DRF estándar)
-    else if (data.detail) {
+    else if (typeof data === 'object' && data !== null && 'detail' in data && typeof data.detail === 'string') {
       message = data.detail;
     }
     // Formato 5: { non_field_errors: ["error1", "error2"] } (DRF validaciones)
-    else if (data.non_field_errors) {
-      message = Array.isArray(data.non_field_errors)
-        ? data.non_field_errors[0]
-        : data.non_field_errors;
+    else if (typeof data === 'object' && data !== null && 'non_field_errors' in data) {
+      const nonFieldErrors = data.non_field_errors;
+      message = Array.isArray(nonFieldErrors)
+        ? String(nonFieldErrors[0])
+        : String(nonFieldErrors);
     }
     // Formato 6: Errores de campo específicos { email: ["error"], password: ["error"] }
     else if (typeof data === 'object' && Object.keys(data).length > 0) {
       errors = data;
       const firstKey = Object.keys(data)[0];
-      const firstError = data[firstKey];
+      const firstError = (data as Record<string, unknown>)[firstKey];
 
       if (Array.isArray(firstError)) {
         message = firstError[0];
@@ -109,28 +112,28 @@ export const handleApiError = (error: any): ApiError => {
   }
 
   // Error de red o timeout
-  if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
+  if (axiosError?.code === 'NETWORK_ERROR' || axiosError?.message === 'Network Error') {
     return {
       message: 'Error de conexión. Verifica tu conexión a internet.',
     };
   }
 
   // Error sin response (timeout, cancelado, etc.)
-  if (error.code === 'ECONNABORTED') {
+  if (axiosError?.code === 'ECONNABORTED') {
     return {
       message: 'La solicitud tardó demasiado tiempo. Intenta nuevamente.',
     };
   }
 
   return {
-    message: error.message || 'Error inesperado. Intenta nuevamente.',
+    message: error instanceof Error ? error.message : 'Error inesperado. Intenta nuevamente.',
   };
 };
 
 // Función helper para hacer peticiones GET con paginación
 export const getWithPagination = async <T>(
   endpoint: string,
-  params?: Record<string, any>
+  params?: Record<string, unknown>
 ): Promise<ApiResponse<T>> => {
   try {
     const response = await apiClient.get<ApiResponse<T>>(endpoint, { params });
@@ -152,7 +155,7 @@ export const get = async <T>(endpoint: string): Promise<T> => {
 };
 
 // Función helper para hacer peticiones POST
-export const post = async <T>(endpoint: string, data: any): Promise<T> => {
+export const post = async <T>(endpoint: string, data: unknown): Promise<T> => {
   try {
     const response = await apiClient.post<T>(endpoint, data);
     return response.data;
@@ -163,7 +166,7 @@ export const post = async <T>(endpoint: string, data: any): Promise<T> => {
 };
 
 // Función helper para hacer peticiones PUT
-export const put = async <T>(endpoint: string, data: any): Promise<T> => {
+export const put = async <T>(endpoint: string, data: unknown): Promise<T> => {
   try {
     const response = await apiClient.put<T>(endpoint, data);
     return response.data;
@@ -174,7 +177,7 @@ export const put = async <T>(endpoint: string, data: any): Promise<T> => {
 };
 
 // Función helper para hacer peticiones PATCH
-export const patch = async <T>(endpoint: string, data: any): Promise<T> => {
+export const patch = async <T>(endpoint: string, data: unknown): Promise<T> => {
   try {
     const response = await apiClient.patch<T>(endpoint, data);
     return response.data;

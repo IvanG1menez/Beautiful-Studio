@@ -37,8 +37,10 @@ from apps.turnos.models import Turno
 from apps.clientes.models import Cliente
 from apps.servicios.models import Servicio
 from apps.empleados.models import Empleado
-from .models import PagoMercadoPago
+from .models import OrdenMercadoPagoPresencial, PagoMercadoPago, PreferenciaMercadoPagoCancelada
 from .serializers import (
+    CancelarPagoStaffSerializer,
+    ConfirmarPagoStaffSerializer,
     CrearPreferenciaSerializer,
     CrearPreferenciaSinTurnoSerializer,
     CrearPreferenciaReprogramacionSerializer,
@@ -52,6 +54,79 @@ from apps.turnos.services.reprogramacion_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[Cliente, bool]:
+    """Resuelve el cliente de una reserva staff y crea walk-ins solo tras pago aprobado."""
+    from apps.users.models import User
+
+    cliente_id = turno_payload.get("cliente_id")
+    if cliente_id:
+        return Cliente.objects.select_related("user").get(pk=cliente_id), True
+
+    dni = (turno_payload.get("walkin_dni") or "").strip()
+    email = (turno_payload.get("walkin_email") or "").strip().lower()
+    telefono = (turno_payload.get("walkin_telefono") or "").strip()
+    nombre = (turno_payload.get("walkin_nombre") or "").strip() or "Cliente"
+
+    cliente = None
+    if dni:
+        cliente = Cliente.objects.select_related("user").filter(user__dni=dni).first()
+    if cliente is None and email:
+        cliente = Cliente.objects.select_related("user").filter(user__email=email).first()
+    if cliente is not None:
+        return cliente, True
+
+    partes_nombre = nombre.split(" ", 1)
+    first_name = partes_nombre[0]
+    last_name = partes_nombre[1] if len(partes_nombre) > 1 else ""
+
+    user_obj = User.objects.filter(email=email).first() if email else None
+    if user_obj is None and dni:
+        user_obj = User.objects.filter(dni=dni).first()
+
+    if user_obj is None:
+        username_base = email or (dni and f"cliente-{dni}") or f"cliente-{uuid.uuid4().hex[:8]}"
+        username = username_base
+        counter = 1
+        while User.objects.filter(username=username).exists():
+            counter += 1
+            username = f"{username_base}-{counter}"
+
+        user_email = email or f"no-email-{uuid.uuid4().hex[:8]}@example.com"
+        user_obj = User.objects.create_user(
+            username=username,
+            email=user_email,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        user_obj.role = "cliente"
+        user_obj.dni = dni or None
+        user_obj.phone = telefono or None
+        user_obj.set_unusable_password()
+        user_obj.save()
+    else:
+        campos_update = []
+        if not user_obj.first_name and first_name:
+            user_obj.first_name = first_name
+            campos_update.append("first_name")
+        if not user_obj.last_name and last_name:
+            user_obj.last_name = last_name
+            campos_update.append("last_name")
+        if not getattr(user_obj, "dni", None) and dni:
+            user_obj.dni = dni
+            campos_update.append("dni")
+        if not getattr(user_obj, "phone", None) and telefono:
+            user_obj.phone = telefono
+            campos_update.append("phone")
+        if getattr(user_obj, "role", None) != "cliente":
+            user_obj.role = "cliente"
+            campos_update.append("role")
+        if campos_update:
+            user_obj.save(update_fields=campos_update)
+
+    cliente, created = Cliente.objects.get_or_create(user=user_obj)
+    return cliente, not created
 
 
 class CrearPreferenciaView(APIView):
@@ -534,10 +609,6 @@ class CrearPreferenciaStaffView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Resolver o crear cliente
-        from apps.clientes.models import Cliente
-        from apps.users.models import User
-
         cliente = None
         ya_registrado = True
 
@@ -560,34 +631,19 @@ class CrearPreferenciaStaffView(APIView):
                 Cliente.objects.select_related("user").filter(user__email=email).first()
             )
 
+        if cliente is None and not email:
+            return Response(
+                {
+                    "detail": (
+                        "Para cobrar por QR a un cliente no registrado, cargá un email válido. "
+                        "El cliente se registrará recién cuando Mercado Pago confirme el pago."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if cliente is None:
             ya_registrado = False
-            nombre = (data.get("nombre") or "").strip() or "Cliente"
-            telefono = (data.get("telefono") or "").strip() or None
-
-            partes_nombre = nombre.split(" ", 1)
-            first_name = partes_nombre[0]
-            last_name = partes_nombre[1] if len(partes_nombre) > 1 else ""
-
-            username_base = email or (dni and f"cliente-{dni}") or None
-            if not username_base:
-                username_base = f"cliente-{uuid.uuid4().hex[:8]}"
-
-            user_email = email or f"no-email-{uuid.uuid4().hex[:8]}@example.com"
-
-            user_obj = User.objects.create_user(
-                username=username_base,
-                email=user_email,
-                first_name=first_name,
-                last_name=last_name,
-            )
-            user_obj.role = "cliente"
-            user_obj.dni = dni or None
-            user_obj.phone = telefono
-            user_obj.set_unusable_password()
-            user_obj.save()
-
-            cliente = Cliente.objects.create(user=user_obj)
 
         # Obtener servicio y empleado
         try:
@@ -645,7 +701,7 @@ class CrearPreferenciaStaffView(APIView):
         )
 
         turno_payload = {
-            "cliente_id": cliente.pk,
+            "cliente_id": cliente.pk if cliente else None,
             "servicio_id": servicio.pk,
             "empleado_id": data["empleado_id"],
             "fecha_hora": data["fecha_hora"].isoformat(),
@@ -665,15 +721,99 @@ class CrearPreferenciaStaffView(APIView):
 
         external_reference = json.dumps(turno_payload)
         notification_url = getattr(settings, "MERCADO_PAGO_WEBHOOK_URL", "")
+        mp_env = (getattr(settings, "MP_ENV", "prod") or "prod").lower()
+        access_token = (getattr(settings, "MP_ACCESS_TOKEN", "") or "").strip()
+        token_env = "test" if access_token.startswith("TEST-") else "prod"
+
+        if getattr(settings, "MP_QR_NATIVE_ENABLED", True):
+            qr_access_token = (getattr(settings, "MP_QR_ACCESS_TOKEN", "") or "").strip()
+            qr_collector_id = str(
+                getattr(settings, "MP_QR_COLLECTOR_ID", "")
+                or getattr(settings, "MP_QR_SELLER_COLLECTOR_ID", "")
+            ).strip()
+            qr_pos_external_id = str(getattr(settings, "MP_QR_POS_EXTERNAL_ID", "")).strip()
+            if not qr_access_token or not qr_collector_id or not qr_pos_external_id:
+                return Response(
+                    {
+                        "detail": (
+                            "Configuración QR incompleta: revisá MP_QR_ACCESS_TOKEN, "
+                            "MP_QR_COLLECTOR_ID y MP_QR_POS_EXTERNAL_ID."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            reference_id = f"staff-qr-{uuid.uuid4().hex}"
+            titulo_orden = f"Reserva presencial - {servicio.nombre}"
+            try:
+                orden_mp = services.crear_orden_qr_dinamico(
+                    collector_id=qr_collector_id,
+                    external_pos_id=qr_pos_external_id,
+                    reference_id=reference_id,
+                    titulo=titulo_orden,
+                    descripcion=f"Turno {servicio.nombre}",
+                    monto=monto_final,
+                    notification_url=notification_url,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Error creando orden QR nativa MP staff: %s",
+                    exc,
+                )
+                return Response(
+                    {"detail": f"Mercado Pago rechazó el QR nativo: {exc}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            else:
+                qr_data = orden_mp.get("qr_data") or orden_mp.get("qr") or ""
+                if qr_data:
+                    qr_public_key = getattr(settings, "MP_QR_PUBLIC_KEY", "") or getattr(settings, "MP_PUBLIC_KEY", "")
+                    OrdenMercadoPagoPresencial.objects.create(
+                        reference_id=reference_id,
+                        payload=turno_payload,
+                        qr_data=qr_data,
+                        monto=Decimal(str(monto_final)),
+                    )
+
+                    logger.info(
+                        "Orden QR staff creada — reference_id=%s servicio=%s monto=%.2f",
+                        reference_id,
+                        servicio.pk,
+                        monto_final,
+                    )
+                    return Response(
+                        {
+                            "status": "pending",
+                            "preference_id": reference_id,
+                            "qr_data": qr_data,
+                            "qr_init_point": qr_data,
+                            "qr_native": True,
+                            "mp_env": mp_env,
+                            "mp_token_env": token_env,
+                            "qr_link_kind": "qr_data",
+                            "public_key": qr_public_key,
+                            "qr_public_key": qr_public_key,
+                        },
+                        status=status.HTTP_201_CREATED,
+                    )
+                logger.error(
+                    "Mercado Pago creó la orden QR staff sin qr_data. Respuesta: %s",
+                    orden_mp,
+                )
+                return Response(
+                    {"detail": "Mercado Pago creó la orden QR, pero no devolvió datos de QR."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
         try:
+            titulo_preferencia = f"Turno {servicio.nombre}"
             resultado = services.crear_preferencia(
-                titulo=servicio.nombre,
-                descripcion=f"Turno — {servicio.nombre}",
+                titulo=titulo_preferencia,
+                descripcion=f"Reserva presencial - {servicio.nombre}",
                 monto=monto_final,
                 external_reference=external_reference,
                 notification_url=notification_url,
-                payer_email=cliente.user.email or "",
+                payer_email="",
             )
         except ValueError as exc:
             logger.error("Error creando preferencia MP staff: %s", exc)
@@ -681,11 +821,12 @@ class CrearPreferenciaStaffView(APIView):
 
         logger.info(
             "Preferencia staff creada — cliente=%s servicio=%s monto=%.2f preference_id=%s",
-            cliente.pk,
+            cliente.pk if cliente else "walk-in-pendiente",
             servicio.pk,
             monto_final,
             resultado["preference_id"],
         )
+        qr_init_point = resultado["sandbox_init_point"] if token_env == "test" else resultado["init_point"]
 
         return Response(
             {
@@ -693,10 +834,175 @@ class CrearPreferenciaStaffView(APIView):
                 "preference_id": resultado["preference_id"],
                 "init_point": resultado["init_point"],
                 "sandbox_init_point": resultado["sandbox_init_point"],
+                "qr_init_point": qr_init_point,
+                "mp_env": mp_env,
+                "mp_token_env": token_env,
+                "qr_link_kind": "sandbox_init_point" if token_env == "test" else "init_point",
                 "public_key": getattr(settings, "MP_PUBLIC_KEY", ""),
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class ConfirmarPagoStaffView(APIView):
+    """Valida manualmente un ID de operación MP para el flujo presencial."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ConfirmarPagoStaffSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        if not (
+            user.is_staff
+            or getattr(user, "role", None)
+            in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"detail": "No tiene permisos para confirmar pagos desde el panel."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        preference_id = serializer.validated_data["preference_id"]
+        payment_id = serializer.validated_data["payment_id"]
+
+        if PreferenciaMercadoPagoCancelada.objects.filter(preference_id=preference_id).exists():
+            return Response(
+                {"detail": "Esta transacción fue cancelada. Generá un nuevo QR para registrar el pago."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pago_existente = PagoMercadoPago.objects.select_related("turno").filter(
+            payment_id=payment_id,
+            estado="approved",
+        ).first()
+        if pago_existente:
+            if pago_existente.preference_id != preference_id:
+                return Response(
+                    {"detail": "Ese ID de operación ya fue registrado en otra reserva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"status": "approved", "turno_id": pago_existente.turno.pk},
+                status=status.HTTP_200_OK,
+            )
+
+        try:
+            pago_mp = services.obtener_pago(payment_id)
+        except ValueError as exc:
+            logger.warning("ConfirmarPagoStaff: no se pudo obtener pago %s: %s", payment_id, exc)
+            return Response(
+                {"detail": "No se encontró ese ID de operación en Mercado Pago."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if pago_mp.get("status") != "approved":
+            return Response(
+                {"detail": "El pago existe, pero todavía no está aprobado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mp_preference_id = pago_mp.get("preference_id") or ""
+        if mp_preference_id != preference_id:
+            return Response(
+                {"detail": "El ID de operación no corresponde al QR generado para esta reserva."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        turno_payload = WebhookMercadoPagoView()._parse_turno_payload(
+            pago_mp.get("external_reference", "")
+        )
+        if turno_payload is None or turno_payload.get("tipo_movimiento") == "reprogramacion_turno":
+            return Response(
+                {"detail": "El pago no corresponde a una reserva presencial."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        monto_cobrado = float(
+            pago_mp.get("transaction_amount")
+            or turno_payload.get("monto_cobrado")
+            or 0
+        )
+
+        try:
+            WebhookMercadoPagoView()._crear_turno_desde_payload(
+                turno_payload,
+                payment_id,
+                preference_id,
+                monto_cobrado_override=monto_cobrado or None,
+            )
+        except Exception as exc:
+            logger.error(
+                "ConfirmarPagoStaff: error registrando pago/turno preference_id=%s payment_id=%s: %s",
+                preference_id,
+                payment_id,
+                exc,
+            )
+            return Response(
+                {"detail": "No se pudo registrar el pago aprobado en el sistema."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pago = PagoMercadoPago.objects.select_related("turno").filter(
+            preference_id=preference_id,
+            payment_id=payment_id,
+            estado="approved",
+        ).first()
+        if not pago:
+            return Response(
+                {"detail": "El pago fue validado, pero no se encontró el turno creado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {"status": "approved", "turno_id": pago.turno.pk},
+            status=status.HTTP_200_OK,
+        )
+
+
+class CancelarPagoStaffView(APIView):
+    """Marca una preferencia presencial como cancelada para ignorar confirmaciones tardías."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = CancelarPagoStaffSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        if not (
+            user.is_staff
+            or getattr(user, "role", None)
+            in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"detail": "No tiene permisos para cancelar pagos desde el panel."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        preference_id = serializer.validated_data["preference_id"]
+        if PagoMercadoPago.objects.filter(preference_id=preference_id, estado="approved").exists():
+            return Response(
+                {"detail": "El pago ya fue aprobado y no puede cancelarse desde este flujo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        OrdenMercadoPagoPresencial.objects.filter(
+            reference_id=preference_id,
+            estado="pending",
+        ).update(estado="cancelled")
+
+        PreferenciaMercadoPagoCancelada.objects.get_or_create(
+            preference_id=preference_id,
+            defaults={
+                "motivo": "Cancelada desde reserva presencial",
+                "cancelado_por": user,
+            },
+        )
+        return Response({"status": "cancelled"}, status=status.HTTP_200_OK)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -712,6 +1018,25 @@ class WebhookMercadoPagoView(APIView):
     permission_classes = [AllowAny]
 
     # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _crear_turno_desde_orden_presencial(
+        self,
+        orden: OrdenMercadoPagoPresencial,
+        payment_id: str,
+        monto_cobrado_override: float | None = None,
+    ) -> None:
+        """Crea turno/pago a partir de una orden QR presencial persistida."""
+        if orden.estado == "approved":
+            return
+        self._crear_turno_desde_payload(
+            orden.payload,
+            payment_id,
+            orden.reference_id,
+            monto_cobrado_override=monto_cobrado_override,
+        )
+        orden.estado = "approved"
+        orden.payment_id = str(payment_id)
+        orden.save(update_fields=["estado", "payment_id", "actualizado_en"])
 
     def _crear_turno_desde_payload(
         self,
@@ -738,7 +1063,6 @@ class WebhookMercadoPagoView(APIView):
             )
             return
 
-        cliente_wh = Cliente.objects.get(pk=turno_payload["cliente_id"])
         servicio_wh = Servicio.objects.get(pk=turno_payload["servicio_id"])
         empleado_wh = Empleado.objects.get(pk=turno_payload["empleado_id"])
         fecha_hora_wh = parse_datetime(turno_payload["fecha_hora"])
@@ -763,13 +1087,20 @@ class WebhookMercadoPagoView(APIView):
         if tipo_pago not in {"SENIA", "PAGO_COMPLETO", "SIN_PAGO"}:
             usar_sena_payload = bool(turno_payload.get("usar_sena", True))
             tipo_pago = "SENIA" if usar_sena_payload else "PAGO_COMPLETO"
-        es_cliente_registrado = bool(turno_payload.get("es_cliente_registrado", True))
+        es_cliente_registrado_payload = turno_payload.get("es_cliente_registrado")
         walkin_nombre = turno_payload.get("walkin_nombre") or ""
         walkin_dni = turno_payload.get("walkin_dni") or ""
         walkin_email = turno_payload.get("walkin_email") or ""
         walkin_telefono = turno_payload.get("walkin_telefono") or ""
 
         with transaction.atomic():
+            cliente_wh, cliente_existia = _resolver_o_crear_cliente_staff_desde_payload(turno_payload)
+            es_cliente_registrado = bool(
+                cliente_existia
+                if es_cliente_registrado_payload is None
+                else es_cliente_registrado_payload
+            )
+
             # Idempotente sobre el slot único (empleado + fecha_hora).
             # Si el turno ya existe (reintento de webhook, test previo, etc.)
             # lo reutilizamos — nunca lanzamos IntegrityError.
@@ -913,6 +1244,13 @@ class WebhookMercadoPagoView(APIView):
             )
             return
 
+        if PreferenciaMercadoPagoCancelada.objects.filter(preference_id=mp_preference_id).exists():
+            logger.info(
+                "Webhook MP: preference_id=%s cancelada desde panel, se ignora el pago tardío.",
+                mp_preference_id,
+            )
+            return
+
         pago = PagoMercadoPago.objects.filter(preference_id=mp_preference_id).first()
         if pago and pago.estado == "approved":
             logger.info(
@@ -1036,12 +1374,22 @@ class WebhookMercadoPagoView(APIView):
             try:
                 pago_mp = services.obtener_pago(str(resource_id))
             except ValueError as exc:
-                logger.error(
-                    "Webhook MP: no se pudo obtener pago %s: %s", resource_id, exc
+                logger.warning(
+                    "Webhook MP: no se pudo obtener pago %s con credenciales generales: %s. Reintentando QR.",
+                    resource_id,
+                    exc,
                 )
-                return Response(
-                    {"detail": "Error consultando pago."}, status=status.HTTP_200_OK
-                )
+                try:
+                    pago_mp = services.obtener_pago(str(resource_id), use_qr_credentials=True)
+                except ValueError as exc_qr:
+                    logger.error(
+                        "Webhook MP: no se pudo obtener pago %s con credenciales QR: %s",
+                        resource_id,
+                        exc_qr,
+                    )
+                    return Response(
+                        {"detail": "Error consultando pago."}, status=status.HTTP_200_OK
+                    )
 
             external_reference = pago_mp.get("external_reference", "")
             nuevo_estado = pago_mp.get("status", "")
@@ -1053,6 +1401,22 @@ class WebhookMercadoPagoView(APIView):
                 mp_preference_id,
                 external_reference,
             )
+
+            orden_presencial = OrdenMercadoPagoPresencial.objects.filter(
+                reference_id=external_reference,
+                estado="pending",
+            ).first()
+            if orden_presencial is not None:
+                if nuevo_estado == "approved":
+                    try:
+                        self._crear_turno_desde_orden_presencial(
+                            orden_presencial,
+                            str(resource_id),
+                            monto_cobrado_override=float(pago_mp.get("transaction_amount") or orden_presencial.monto or 0),
+                        )
+                    except Exception as exc:
+                        logger.error("Webhook MP orden QR presencial: error procesando pago: %s", exc)
+                return Response({"detail": "Webhook procesado."}, status=status.HTTP_200_OK)
 
             turno_payload = self._parse_turno_payload(external_reference)
 
@@ -1113,12 +1477,22 @@ class WebhookMercadoPagoView(APIView):
             try:
                 orden = services.obtener_orden(str(resource_id))
             except ValueError as exc:
-                logger.error(
-                    "Webhook MP: no se pudo obtener orden %s: %s", resource_id, exc
+                logger.warning(
+                    "Webhook MP: no se pudo obtener orden %s con credenciales generales: %s. Reintentando QR.",
+                    resource_id,
+                    exc,
                 )
-                return Response(
-                    {"detail": "Error consultando orden."}, status=status.HTTP_200_OK
-                )
+                try:
+                    orden = services.obtener_orden(str(resource_id), use_qr_credentials=True)
+                except ValueError as exc_qr:
+                    logger.error(
+                        "Webhook MP: no se pudo obtener orden %s con credenciales QR: %s",
+                        resource_id,
+                        exc_qr,
+                    )
+                    return Response(
+                        {"detail": "Error consultando orden."}, status=status.HTTP_200_OK
+                    )
 
             external_reference = orden.get("external_reference", "")
             mp_preference_id = orden.get("preference_id", "")
@@ -1130,6 +1504,40 @@ class WebhookMercadoPagoView(APIView):
                 [{"id": p.get("id"), "status": p.get("status")} for p in pagos_orden],
                 external_reference,
             )
+
+            orden_presencial = OrdenMercadoPagoPresencial.objects.filter(
+                reference_id=external_reference,
+                estado="pending",
+            ).first()
+            if orden_presencial is not None:
+                pago_aprobado = next(
+                    (p for p in pagos_orden if p.get("status") == "approved"), None
+                )
+                if pago_aprobado:
+                    payment_id_aprobado = pago_aprobado.get("id", resource_id)
+                    monto_cobrado = float(
+                        pago_aprobado.get("total_paid_amount")
+                        or pago_aprobado.get("transaction_amount")
+                        or orden_presencial.monto
+                        or 0
+                    )
+                    try:
+                        self._crear_turno_desde_orden_presencial(
+                            orden_presencial,
+                            str(payment_id_aprobado),
+                            monto_cobrado_override=monto_cobrado or None,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "Webhook merchant_order QR presencial: error procesando pago: %s",
+                            exc,
+                        )
+                else:
+                    logger.info(
+                        "Webhook merchant_order QR presencial: ningún pago aprobado aún (estados=%s).",
+                        [p.get("status") for p in pagos_orden],
+                    )
+                return Response(status=status.HTTP_200_OK)
 
             turno_payload = self._parse_turno_payload(external_reference)
             if turno_payload is None:
@@ -1208,6 +1616,119 @@ class VerificarPagoView(APIView):
                 status=status.HTTP_200_OK,
             )
         except PagoMercadoPago.DoesNotExist:
+            orden_presencial = OrdenMercadoPagoPresencial.objects.filter(
+                reference_id=preference_id
+            ).first()
+            if orden_presencial is not None:
+                if orden_presencial.estado == "approved":
+                    pago = PagoMercadoPago.objects.select_related("turno").filter(
+                        preference_id=preference_id,
+                        estado="approved",
+                    ).first()
+                    if pago:
+                        return Response(
+                            {"status": "approved", "turno_id": pago.turno.pk},
+                            status=status.HTTP_200_OK,
+                        )
+                if PreferenciaMercadoPagoCancelada.objects.filter(preference_id=preference_id).exists():
+                    return Response({"status": "cancelled"}, status=status.HTTP_200_OK)
+                try:
+                    pago_mp = services.buscar_pago_aprobado_por_external_reference(
+                        preference_id,
+                        use_qr_credentials=True,
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "VerificarPago QR presencial fallback MP falló para reference_id=%s: %s",
+                        preference_id,
+                        exc,
+                    )
+                    return Response({"status": "pending"}, status=status.HTTP_200_OK)
+                if not pago_mp:
+                    try:
+                        orden_mp = services.buscar_orden_aprobada_por_external_reference(
+                            preference_id,
+                            use_qr_credentials=True,
+                        )
+                    except ValueError as exc:
+                        logger.warning(
+                            "VerificarPago QR presencial merchant_order fallback falló para reference_id=%s: %s",
+                            preference_id,
+                            exc,
+                        )
+                        return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+                    if not orden_mp:
+                        return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+                    pago_aprobado = next(
+                        (p for p in orden_mp.get("payments", []) if p.get("status") == "approved"),
+                        None,
+                    )
+                    if not pago_aprobado:
+                        return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+                    payment_id = str(pago_aprobado.get("id") or "")
+                    monto_cobrado = float(
+                        pago_aprobado.get("total_paid_amount")
+                        or pago_aprobado.get("transaction_amount")
+                        or orden_presencial.monto
+                        or 0
+                    )
+                    try:
+                        WebhookMercadoPagoView()._crear_turno_desde_orden_presencial(
+                            orden_presencial,
+                            payment_id,
+                            monto_cobrado_override=monto_cobrado or None,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "VerificarPago QR presencial merchant_order: error registrando pago/turno reference_id=%s: %s",
+                            preference_id,
+                            exc,
+                        )
+                        return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+                    pago = PagoMercadoPago.objects.select_related("turno").filter(
+                        preference_id=preference_id,
+                        estado="approved",
+                    ).first()
+                    if pago:
+                        return Response(
+                            {"status": "approved", "turno_id": pago.turno.pk},
+                            status=status.HTTP_200_OK,
+                        )
+                    return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+                payment_id = str(pago_mp.get("id") or "")
+                monto_cobrado = float(
+                    pago_mp.get("transaction_amount") or orden_presencial.monto or 0
+                )
+                try:
+                    WebhookMercadoPagoView()._crear_turno_desde_orden_presencial(
+                        orden_presencial,
+                        payment_id,
+                        monto_cobrado_override=monto_cobrado or None,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "VerificarPago QR presencial: error registrando pago/turno reference_id=%s: %s",
+                        preference_id,
+                        exc,
+                    )
+                    return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
+                pago = PagoMercadoPago.objects.select_related("turno").filter(
+                    preference_id=preference_id,
+                    estado="approved",
+                ).first()
+                if pago:
+                    return Response(
+                        {"status": "approved", "turno_id": pago.turno.pk},
+                        status=status.HTTP_200_OK,
+                    )
+                return Response({"status": "pending"}, status=status.HTTP_200_OK)
+
             # Fallback sin webhook: consultar MP por preference_id.
             # Si MP confirma aprobado, registrar turno/pago localmente de forma
             # idempotente reutilizando la misma lógica del webhook.
@@ -1219,9 +1740,48 @@ class VerificarPagoView(APIView):
                     preference_id,
                     exc,
                 )
-                return Response({"status": "pending"}, status=status.HTTP_200_OK)
+                return Response(
+                    {"status": "pending", "detail": str(exc)},
+                    status=status.HTTP_200_OK,
+                )
 
             if not pago_mp:
+                try:
+                    ultimo_pago = services.buscar_ultimo_pago_por_preference(preference_id)
+                except ValueError as exc:
+                    logger.warning(
+                        "VerificarPago último pago MP falló para preference_id=%s: %s",
+                        preference_id,
+                        exc,
+                    )
+                    return Response(
+                        {"status": "pending"},
+                        status=status.HTTP_200_OK,
+                    )
+
+                if ultimo_pago:
+                    estado_mp = ultimo_pago.get("status") or "pending"
+                    detalle_mp = ultimo_pago.get("status_detail") or ""
+                    if estado_mp in {"rejected", "cancelled", "refunded", "charged_back"}:
+                        return Response(
+                            {
+                                "status": "rejected",
+                                "mp_status": estado_mp,
+                                "mp_status_detail": detalle_mp,
+                                "payment_id": ultimo_pago.get("id"),
+                            },
+                            status=status.HTTP_200_OK,
+                        )
+                    return Response(
+                        {
+                            "status": "pending",
+                            "mp_status": estado_mp,
+                            "mp_status_detail": detalle_mp,
+                            "payment_id": ultimo_pago.get("id"),
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+
                 return Response({"status": "pending"}, status=status.HTTP_200_OK)
 
             external_reference = pago_mp.get("external_reference", "")

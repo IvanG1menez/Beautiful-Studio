@@ -1,8 +1,10 @@
 from django.urls import path
 
 from .views import (
+    CancelarPagoStaffView,
     ComprobantePagoPDFView,
     ComprobantePagoView,
+    ConfirmarPagoStaffView,
     CrearPreferenciaView,
     CrearPreferenciaSinTurnoView,
     CrearPreferenciaReprogramacionView,
@@ -25,6 +27,16 @@ urlpatterns = [
         "preferencia-staff/",
         CrearPreferenciaStaffView.as_view(),
         name="crear-preferencia-staff",
+    ),
+    path(
+        "confirmar-pago-staff/",
+        ConfirmarPagoStaffView.as_view(),
+        name="confirmar-pago-staff",
+    ),
+    path(
+        "cancelar-pago-staff/",
+        CancelarPagoStaffView.as_view(),
+        name="cancelar-pago-staff",
     ),
     path(
         "preferencia-reprogramacion/",

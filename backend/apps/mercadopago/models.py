@@ -84,3 +84,52 @@ class PagoMercadoPago(models.Model):
 
     def __str__(self):
         return f"Pago {self.preference_id} — {self.estado} — ${self.monto}"
+
+
+class PreferenciaMercadoPagoCancelada(models.Model):
+    """Preferencias presenciales canceladas desde el panel antes de confirmar pago."""
+
+    preference_id = models.CharField(max_length=255, unique=True)
+    motivo = models.CharField(max_length=255, blank=True)
+    cancelado_por = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="preferencias_mp_canceladas",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Preferencia Mercado Pago cancelada"
+        verbose_name_plural = "Preferencias Mercado Pago canceladas"
+
+    def __str__(self):
+        return f"Preferencia cancelada {self.preference_id}"
+
+
+class OrdenMercadoPagoPresencial(models.Model):
+    """Orden QR presencial pendiente de confirmación por Mercado Pago."""
+
+    ESTADO_CHOICES = [
+        ("pending", "Pendiente"),
+        ("approved", "Aprobada"),
+        ("cancelled", "Cancelada"),
+    ]
+
+    reference_id = models.CharField(max_length=255, unique=True)
+    payload = models.JSONField()
+    qr_data = models.TextField(blank=True)
+    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="pending")
+    payment_id = models.CharField(max_length=255, blank=True, null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Orden Mercado Pago presencial"
+        verbose_name_plural = "Órdenes Mercado Pago presenciales"
+        ordering = ["-creado_en"]
+
+    def __str__(self):
+        return f"Orden presencial {self.reference_id} — {self.estado}"

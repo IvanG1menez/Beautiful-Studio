@@ -74,6 +74,9 @@ class CrearPreferenciaStaffSerializer(serializers.Serializer):
         choices=["SENIA", "PAGO_COMPLETO"], required=False
     )
 
+    def validate_email(self, value):
+        return (value or "").strip().lower()
+
     def validate(self, attrs):
         # Requiere al menos algún identificador mínimo del cliente
         if not (
@@ -85,6 +88,37 @@ class CrearPreferenciaStaffSerializer(serializers.Serializer):
                 "Debe proporcionar cliente_id o al menos DNI o email para identificar al cliente."
             )
         return attrs
+
+
+class ConfirmarPagoStaffSerializer(serializers.Serializer):
+    """Valida la confirmación manual de un pago presencial por ID de operación."""
+
+    preference_id = serializers.CharField()
+    payment_id = serializers.CharField()
+
+    def validate_payment_id(self, value):
+        payment_id = (value or "").strip()
+        if not payment_id.isdigit():
+            raise serializers.ValidationError("El ID de operación debe ser numérico.")
+        return payment_id
+
+    def validate_preference_id(self, value):
+        preference_id = (value or "").strip()
+        if not preference_id:
+            raise serializers.ValidationError("La preferencia es requerida.")
+        return preference_id
+
+
+class CancelarPagoStaffSerializer(serializers.Serializer):
+    """Valida la cancelación de una preferencia presencial pendiente."""
+
+    preference_id = serializers.CharField()
+
+    def validate_preference_id(self, value):
+        preference_id = (value or "").strip()
+        if not preference_id:
+            raise serializers.ValidationError("La preferencia es requerida.")
+        return preference_id
 
 
 class PagoMercadoPagoSerializer(serializers.ModelSerializer):
@@ -113,3 +147,4 @@ class PagoMercadoPagoSerializer(serializers.ModelSerializer):
             "actualizado_en",
         ]
         read_only_fields = fields
+

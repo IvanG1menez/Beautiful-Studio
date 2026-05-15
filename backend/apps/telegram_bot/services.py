@@ -1,13 +1,20 @@
 import logging
 import re
 import unicodedata
+from datetime import datetime, timedelta
 
 import requests
 from django.conf import settings
 from django.utils import timezone
 
+from apps.authentication.models import ConfiguracionGlobal
 from apps.turnos.models import Turno
 from apps.turnos.services.cancelacion_service import cancelar_turno_para_cliente
+from apps.turnos.services.reprogramacion_service import (
+    obtener_estado_limite_reprogramacion_cliente_servicio,
+    reprogramar_turno,
+)
+from apps.turnos.views import TurnoViewSet
 
 from .models import TelegramConversationState, TelegramLink
 
@@ -49,6 +56,7 @@ class TelegramBotService:
     def __init__(self):
         self.token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
         self.timeout = int(getattr(settings, "TELEGRAM_API_REQUEST_TIMEOUT", 10))
+        self.frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
     def process_update(self, update):
         callback_query = update.get("callback_query")
@@ -121,6 +129,10 @@ class TelegramBotService:
 
         if command in {"cancelar", "cancelar turno"}:
             self.send_turnos_for_cancel(chat_id, link)
+            return
+
+        if command in {"reprogramar", "reprogramar turno", "reprogramacion", "reprogramación"}:
+            self.send_turnos_for_reprogram(chat_id, link)
             return
 
         if command in {"ayuda", "help"}:
@@ -239,6 +251,11 @@ class TelegramBotService:
             self.answer_callback_query(callback_id)
             return
 
+        if data == "menu:reprogram_turno":
+            self.send_turnos_for_reprogram(chat_id, link)
+            self.answer_callback_query(callback_id)
+            return
+
         if data == "menu:help":
             self.send_help(chat_id)
             self.answer_callback_query(callback_id)
@@ -317,6 +334,11 @@ class TelegramBotService:
             self.answer_callback_query(callback_id)
             return
 
+        if data.startswith("rp:"):
+            self._handle_reprogram_callback(chat_id, link, data)
+            self.answer_callback_query(callback_id)
+            return
+
         self.answer_callback_query(callback_id)
 
     def _try_link_by_phone(self, link, raw_phone):
@@ -378,6 +400,7 @@ class TelegramBotService:
             "inline_keyboard": [
                 [{"text": "📅 Consultar turnos", "callback_data": "menu:list_turnos"}],
                 [{"text": "❌ Cancelar turno", "callback_data": "menu:cancel_turno"}],
+                [{"text": "🔁 Reprogramar turno", "callback_data": "menu:reprogram_turno"}],
                 [{"text": "💼 Mi estado de cuenta", "callback_data": "menu:status"}],
                 [{"text": "🆘 Ayuda", "callback_data": "menu:help"}],
                 [{"text": "👋 Finalizar chat", "callback_data": "menu:end_chat"}],
@@ -417,6 +440,7 @@ class TelegramBotService:
             "• /start o /menu: ver opciones\n"
             "• Consultar: muestra tus proximos turnos\n"
             "• Cancelar: te guia con motivo y confirmacion final\n"
+            "• Reprogramar: cambia turno si esta dentro del rango permitido\n"
             "• Avanzado: /modificar_turno cancelar <turno_id> [motivo]"
         )
         self.send_message(chat_id, text)
@@ -528,6 +552,331 @@ class TelegramBotService:
             "Elegi el turno que queres cancelar 👇",
             reply_markup={"inline_keyboard": keyboard_rows},
         )
+
+    def send_turnos_for_reprogram(self, chat_id, link):
+        if not link.is_verified or not link.cliente:
+            self._send_phone_link_instructions(chat_id)
+            return
+
+        turnos = (
+            Turno.objects.select_related("servicio", "empleado", "empleado__user", "cliente__user")
+            .filter(cliente=link.cliente, fecha_hora__gte=timezone.now())
+            .exclude(estado__in=["cancelado", "completado", "no_asistio", "expirada"])
+            .order_by("fecha_hora")[:8]
+        )
+
+        if not turnos:
+            self.send_message(chat_id, "📭 No tenes turnos proximos para reprogramar.")
+            self.send_post_action_prompt(chat_id)
+            return
+
+        keyboard_rows = []
+        blocked_lines = []
+        for turno in turnos:
+            can_reprogram, reason = self._can_reprogram_from_telegram(turno)
+            fecha = timezone.localtime(turno.fecha_hora).strftime("%d/%m %H:%M")
+            if can_reprogram:
+                keyboard_rows.append(
+                    [
+                        {
+                            "text": f"#{turno.id} - {fecha} - {turno.servicio.nombre}",
+                            "callback_data": f"rp:t:{turno.id}",
+                        }
+                    ]
+                )
+            else:
+                blocked_lines.append(f"• #{turno.id} {fecha}: {reason}")
+
+        if not keyboard_rows:
+            text = "No hay turnos que se puedan reprogramar desde Telegram ahora."
+            if blocked_lines:
+                text += "\n\n" + "\n".join(blocked_lines[:5])
+            text += "\n\nPara operaciones con pago o fuera de rango, entra a tu panel web."
+            self.send_message(
+                chat_id,
+                text,
+                reply_markup={
+                    "inline_keyboard": [[{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}]]
+                },
+            )
+            return
+
+        keyboard_rows.append([{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}])
+        text = "Elegi el turno que queres reprogramar 🔁"
+        if blocked_lines:
+            text += "\n\nAlgunos turnos no aparecen porque requieren gestion desde la web."
+        self.send_message(chat_id, text, reply_markup={"inline_keyboard": keyboard_rows})
+
+    def _handle_reprogram_callback(self, chat_id, link, data):
+        parts = data.split(":")
+        if len(parts) < 3:
+            self.send_main_menu(chat_id)
+            return
+
+        action = parts[1]
+        turno_id = self._safe_int(parts[2])
+        if not turno_id:
+            self.send_message(chat_id, "Turno invalido.")
+            self.send_main_menu(chat_id)
+            return
+
+        turno = self._get_reprogrammable_turno(link, turno_id)
+        if not turno:
+            self.send_message(chat_id, "No encontre ese turno para tu cuenta.")
+            self.send_main_menu(chat_id)
+            return
+
+        can_reprogram, reason = self._can_reprogram_from_telegram(turno)
+        if not can_reprogram:
+            self._send_reprogram_web_fallback(chat_id, turno, reason)
+            return
+
+        if action == "t":
+            self.send_reprogram_dates(chat_id, turno)
+            return
+
+        if action == "d" and len(parts) >= 4:
+            self.send_reprogram_times(chat_id, turno, parts[3])
+            return
+
+        if action == "h" and len(parts) >= 5:
+            self.ask_reprogram_confirmation(chat_id, turno, parts[3], parts[4])
+            return
+
+        if action == "ok" and len(parts) >= 5:
+            self.confirm_reprogram(chat_id, link, turno, parts[3], parts[4])
+            return
+
+        self.send_main_menu(chat_id)
+
+    def send_reprogram_dates(self, chat_id, turno):
+        profesional = turno.empleado.nombre_completo if turno.empleado else "tu profesional asignado"
+        fechas = self._next_available_dates(turno, limit=5)
+        if not fechas:
+            self.send_message(
+                chat_id,
+                (
+                    f"No encontre fechas proximas disponibles con {profesional}.\n"
+                    "Para ver otros profesionales o solicitar reprogramacion flexible, entra a tu panel web."
+                ),
+                reply_markup={
+                    "inline_keyboard": [
+                        [{"text": "Abrir panel web", "url": self._reprogram_web_url(turno)}],
+                        [{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}],
+                    ]
+                },
+            )
+            return
+
+        keyboard_rows = []
+        for fecha in fechas:
+            label = fecha.strftime("%d/%m")
+            keyboard_rows.append(
+                [{"text": label, "callback_data": f"rp:d:{turno.id}:{fecha.isoformat()}"}]
+            )
+        keyboard_rows.append([{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}])
+        self.send_message(
+            chat_id,
+            (
+                f"Vamos a reprogramar tu turno con {profesional}.\n\n"
+                "Te muestro las proximas fechas disponibles:"
+            ),
+            reply_markup={"inline_keyboard": keyboard_rows},
+        )
+
+    def send_reprogram_times(self, chat_id, turno, date_value):
+        fecha = self._parse_date(date_value)
+        if not fecha:
+            self.send_message(chat_id, "Fecha invalida. Volve a intentarlo.")
+            self.send_reprogram_dates(chat_id, turno)
+            return
+
+        horarios = self._available_times_for_turno(turno, fecha)
+        horarios_visibles = self._visible_hourly_times(horarios, limit=5)
+        if not horarios_visibles:
+            self.send_message(chat_id, "No quedan horarios disponibles ese dia. Elegi otra fecha.")
+            self.send_reprogram_dates(chat_id, turno)
+            return
+
+        keyboard_rows = []
+        for hora in horarios_visibles:
+            keyboard_rows.append(
+                [
+                    {
+                        "text": hora,
+                        "callback_data": f"rp:h:{turno.id}:{fecha.isoformat()}:{hora.replace(':', '')}",
+                    }
+                ]
+            )
+        keyboard_rows.append([{"text": "⬅️ Elegir otra fecha", "callback_data": f"rp:t:{turno.id}"}])
+        keyboard_rows.append([{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}])
+
+        self.send_message(
+            chat_id,
+            f"Horarios disponibles para el {fecha.strftime('%d/%m')} con {turno.empleado.nombre_completo}:",
+            reply_markup={"inline_keyboard": keyboard_rows},
+        )
+
+    def ask_reprogram_confirmation(self, chat_id, turno, date_value, time_value):
+        fecha_hora = self._parse_date_time(date_value, time_value)
+        if not fecha_hora:
+            self.send_message(chat_id, "Horario invalido. Volve a intentarlo.")
+            self.send_reprogram_dates(chat_id, turno)
+            return
+
+        fecha_actual = timezone.localtime(turno.fecha_hora).strftime("%d/%m %H:%M")
+        fecha_nueva = timezone.localtime(fecha_hora).strftime("%d/%m %H:%M")
+        text = (
+            "Confirmá la reprogramacion:\n\n"
+            f"Servicio: {turno.servicio.nombre}\n"
+            f"Profesional: {turno.empleado.nombre_completo}\n"
+            f"Fecha anterior: {fecha_actual}\n"
+            f"Nueva fecha: {fecha_nueva}"
+        )
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "✅ Confirmar",
+                        "callback_data": f"rp:ok:{turno.id}:{date_value}:{time_value}",
+                    }
+                ],
+                [{"text": "🔁 Elegir otro horario", "callback_data": f"rp:d:{turno.id}:{date_value}"}],
+                [{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}],
+            ]
+        }
+        self.send_message(chat_id, text, reply_markup=keyboard)
+
+    def confirm_reprogram(self, chat_id, link, turno, date_value, time_value):
+        fecha_hora = self._parse_date_time(date_value, time_value)
+        if not fecha_hora:
+            self.send_message(chat_id, "Horario invalido. Volve a intentarlo.")
+            self.send_reprogram_dates(chat_id, turno)
+            return
+
+        can_reprogram, reason = self._can_reprogram_from_telegram(turno)
+        if not can_reprogram:
+            self._send_reprogram_web_fallback(chat_id, turno, reason)
+            return
+
+        try:
+            resultado = reprogramar_turno(
+                turno=turno,
+                usuario=link.cliente.user,
+                fecha_hora_nueva=fecha_hora,
+                motivo="Reprogramacion solicitada desde Telegram",
+            )
+        except ValueError as exc:
+            self.send_message(chat_id, f"No pude reprogramar el turno: {exc}")
+            self.send_main_menu(chat_id)
+            return
+
+        nueva_fecha = timezone.localtime(resultado.turno.fecha_hora).strftime("%d/%m/%Y %H:%M")
+        self.send_message(
+            chat_id,
+            (
+                "✅ Turno reprogramado correctamente.\n\n"
+                f"Nueva fecha: {nueva_fecha}\n"
+                f"Profesional: {resultado.turno.empleado.nombre_completo}"
+            ),
+        )
+        self.send_post_action_prompt(chat_id)
+
+    def _get_reprogrammable_turno(self, link, turno_id):
+        return (
+            Turno.objects.select_related("servicio", "empleado", "empleado__user", "cliente__user")
+            .filter(id=turno_id, cliente=link.cliente)
+            .first()
+        )
+
+    def _can_reprogram_from_telegram(self, turno):
+        if turno.estado in ["cancelado", "completado", "no_asistio", "pendiente_manual", "oferta_enviada", "expirada"]:
+            return False, "este turno no se puede reprogramar por su estado actual"
+
+        estado_limite = obtener_estado_limite_reprogramacion_cliente_servicio(turno)
+        if not estado_limite["puede_reprogramar"]:
+            return False, estado_limite["motivo"]
+
+        config = ConfiguracionGlobal.get_config()
+        brecha_horas = max(1, int(config.min_horas_cancelacion_credito or 24))
+        if timezone.now() > turno.fecha_hora - timedelta(hours=brecha_horas):
+            return False, "estas fuera del rango permitido y esta operacion requiere gestion desde la web"
+
+        return True, ""
+
+    def _send_reprogram_web_fallback(self, chat_id, turno, reason):
+        self.send_message(
+            chat_id,
+            (
+                "Este turno no puede reprogramarse desde Telegram.\n\n"
+                f"Motivo: {reason}.\n\n"
+                "Para continuar, entra a tu panel web:"
+            ),
+            reply_markup={
+                "inline_keyboard": [
+                    [{"text": "Abrir panel web", "url": self._reprogram_web_url(turno)}],
+                    [{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}],
+                ]
+            },
+        )
+
+    def _reprogram_web_url(self, turno):
+        return f"{self.frontend_url}/dashboard/cliente?reprogramar={turno.id}"
+
+    def _next_available_dates(self, turno, limit=5, days_ahead=30):
+        dates = []
+        today = timezone.localdate()
+        for offset in range(days_ahead + 1):
+            candidate = today + timedelta(days=offset)
+            if self._available_times_for_turno(turno, candidate):
+                dates.append(candidate)
+                if len(dates) >= limit:
+                    break
+        return dates
+
+    def _available_times_for_turno(self, turno, date_value):
+        if not turno.empleado or not turno.servicio:
+            return []
+        return TurnoViewSet()._calcular_horarios_disponibles(
+            turno.empleado,
+            turno.servicio,
+            date_value,
+        )
+
+    def _visible_hourly_times(self, horarios, limit=5):
+        visible = []
+        for hora in horarios:
+            if not visible or self._time_to_minutes(hora) - self._time_to_minutes(visible[-1]) >= 60:
+                visible.append(hora)
+            if len(visible) >= limit:
+                break
+        return visible
+
+    def _parse_date(self, value):
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_date_time(self, date_value, time_value):
+        fecha = self._parse_date(date_value)
+        if not fecha:
+            return None
+        if not re.fullmatch(r"\d{4}", str(time_value or "")):
+            return None
+        try:
+            naive = datetime.combine(
+                fecha,
+                datetime.strptime(time_value, "%H%M").time(),
+            )
+            return timezone.make_aware(naive, timezone.get_current_timezone())
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _time_to_minutes(value):
+        hours, minutes = value.split(":")
+        return int(hours) * 60 + int(minutes)
 
     def ask_cancel_confirmation(self, chat_id, link, turno_id):
         turno = (

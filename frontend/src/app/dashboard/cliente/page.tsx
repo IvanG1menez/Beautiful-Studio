@@ -32,7 +32,7 @@ import {
   Wallet,
   XCircle
 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -163,6 +163,7 @@ const getEstadoBadgeVariant = (estado: string): "default" | "secondary" | "destr
 
 export default function DashboardClientePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isClient, setIsClient] = useState(false);
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [perfilCliente, setPerfilCliente] = useState<Cliente | null>(null);
@@ -189,6 +190,7 @@ export default function DashboardClientePage() {
   const [errorReprogramacion, setErrorReprogramacion] = useState('');
   const [mostrarCambioProfesional, setMostrarCambioProfesional] = useState(false);
   const [profesionalesAlternativos, setProfesionalesAlternativos] = useState<ProfesionalOpcion[]>([]);
+  const [profesionalAlternativoIndex, setProfesionalAlternativoIndex] = useState(0);
   const [profesionalSeleccionadoId, setProfesionalSeleccionadoId] = useState<number | null>(null);
   const [pasoReprogramacion, setPasoReprogramacion] = useState<PasoReprogramacion>('calendar');
   const [mostrarAdvertenciaFueraRango, setMostrarAdvertenciaFueraRango] = useState(false);
@@ -477,15 +479,16 @@ export default function DashboardClientePage() {
     );
 
     setAgendaProfesional(mapa);
-    setAgendaGlobal({});
     setFechasDisponibles(disponibles);
 
     setFechaReprogramacion('');
     setNuevaFechaHora('');
     setPasoReprogramacion('calendar');
+
+    return { mapa, disponibles };
   };
 
-  const cargarAgendaGlobal = async (turno: Turno) => {
+  const cargarAgendaGlobal = async (turno: Turno, aplicarFechas = true) => {
     const mapaGlobal: Record<string, SlotAgrupado[]> = {};
     const mapaFechas: string[] = [];
 
@@ -513,7 +516,9 @@ export default function DashboardClientePage() {
     );
 
     setAgendaGlobal(mapaGlobal);
-    setFechasDisponibles(mapaFechas);
+    if (aplicarFechas) {
+      setFechasDisponibles(mapaFechas);
+    }
 
     return { mapaGlobal, mapaFechas };
   };
@@ -538,7 +543,16 @@ export default function DashboardClientePage() {
         return;
       }
 
-      await cargarAgendaSingle(turno, empleadoId);
+      const [singleResult, globalResult] = await Promise.all([
+        cargarAgendaSingle(turno, empleadoId),
+        cargarAgendaGlobal(turno, false),
+      ]);
+
+      const fechasUnificadas = Array.from(new Set([
+        ...singleResult.disponibles,
+        ...globalResult.mapaFechas,
+      ])).sort();
+      setFechasDisponibles(fechasUnificadas);
     } finally {
       setCargandoAgenda(false);
       setCargandoAlternativas(false);
@@ -555,6 +569,7 @@ export default function DashboardClientePage() {
     setFechasDisponibles([]);
     setMostrarCambioProfesional(false);
     setProfesionalesAlternativos([]);
+    setProfesionalAlternativoIndex(0);
     setMotivoReprogramacion('');
     setErrorReprogramacion('');
     setPasoReprogramacion('calendar');
@@ -632,6 +647,17 @@ export default function DashboardClientePage() {
     if (!profesionalActivoId) return;
   }, [reprogramDialogOpen, turnoParaReprogramar, profesionalActivoId]);
 
+  useEffect(() => {
+    const turnoId = Number(searchParams.get('reprogramar'));
+    if (!turnoId || loadingTurnos || reprogramDialogOpen) return;
+
+    const turno = turnos.find((item) => item.id === turnoId);
+    if (!turno) return;
+
+    abrirDialogoReprogramacion(turno);
+    router.replace('/dashboard/cliente');
+  }, [searchParams, loadingTurnos, reprogramDialogOpen, turnos, router]);
+
   const convertirLocalAISO = (valorLocal: string) => {
     const fechaLocal = new Date(valorLocal);
     return fechaLocal.toISOString();
@@ -698,6 +724,27 @@ export default function DashboardClientePage() {
     { morning: [], afternoon: [] }
   );
 
+  const timeToMinutes = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const slotsVisiblesCadaHora = slotsDelDia.reduce<SlotAgrupado[]>((acc, slot) => {
+    const lastSlot = acc[acc.length - 1];
+    if (!lastSlot || timeToMinutes(slot.time) - timeToMinutes(lastSlot.time) >= 60) {
+      acc.push(slot);
+    }
+    return acc;
+  }, []);
+
+  const slotsVisiblesAgrupados = slotsVisiblesCadaHora.reduce<Record<'morning' | 'afternoon', SlotAgrupado[]>>(
+    (acc, slot) => {
+      acc[getPeriodKey(slot.time)].push(slot);
+      return acc;
+    },
+    { morning: [], afternoon: [] }
+  );
+
   const selectedSlotProfessionals = useMemo(() => {
     if (!fechaReprogramacion || !horarioSeleccionado) return [] as ProfesionalOpcion[];
 
@@ -714,6 +761,26 @@ export default function DashboardClientePage() {
     return profesionalesServicio.filter((prof) => Number(prof.id) === Number(profesionalActivoId || turnoParaReprogramar?.empleado || 0));
   }, [agendaGlobal, fechaReprogramacion, horarioSeleccionado, profesionalesServicio, profesionalActivoId, turnoParaReprogramar?.empleado, viewMode]);
   const profesionalesDisponiblesHorario = selectedSlotProfessionals;
+  const profesionalOriginalTieneHorarios = fechaReprogramacion
+    ? (agendaProfesional[fechaReprogramacion] || []).length > 0
+    : true;
+  const horarioSugerido = slotsVisiblesCadaHora[0]?.time || slotsDelDia[0]?.time || '';
+  const profesionalSeleccionado = profesionalesServicio.find(
+    (prof) => Number(prof.id) === Number(profesionalSeleccionadoId)
+  );
+  const profesionalesCarrusel = viewMode === 'all'
+    ? profesionalesDisponiblesHorario
+    : profesionalesServicio.filter((prof) => Number(prof.id) === Number(turnoParaReprogramar?.empleado || profesionalActivoId || 0));
+  const profesionalCarruselActual = profesionalesCarrusel[profesionalAlternativoIndex] || profesionalesCarrusel[0] || profesionalSeleccionado;
+
+  const resolveProfesionalesSlot = (slot?: SlotAgrupado) => {
+    return (slot?.professionalIds || []).map((id) =>
+      profesionalesServicio.find((prof) => String(prof.id) === String(id)) || {
+        id: Number(id),
+        nombre: `Profesional #${id}`,
+      }
+    );
+  };
 
   const handleDateSelect = (dateISO: string) => {
     setFechaReprogramacion(dateISO);
@@ -721,20 +788,45 @@ export default function DashboardClientePage() {
     setErrorReprogramacion('');
     setPenalidadDialogOpen(false);
 
-    const slots = viewMode === 'all' ? (agendaGlobal[dateISO] || []) : (agendaProfesional[dateISO] || []).map((time) => ({
+    const originalId = String(turnoParaReprogramar?.empleado || profesionalActivoId || '');
+    const slotsOriginal = (agendaProfesional[dateISO] || []).map((time) => ({
       time,
-      professionalIds: [String(profesionalActivoId || turnoParaReprogramar?.empleado || '')],
+      professionalIds: [originalId],
       available: true,
     }));
+    const slotsGlobales = agendaGlobal[dateISO] || [];
+    const usarProfesionalOriginal = slotsOriginal.length > 0;
+    const slots = usarProfesionalOriginal ? slotsOriginal : slotsGlobales;
 
     if (slots.length === 0) {
       setNuevaFechaHora('');
-      setPasoReprogramacion('select-professional');
+      setProfesionalesAlternativos([]);
+      setProfesionalAlternativoIndex(0);
+      setPasoReprogramacion('calendar');
       return;
     }
 
-    setNuevaFechaHora(`${dateISO}T${slots[0].time}`);
-    setPasoReprogramacion('time');
+    const slotSugerido = slots[0];
+    setViewMode(usarProfesionalOriginal ? 'single' : 'all');
+    setNuevaFechaHora(`${dateISO}T${slotSugerido.time}`);
+    setPasoReprogramacion('calendar');
+
+    if (usarProfesionalOriginal) {
+      setProfesionalActivoId(Number(originalId));
+      setProfesionalSeleccionadoId(Number(originalId));
+      setProfesionalesAlternativos([]);
+      setProfesionalAlternativoIndex(0);
+      return;
+    }
+
+    const profesionalesDelSlot = resolveProfesionalesSlot(slotSugerido);
+    setProfesionalesAlternativos(profesionalesDelSlot);
+    setProfesionalAlternativoIndex(0);
+    const primerProfesional = profesionalesDelSlot[0];
+    if (primerProfesional) {
+      setProfesionalActivoId(Number(primerProfesional.id));
+      setProfesionalSeleccionadoId(Number(primerProfesional.id));
+    }
   };
 
   const handleTimeSelect = (slot: SlotAgrupado) => {
@@ -743,34 +835,59 @@ export default function DashboardClientePage() {
     setNuevaFechaHora(`${fechaReprogramacion}T${slot.time}`);
 
     const originalDisponible = slot.professionalIds.includes(originalId);
-    const profesionalesDelSlot = slot.professionalIds.map((id) =>
-      profesionalesServicio.find((prof) => String(prof.id) === String(id)) || {
-        id: Number(id),
-        nombre: `Profesional #${id}`,
-      }
-    );
+    const profesionalesDelSlot = resolveProfesionalesSlot(slot);
 
-    setProfesionalesAlternativos(profesionalesDelSlot.filter((prof) => String(prof.id) !== originalId));
+    setProfesionalesAlternativos(profesionalesDelSlot);
+    setProfesionalAlternativoIndex(0);
 
     if (viewMode === 'single' && originalDisponible) {
-      setPasoReprogramacion('confirmation');
-      return;
-    }
-
-    if (originalDisponible && profesionalesDelSlot.length === 1) {
       setProfesionalSeleccionadoId(Number(originalId));
       setProfesionalActivoId(Number(originalId));
-      setPasoReprogramacion('confirmation');
       return;
     }
 
-    setPasoReprogramacion('select-professional');
+    const profesionalActualDisponible = profesionalesDelSlot.some(
+      (prof) => Number(prof.id) === Number(profesionalSeleccionadoId)
+    );
+    if (profesionalActualDisponible) {
+      return;
+    }
+
+    const primerProfesional = profesionalesDelSlot[0];
+    if (primerProfesional) {
+      setProfesionalSeleccionadoId(Number(primerProfesional.id));
+      setProfesionalActivoId(Number(primerProfesional.id));
+    }
   };
 
   const handleProfessionalSelect = (professional: ProfesionalOpcion) => {
     setProfesionalSeleccionadoId(Number(professional.id));
     setProfesionalActivoId(Number(professional.id));
-    setPasoReprogramacion('confirmation');
+  };
+
+  const activarAlternativasFecha = () => {
+    if (!fechaReprogramacion) return;
+    const slotsGlobales = agendaGlobal[fechaReprogramacion] || [];
+    if (slotsGlobales.length === 0) return;
+
+    const slotActual = slotsGlobales.find((slot) => slot.time === horarioSeleccionado) || slotsGlobales[0];
+    setViewMode('all');
+    setNuevaFechaHora(`${fechaReprogramacion}T${slotActual.time}`);
+    const profesionalesDelSlot = resolveProfesionalesSlot(slotActual);
+    setProfesionalesAlternativos(profesionalesDelSlot);
+    setProfesionalAlternativoIndex(0);
+    if (profesionalesDelSlot[0]) {
+      handleProfessionalSelect(profesionalesDelSlot[0]);
+    }
+  };
+
+  const moverProfesionalAlternativo = (direction: 'prev' | 'next') => {
+    if (profesionalesCarrusel.length === 0) return;
+    const nextIndex = direction === 'next'
+      ? (profesionalAlternativoIndex + 1) % profesionalesCarrusel.length
+      : (profesionalAlternativoIndex - 1 + profesionalesCarrusel.length) % profesionalesCarrusel.length;
+    setProfesionalAlternativoIndex(nextIndex);
+    handleProfessionalSelect(profesionalesCarrusel[nextIndex]);
   };
 
   const toggleViewMode = async (mode: ReprogramacionViewMode) => {
@@ -1473,19 +1590,6 @@ export default function DashboardClientePage() {
                     </div>
                   </DialogHeader>
 
-                  {viewMode === 'single' && (
-                    <div className="px-6 pb-6 sm:px-9">
-                      <Button
-                        type="button"
-                        className="h-14 w-full rounded-lg bg-linear-to-r from-[#9018f5] via-[#bd28d8] to-[#e11690] text-base font-semibold text-white shadow-lg shadow-fuchsia-500/20 hover:opacity-95"
-                        onClick={() => void toggleViewMode('all')}
-                      >
-                        <User className="mr-2 h-5 w-5" />
-                        Ver otros profesionales disponibles
-                      </Button>
-                    </div>
-                  )}
-
                   <div className="flex items-center gap-3 border-t border-slate-100 px-3 py-5 sm:px-4">
                     <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0 rounded-full bg-white shadow-md" onClick={() => scrollDates('left')}>
                       <ChevronLeft className="h-5 w-5" />
@@ -1493,17 +1597,13 @@ export default function DashboardClientePage() {
                     <div ref={dateScrollRef} className="scrollbar-hide flex flex-1 gap-3 overflow-x-auto py-1">
                       {fechasBarraReprogramacion.map((dateValue) => {
                         const fechaISO = dateKeyLocal(dateValue);
-                        const disponible = viewMode === 'all'
-                          ? (agendaGlobal[fechaISO] || []).length > 0
-                          : (agendaProfesional[fechaISO] || []).length > 0;
+                        const disponible = (agendaProfesional[fechaISO] || []).length > 0 || (agendaGlobal[fechaISO] || []).length > 0;
                         const selected = fechaReprogramacion === fechaISO;
                         const weekday = dateValue.toLocaleDateString('es-AR', { weekday: 'short' }).toUpperCase();
                         const day = dateValue.getDate().toString().padStart(2, '0');
                         const month = dateValue.toLocaleDateString('es-AR', { month: 'short' });
                         const isToday = fechaISO === dateKeyLocal(new Date());
-                        const disabledTitle = viewMode === 'all'
-                          ? 'No hay profesionales disponibles este día'
-                          : `${profesionalOriginalNombre} no trabaja o no tiene horarios disponibles este día`;
+                        const disabledTitle = 'No hay profesionales disponibles este día';
 
                         return (
                           <button
@@ -1599,17 +1699,194 @@ export default function DashboardClientePage() {
                 ) : (
                   <div>
                     {pasoReprogramacion === 'calendar' && (
-                      <div className="flex min-h-[365px] items-center justify-center px-6 py-14 text-center">
-                        <div>
-                          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#efe2ff] text-[#a328ff]">
-                            <Sparkles className="h-10 w-10" />
+                      <div className="mx-auto max-w-5xl px-6 py-6">
+                        <div className="grid gap-5 lg:grid-cols-[0.9fr_1.6fr]">
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex items-center gap-2 text-slate-950">
+                              <User className="h-5 w-5 text-purple-600" />
+                              <h3 className="text-lg font-semibold">
+                                {viewMode === 'all' ? 'Profesionales disponibles' : 'Profesional'}
+                              </h3>
+                            </div>
+
+                            {!fechaReprogramacion ? (
+                              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm text-slate-500">
+                                Seleccioná una fecha para ver profesionales y horarios.
+                              </div>
+                            ) : viewMode === 'all' ? (
+                              <div>
+                                {!profesionalOriginalTieneHorarios && (
+                                  <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                                    {profesionalOriginalNombre} no tiene horarios ese día. Te mostramos alternativas disponibles.
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-3">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-10 w-10 rounded-full"
+                                    onClick={() => moverProfesionalAlternativo('prev')}
+                                    disabled={profesionalesCarrusel.length <= 1}
+                                  >
+                                    <ChevronLeft className="h-4 w-4" />
+                                  </Button>
+                                  <div className="min-h-[86px] flex-1 rounded-xl border border-purple-200 bg-purple-50 p-4">
+                                    <p className="font-semibold text-purple-950">{profesionalCarruselActual?.nombre || 'Profesional disponible'}</p>
+                                    <p className="mt-1 text-sm text-purple-700">{turnoParaReprogramar?.servicio_nombre || 'Servicio'}</p>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-10 w-10 rounded-full"
+                                    onClick={() => moverProfesionalAlternativo('next')}
+                                    disabled={profesionalesCarrusel.length <= 1}
+                                  >
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                {profesionalesCarrusel.length > 1 && (
+                                  <p className="mt-3 text-center text-xs text-slate-500">
+                                    {profesionalAlternativoIndex + 1} de {profesionalesCarrusel.length} profesionales disponibles
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="rounded-xl border border-purple-200 bg-purple-50 p-4">
+                                  <p className="font-semibold text-purple-950">{profesionalOriginalNombre}</p>
+                                  <p className="mt-1 text-sm text-purple-700">{turnoParaReprogramar?.servicio_nombre || 'Servicio'}</p>
+                                </div>
+                                {(agendaGlobal[fechaReprogramacion] || []).length > 0 && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="mt-4 h-11 w-full rounded-xl border-slate-200 bg-slate-50 font-semibold text-slate-700 hover:bg-slate-100"
+                                    onClick={activarAlternativasFecha}
+                                  >
+                                    Ver otros profesionales disponibles
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="mt-5 border-t border-slate-200 pt-5">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-11 w-full rounded-xl border-slate-200 bg-slate-100 font-semibold text-slate-700 hover:bg-slate-200"
+                                onClick={() => setPasoReprogramacion('flexible')}
+                              >
+                                Reprogramación flexible
+                              </Button>
+                              <p className="mt-2 text-center text-xs text-slate-500">Si no encontrás un horario que te sirva</p>
+                            </div>
                           </div>
-                          <h3 className="mt-5 text-2xl font-semibold text-slate-950">Selecciona una fecha</h3>
-                          <p className="mt-3 text-base text-slate-700">
-                            {viewMode === 'single'
-                              ? `Mostrando fechas disponibles con ${profesionalOriginalNombre}`
-                              : 'Mostrando todas las fechas con profesionales disponibles'}
-                          </p>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex items-center gap-2 text-slate-950">
+                              <Clock className="h-5 w-5 text-purple-600" />
+                              <h3 className="text-lg font-semibold">Horarios disponibles</h3>
+                            </div>
+
+                            {!fechaReprogramacion ? (
+                              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                                El selector de horarios se habilita después de elegir una fecha.
+                              </div>
+                            ) : slotsDelDia.length === 0 ? (
+                              <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+                                No hay horarios disponibles para esta fecha. Podés elegir otra fecha o solicitar reprogramación flexible.
+                              </div>
+                            ) : (
+                              <div>
+                                {horarioSugerido && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTimeSelect(slotsVisiblesCadaHora[0] || slotsDelDia[0])}
+                                    className={`mb-5 w-full rounded-xl border p-4 text-left transition ${horarioSeleccionado === horarioSugerido
+                                      ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                                      : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-emerald-200'
+                                      }`}
+                                  >
+                                    <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                                      <CheckCircle className="h-4 w-4 text-emerald-600" />
+                                      Horario sugerido
+                                    </div>
+                                    <div className="flex h-12 items-center justify-center rounded-lg bg-emerald-600 text-lg font-bold text-white">
+                                      <Clock className="mr-2 h-5 w-5" />
+                                      {horarioSugerido}
+                                    </div>
+                                    <p className="mt-2 text-center text-xs text-emerald-700">Primer horario disponible</p>
+                                  </button>
+                                )}
+
+                                <div className="space-y-5">
+                                  {(['morning', 'afternoon'] as const).map((period) => {
+                                    const config = getPeriodConfig(period);
+                                    const Icon = config.icon;
+                                    const slots = slotsVisiblesAgrupados[period];
+                                    if (slots.length === 0) return null;
+
+                                    return (
+                                      <div key={period}>
+                                        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                          <Icon className="h-4 w-4 text-purple-600" />
+                                          {config.label}
+                                        </div>
+                                        <div className="flex flex-wrap gap-3">
+                                          {slots.map((slot) => {
+                                            const selected = horarioSeleccionado === slot.time;
+                                            return (
+                                              <button
+                                                key={slot.time}
+                                                type="button"
+                                                onClick={() => handleTimeSelect(slot)}
+                                                className={`min-w-[100px] rounded-lg border px-5 py-3 text-base font-semibold transition ${selected
+                                                  ? 'border-purple-600 bg-purple-600 text-white'
+                                                  : 'border-slate-300 bg-white text-slate-900 hover:border-purple-300 hover:bg-purple-50'
+                                                  }`}
+                                              >
+                                                {slot.time}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                  <p className="mb-3 text-sm font-semibold text-slate-900">Resumen</p>
+                                  <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+                                    <p><span className="font-semibold text-slate-950">Fecha:</span> {fechaSeleccionadaFormateada}</p>
+                                    <p><span className="font-semibold text-slate-950">Horario:</span> {horarioSeleccionado || 'Sin horario'}</p>
+                                    <p><span className="font-semibold text-slate-950">Profesional:</span> {profesionalCarruselActual?.nombre || profesionalActualNombre}</p>
+                                    <p><span className="font-semibold text-slate-950">Servicio:</span> {turnoParaReprogramar?.servicio_nombre || 'Servicio'}</p>
+                                  </div>
+                                </div>
+
+                                {profesionalSeleccionadoId && turnoParaReprogramar && profesionalSeleccionadoId !== turnoParaReprogramar.empleado && (
+                                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                                    Cambiás de {profesionalOriginalNombre} a {profesionalCarruselActual?.nombre || profesionalActualNombre}.
+                                  </div>
+                                )}
+
+                                <div className="mt-6 flex justify-end">
+                                  <Button
+                                    type="button"
+                                    className="h-12 rounded-xl bg-purple-600 px-8 text-base font-semibold text-white hover:bg-purple-700"
+                                    onClick={() => setPasoReprogramacion('confirmation')}
+                                    disabled={!nuevaFechaHora || !profesionalSeleccionadoId}
+                                  >
+                                    Continuar
+                                    <ChevronRight className="ml-2 h-5 w-5" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1798,7 +2075,7 @@ export default function DashboardClientePage() {
                           <Button
                             variant="outline"
                             className="h-14 rounded-2xl border-slate-200 bg-[#f2f3f7] text-lg font-semibold text-slate-800 hover:bg-slate-100"
-                            onClick={() => setPasoReprogramacion('time')}
+                            onClick={() => setPasoReprogramacion('calendar')}
                             disabled={solicitandoFlexible}
                           >
                             Volver a horarios
@@ -1886,7 +2163,7 @@ export default function DashboardClientePage() {
                           <Button
                             variant="outline"
                             className="h-14 rounded-2xl border-slate-200 bg-[#f2f3f7] text-lg font-semibold text-slate-800 hover:bg-slate-100"
-                            onClick={() => setPasoReprogramacion('time')}
+                            onClick={() => setPasoReprogramacion('calendar')}
                             disabled={reprogramando}
                           >
                             Volver al calendario

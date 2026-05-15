@@ -26,9 +26,43 @@ export interface TurnoProfesional {
 export interface PreferenciaStaffResponse {
   status: 'pending';
   preference_id: string;
-  init_point: string;
+  init_point?: string;
   sandbox_init_point?: string;
+  qr_init_point?: string;
+  qr_data?: string;
+  qr_native?: boolean;
+  mp_env?: 'test' | 'sandbox' | 'prod' | string;
+  mp_token_env?: 'test' | 'prod' | string;
+  qr_link_kind?: string;
   public_key: string;
+  qr_public_key?: string;
+}
+
+export interface ConfirmarPagoStaffPayload {
+  preference_id: string;
+  payment_id: string;
+}
+
+export interface ConfirmarPagoStaffResponse {
+  status: 'approved';
+  turno_id: number;
+}
+
+export interface CancelarPagoStaffPayload {
+  preference_id: string;
+}
+
+export interface CancelarPagoStaffResponse {
+  status: 'cancelled';
+}
+
+export interface VerificarPagoStaffResponse {
+  status: 'pending' | 'approved' | 'cancelled' | 'rejected';
+  turno_id?: number;
+  detail?: string;
+  mp_status?: string;
+  mp_status_detail?: string;
+  payment_id?: string | number;
 }
 
 export interface BuscarClientePorDniResponse {
@@ -125,6 +159,42 @@ export const profesionalTurnosApi = {
     try {
       const response = await apiClient.post<PreferenciaStaffResponse>(
         '/mercadopago/preferencia-staff/',
+        payload,
+      );
+      return response.data;
+    } catch (error: unknown) {
+      const apiError = handleApiError(error);
+      throw new Error(apiError.message);
+    }
+  },
+
+  verificarPagoStaff: async (preferenceId: string): Promise<VerificarPagoStaffResponse> => {
+    try {
+      const response = await apiClient.get<VerificarPagoStaffResponse>(
+        `/mercadopago/verificar-pago/${preferenceId}/`,
+      );
+      return response.data;
+    } catch (error: unknown) {
+      throw new Error(handleApiError(error).message);
+    }
+  },
+
+  confirmarPagoStaff: async (payload: ConfirmarPagoStaffPayload): Promise<ConfirmarPagoStaffResponse> => {
+    try {
+      const response = await apiClient.post<ConfirmarPagoStaffResponse>(
+        '/mercadopago/confirmar-pago-staff/',
+        payload,
+      );
+      return response.data;
+    } catch (error: unknown) {
+      throw new Error(handleApiError(error).message);
+    }
+  },
+
+  cancelarPagoStaff: async (payload: CancelarPagoStaffPayload): Promise<CancelarPagoStaffResponse> => {
+    try {
+      const response = await apiClient.post<CancelarPagoStaffResponse>(
+        '/mercadopago/cancelar-pago-staff/',
         payload,
       );
       return response.data;
