@@ -84,23 +84,14 @@ type ServicioReserva = Servicio & {
 
 const HORARIOS_REFERENCIA = [
   '09:00',
-  '09:30',
   '10:00',
-  '10:30',
   '11:00',
-  '11:30',
   '12:00',
-  '12:30',
   '14:00',
-  '14:30',
   '15:00',
-  '15:30',
   '16:00',
-  '16:30',
   '17:00',
-  '17:30',
   '18:00',
-  '18:30',
 ];
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
@@ -202,7 +193,20 @@ export default function ReservarTurnoProfesionalPage() {
   const telefonoIncompleto = clienteRegistrado === false && !clienteTelefono.trim();
   const emailRequeridoQr = metodoPago === 'mercadopago_qr' && clienteRegistrado === false;
   const emailIncompletoQr = emailRequeridoQr && !clienteEmail.trim();
-  const horariosParaMostrar = Array.from(new Set([...HORARIOS_REFERENCIA, ...horariosDisponibles])).sort();
+  const timeToMinutes = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  const horariosDisponiblesCadaHora = horariosDisponibles.reduce<string[]>((acc, horario) => {
+    const last = acc[acc.length - 1];
+    if (!last || timeToMinutes(horario) - timeToMinutes(last) >= 60) {
+      acc.push(horario);
+    }
+    return acc;
+  }, []);
+  const horariosParaMostrar = fechaSeleccionada
+    ? horariosDisponiblesCadaHora
+    : HORARIOS_REFERENCIA;
 
   useEffect(() => {
     const fetchServicios = async () => {

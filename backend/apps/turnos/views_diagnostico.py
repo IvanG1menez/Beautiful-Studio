@@ -220,7 +220,7 @@ def diagnostico_optimizacion_agenda(request):
 
     # PASO 3: Ejecutar proceso_2 (reacomodamiento)
     try:
-        if turno.servicio and turno.servicio.permite_reacomodamiento:
+        if turno.servicio:
             # Evitar doble disparo: al cancelar ya se dispara la signal automática.
             log_pendiente = (
                 LogReasignacion.objects.select_related("turno_ofrecido__cliente")
@@ -281,7 +281,6 @@ def diagnostico_optimizacion_agenda(request):
                         "sin_candidatos": "No se encontraron candidatos para rellenar el hueco",
                         "turno_fuera_de_ventana": "Turno ya pasó o está muy cerca",
                         "email_fallido": "Error al enviar email al candidato",
-                        "servicio_sin_reacomodamiento": "Servicio no permite reacomodamiento",
                     }
                     motivo = status_map.get(
                         resultado_proceso2.get("status"), "Motivo desconocido"
@@ -299,20 +298,6 @@ def diagnostico_optimizacion_agenda(request):
                         "status": resultado_proceso2.get("status"),
                         "motivo": motivo,
                     }
-        else:
-            resultado["logs"].append(
-                {
-                    "paso": 3,
-                    "accion": "Proceso 2 - Optimización de agenda",
-                    "resultado": "no_aplica",
-                    "detalle": "Servicio no permite reacomodamiento",
-                }
-            )
-            resultado["proceso_2"] = {
-                "status": "servicio_sin_reacomodamiento",
-                "motivo": "Este servicio no tiene habilitado el reacomodamiento automático",
-            }
-
     except Exception as e:
         resultado["logs"].append(
             {
@@ -868,3 +853,98 @@ def diagnostico_simular_no_respuesta(request):
         return Response(resultado, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return Response(resultado, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def diagnostico_fidelidad_racha(request):
+    """Completa un turno de prueba para disparar el proceso de rachas."""
+
+    if request.user.role != "propietario":
+        return Response(
+            {"error": "Solo el propietario puede acceder a herramientas de diagnóstico"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    turno_id = request.data.get("turno_id")
+    if not turno_id:
+        return Response(
+            {"error": "Se requiere el campo 'turno_id'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        turno = Turno.objects.select_related("cliente__user", "servicio").get(id=turno_id)
+    except Turno.DoesNotExist:
+        return Response(
+            {"error": f"Turno con ID {turno_id} no encontrado"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if turno.estado == "completado":
+        return Response(
+            {"error": "El turno ya está completado; usá un turno pendiente/confirmado."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    estado_anterior = turno.estado
+    precio_anterior = turno.precio_final
+
+    try:
+        turno._streak_actor_user = request.user
+        turno.estado = "completado"
+        turno.fecha_hora_completado = timezone.now()
+        if turno.precio_final is None and turno.servicio:
+            turno.precio_final = turno.servicio.precio
+        turno.save(update_fields=["estado", "fecha_hora_completado", "precio_final", "updated_at"])
+    except Exception as exc:
+        logger.error("Error disparando diagnóstico de racha para turno=%s: %s", turno_id, exc)
+        return Response(
+            {"error": f"No se pudo completar el turno: {exc}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    from apps.turnos.models import ClienteStreakStats, StreakAuditLog, StreakRewardEvent
+
+    stats = ClienteStreakStats.objects.filter(cliente=turno.cliente).first()
+    reward = (
+        StreakRewardEvent.objects.filter(turno=turno)
+        .order_by("-created_at")
+        .first()
+    )
+    audit_logs = list(
+        StreakAuditLog.objects.filter(cliente=turno.cliente, turno=turno)
+        .order_by("-created_at")
+        .values("event_type", "accion", "detalle", "valor_anterior", "valor_posterior")[:5]
+    )
+
+    turno.refresh_from_db()
+
+    return Response(
+        {
+            "turno_id": turno.id,
+            "cliente": turno.cliente.nombre_completo,
+            "estado_anterior": estado_anterior,
+            "estado_nuevo": turno.estado,
+            "precio_anterior": float(precio_anterior or 0),
+            "precio_final": float(turno.precio_final or 0),
+            "streak": {
+                "streak_count": stats.streak_count if stats else 0,
+                "last_completed_at": stats.last_completed_at.isoformat() if stats and stats.last_completed_at else None,
+                "next_expiration_at": stats.next_expiration_at.isoformat() if stats and stats.next_expiration_at else None,
+            },
+            "reward": (
+                {
+                    "milestone_number": reward.milestone_number,
+                    "status": reward.status,
+                    "bonus_amount": float(reward.bonus_amount or 0),
+                    "applied_discount_amount": float(reward.applied_discount_amount or 0),
+                    "reason": reward.reason,
+                }
+                if reward
+                else None
+            ),
+            "audit_logs": audit_logs,
+        },
+        status=status.HTTP_200_OK,
+    )

@@ -665,7 +665,6 @@ class TurnoViewSet(viewsets.ModelViewSet):
                     "pendiente",
                     "confirmado",
                     "en_proceso",
-                    "pendiente_manual",
                 ],
             )
         )
@@ -851,7 +850,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 Turno.objects.select_related("servicio").filter(
                     empleado=empleado,
                     fecha_hora__date=fecha_obj,
-                    estado__in=["pendiente", "confirmado", "en_proceso", "pendiente_manual"],
+                    estado__in=["pendiente", "confirmado", "en_proceso"],
                 )
             )
 
@@ -1219,6 +1218,13 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 f"Seña: {'perdida por multa aplicada' if fuera_de_termino else 'vigente'}."
             ),
         )
+
+        try:
+            from apps.emails.services import EmailService
+
+            EmailService.enviar_email_solicitud_reprogramacion_flexible_cliente(solicitud)
+        except Exception as exc:
+            logger.warning("No se pudo enviar email de solicitud flexible al cliente: %s", exc)
 
         _registrar_auditoria_turno(
             request,

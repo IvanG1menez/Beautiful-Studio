@@ -121,7 +121,6 @@ class ReacomodamientoTest(TestCase):
             precio=Decimal("5000.00"),
             duracion_minutos=45,
             categoria=cat,
-            permite_reacomodamiento=True,
             valor_descuento_adelanto=Decimal("10.00"),
             tipo_descuento_adelanto="PORCENTAJE",
         )

@@ -72,11 +72,6 @@ class Servicio(models.Model):
         verbose_name="Descuento por reasignación",
         help_text="Descuento fijo a aplicar cuando se ofrece un adelanto de turno",
     )
-    permite_reacomodamiento = models.BooleanField(
-        default=False,
-        verbose_name="Permite reacomodamiento",
-        help_text="Indica si el servicio participa en la lógica de rellenar huecos",
-    )
     TIPO_DESCUENTO_ADELANTO_CHOICES = [
         ("PORCENTAJE", "Porcentaje"),
         ("MONTO_FIJO", "Monto fijo"),

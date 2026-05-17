@@ -48,6 +48,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
     puede_reprogramar = serializers.SerializerMethodField()
     motivo_no_reprogramable = serializers.SerializerMethodField()
     reprogramacion_bloqueada_codigo = serializers.SerializerMethodField()
+    reprogramaciones_mensuales_usadas = serializers.SerializerMethodField()
+    reprogramaciones_mensuales_max = serializers.SerializerMethodField()
+    reprogramaciones_mensuales_restantes = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
@@ -93,6 +96,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "puede_reprogramar",
             "motivo_no_reprogramable",
             "reprogramacion_bloqueada_codigo",
+            "reprogramaciones_mensuales_usadas",
+            "reprogramaciones_mensuales_max",
+            "reprogramaciones_mensuales_restantes",
             "notas_cliente",
             "notas_empleado",
             "reacomodamiento_exitoso",
@@ -109,6 +115,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
             return {
                 "puede_reprogramar": False,
                 "codigo": f"estado_{obj.estado}",
+                "usadas": 0,
+                "limite": 1,
+                "restantes": 0,
                 "motivo": "Este turno no se puede reprogramar por su estado actual.",
             }
 
@@ -120,6 +129,9 @@ class TurnoListSerializer(serializers.ModelSerializer):
             return {
                 "puede_reprogramar": True,
                 "codigo": "disponible",
+                "usadas": 0,
+                "limite": 1,
+                "restantes": 1,
                 "motivo": "",
             }
 
@@ -133,6 +145,15 @@ class TurnoListSerializer(serializers.ModelSerializer):
     def get_reprogramacion_bloqueada_codigo(self, obj):
         estado = self._get_estado_reprogramacion(obj)
         return None if estado["puede_reprogramar"] else estado["codigo"]
+
+    def get_reprogramaciones_mensuales_usadas(self, obj):
+        return self._get_estado_reprogramacion(obj).get("usadas", 0)
+
+    def get_reprogramaciones_mensuales_max(self, obj):
+        return self._get_estado_reprogramacion(obj).get("limite", 1)
+
+    def get_reprogramaciones_mensuales_restantes(self, obj):
+        return self._get_estado_reprogramacion(obj).get("restantes", 0)
 
     def get_reacomodamiento_exitoso(self, obj):
         from .models import LogReasignacion

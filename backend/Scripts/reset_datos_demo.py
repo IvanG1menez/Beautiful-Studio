@@ -242,7 +242,6 @@ def crear_usuarios_base():
         "descripcion": "Servicio integral de color, lavado y brushing.",
         "precio": Decimal("1000.00"),
         "descuento_reasignacion": Decimal("0.00"),
-        "permite_reacomodamiento": True,
         "tipo_descuento_adelanto": "PORCENTAJE",
         "valor_descuento_adelanto": Decimal("90.00"),
         "tiempo_espera_respuesta": 20,

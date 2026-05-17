@@ -13,6 +13,7 @@ app_name = "core"
 
 urlpatterns = [
     # Rutas de autenticación
+    path("auth/login/google-oauth2/", views.google_oauth_login, name="google-oauth-login"),
     path("register/", views.register, name="register"),
     path("login/", views.login, name="login"),
     path("logout/", views.logout, name="logout"),

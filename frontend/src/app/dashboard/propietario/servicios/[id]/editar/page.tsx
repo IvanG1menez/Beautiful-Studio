@@ -22,7 +22,6 @@ interface Servicio {
   duracion_minutos: number;
   descripcion: string;
   is_active: boolean;
-  permite_reacomodamiento: boolean;
   tipo_descuento_adelanto: 'PORCENTAJE' | 'MONTO_FIJO';
   valor_descuento_adelanto: string;
   monto_sena_fijo?: string | number;
@@ -106,7 +105,6 @@ export default function EditarServicioPage() {
             duracion_minutos: servicio.duracion_minutos.toString(),
             descripcion: servicio.descripcion || '',
             is_active: servicio.is_active,
-            permite_reacomodamiento: servicio.permite_reacomodamiento ?? false,
             tipo_descuento_adelanto: 'MONTO_FIJO',
             valor_descuento_adelanto: descuentoAdelantoMonto.toString(),
             bono_reacomodamiento_senia: (servicio.bono_reacomodamiento_senia ?? 1000).toString(),
@@ -174,7 +172,6 @@ export default function EditarServicioPage() {
         duracion_minutos: duracion,
         descripcion: values.descripcion,
         is_active: values.is_active,
-        permite_reacomodamiento: values.permite_reacomodamiento,
         tipo_descuento_adelanto: values.tipo_descuento_adelanto,
         valor_descuento_adelanto: descuentoValor,
         monto_sena_fijo: montoSenaFijo,

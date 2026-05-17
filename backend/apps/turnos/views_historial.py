@@ -413,7 +413,6 @@ def detalle_historial(request, modelo, history_id):
                     if record.descuento_reasignacion
                     else None
                 ),
-                "permite_reacomodamiento": record.permite_reacomodamiento,
                 "is_active": record.is_active,
             }
         elif modelo == "cliente":

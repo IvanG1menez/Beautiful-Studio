@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { obtenerConfigNotificaciones } from '@/services/notificacionesService';
@@ -23,6 +24,7 @@ interface ConfiguracionGlobal {
   dias_recordatorio_antes_turno: number;
   dias_vencimiento_credito: number;
   horas_vencimiento_solicitud_reprogramacion: number;
+  max_reprogramaciones_mensuales: number;
 }
 
 export default function ConfiguracionGlobalPage() {
@@ -67,6 +69,7 @@ export default function ConfiguracionGlobalPage() {
             1,
             Number(data.horas_vencimiento_solicitud_reprogramacion ?? 48)
           ),
+          max_reprogramaciones_mensuales: Math.min(5, Math.max(1, Number(data.max_reprogramaciones_mensuales ?? 1))),
         });
       } catch (err) {
         console.error('Error al cargar configuración global:', err);
@@ -126,7 +129,7 @@ export default function ConfiguracionGlobalPage() {
     const loadSSO = async () => {
       try {
         const baseUrl = '/api';
-        const response = await fetch(`${baseUrl}/configuracion/sso/resumen/`, {
+        const response = await fetch(`${baseUrl}/configuracion/sso/`, {
           method: 'GET',
           headers: getAuthHeaders(),
         });
@@ -188,6 +191,17 @@ export default function ConfiguracionGlobalPage() {
       toast.error('El vencimiento de solicitudes de reprogramación debe ser de al menos 1 hora');
       return;
     }
+
+    if ((config.max_reprogramaciones_mensuales ?? 1) < 1 || (config.max_reprogramaciones_mensuales ?? 1) > 5) {
+      setError('El número de reprogramaciones mensuales debe estar entre 1 y 5.');
+      toast.error('El número de reprogramaciones mensuales debe estar entre 1 y 5');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Vas a modificar el número de reprogramaciones mensuales. Este cambio aplica a todos los servicios cargados. ¿Querés continuar?'
+    );
+    if (!confirmed) return;
 
     try {
       setIsSaving(true);
@@ -394,6 +408,30 @@ export default function ConfiguracionGlobalPage() {
           <p className="text-sm text-muted-foreground">
             Valor actual recomendado: 48 horas. Si una solicitud vence, seguirá pendiente pero quedará marcada para revisión del propietario.
           </p>
+
+          <div className="mt-6 rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-2">
+            <Label htmlFor="max_reprogramaciones_mensuales">
+              Numero de reprogramaciones mensuales
+            </Label>
+            <Select
+              value={String(config.max_reprogramaciones_mensuales ?? 1)}
+              onValueChange={(value) => handleNumberChange('max_reprogramaciones_mensuales', value)}
+            >
+              <SelectTrigger id="max_reprogramaciones_mensuales">
+                <SelectValue placeholder="Seleccioná un número" />
+              </SelectTrigger>
+              <SelectContent>
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              *Aclaración* Este cambio aplica a todos los servicios cargados.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

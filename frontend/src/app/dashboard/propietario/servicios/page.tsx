@@ -39,7 +39,6 @@ interface Servicio {
   categoria_nombre: string;
   precio: string;
   descuento_reasignacion?: string;
-  permite_reacomodamiento?: boolean;
   tipo_descuento_adelanto?: 'PORCENTAJE' | 'MONTO_FIJO';
   valor_descuento_adelanto?: string;
   tiempo_espera_respuesta?: number;
@@ -822,12 +821,6 @@ export default function ServiciosAdminPage() {
                                   ? `$${montoSena.toFixed(2)} (${pct.toFixed ? pct.toFixed(2) : pct}%)`
                                   : `${pct}%`;
                               })()}
-                            </div>
-                          )}
-                          {servicio.permite_reacomodamiento !== undefined && (
-                            <div>
-                              <span className="font-medium">Reacomodamiento:</span>{' '}
-                              {servicio.permite_reacomodamiento ? 'Sí' : 'No'}
                             </div>
                           )}
                         </div>

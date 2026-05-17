@@ -2,7 +2,7 @@ from typing import Any
 import json
 from django.db import models
 from django.contrib.auth import get_user_model
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 
 
 # Obtener el modelo de usuario personalizado
@@ -235,6 +235,13 @@ class ConfiguracionGlobal(models.Model):
         help_text="Horas disponibles para que el profesional atienda una solicitud flexible de reprogramación",
     )
 
+    max_reprogramaciones_mensuales = models.IntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="Numero de reprogramaciones mensuales",
+        help_text="Cantidad maxima de reprogramaciones mensuales por cliente y servicio",
+    )
+
     # Parámetros de Reincorporación
     margen_fidelizacion_dias = models.IntegerField(
         default=60,
@@ -339,6 +346,7 @@ class ConfiguracionGlobal(models.Model):
                 "min_horas_cancelacion_credito": 24,
                 "dias_vencimiento_credito": 90,
                 "horas_vencimiento_solicitud_reprogramacion": 48,
+                "max_reprogramaciones_mensuales": 1,
                 "margen_fidelizacion_dias": 60,
                 "descuento_fidelizacion_pct": 15.00,
                 "streak_expiration_days": 180,

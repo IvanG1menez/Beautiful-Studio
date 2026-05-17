@@ -91,11 +91,6 @@ def run():
             "No existe el servicio demo. Ejecuta primero Scripts/reset_datos_demo.py"
         )
 
-    # Forzar flags clave para el test de reacomodamiento
-    if not servicio.permite_reacomodamiento:
-        servicio.permite_reacomodamiento = True
-        servicio.save(update_fields=["permite_reacomodamiento"])
-
     cliente1 = _get_cliente_por_email("cliente1@beautifulstudio.com", User)
     cliente2 = _get_cliente_por_email("cliente2@beautifulstudio.com", User)
     cliente3 = _get_cliente_por_email("cliente3@beautifulstudio.com", User)

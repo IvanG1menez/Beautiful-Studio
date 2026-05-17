@@ -86,6 +86,8 @@ const HORARIOS_MANUALES = [
   '16:30',
 ];
 
+type FechaAsignacionDisponible = { date: Date; iso: string };
+
 export default function AgendaEmpleadoPage() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
@@ -137,9 +139,14 @@ export default function AgendaEmpleadoPage() {
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [fechaAsignada, setFechaAsignada] = useState('');
   const [horarioAsignado, setHorarioAsignado] = useState('');
+  const [fechasAsignacionDisponibles, setFechasAsignacionDisponibles] = useState<FechaAsignacionDisponible[]>([]);
+  const [horariosAsignacionDisponibles, setHorariosAsignacionDisponibles] = useState<string[]>([]);
+  const [loadingAsignacionDisponibilidad, setLoadingAsignacionDisponibilidad] = useState(false);
   const [observacionesAsignacion, setObservacionesAsignacion] = useState('');
   const [procesandoSolicitud, setProcesandoSolicitud] = useState(false);
   const [sobreturnoConfirmado, setSobreturnoConfirmado] = useState(false);
+  const [asignacionExitosaOpen, setAsignacionExitosaOpen] = useState(false);
+  const [asignacionExitosaMensaje, setAsignacionExitosaMensaje] = useState('');
 
   useEffect(() => {
     const fechaParam = searchParams.get('fecha');
@@ -390,14 +397,89 @@ export default function AgendaEmpleadoPage() {
   };
 
   const openAsignarDialog = (solicitud: SolicitudReprogramacionFlexible) => {
-    const fechaInicial = solicitud.preferencia_fecha || getCurrentDateISO();
-    const horarioInicial = solicitud.preferencia_horario || HORARIOS_MANUALES[0];
     setSolicitudSeleccionada(solicitud);
-    setFechaAsignada(fechaInicial);
-    setHorarioAsignado(horarioInicial);
+    setFechaAsignada('');
+    setHorarioAsignado('');
+    setFechasAsignacionDisponibles([]);
+    setHorariosAsignacionDisponibles([]);
     setObservacionesAsignacion('');
     setSobreturnoConfirmado(false);
     setAssignDialogOpen(true);
+    void loadDisponibilidadAsignacion(solicitud);
+  };
+
+  const timeToMinutes = (time: string) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const horariosCadaHora = (horarios: string[]) => horarios.reduce<string[]>((acc, horario) => {
+    const last = acc[acc.length - 1];
+    if (!last || timeToMinutes(horario) - timeToMinutes(last) >= 60) {
+      acc.push(horario);
+    }
+    return acc;
+  }, []);
+
+  const getSolicitudServicioId = (solicitud: SolicitudReprogramacionFlexible) => {
+    const servicio = solicitud.turno?.servicio as unknown;
+    if (typeof servicio === 'number') return servicio;
+    if (servicio && typeof servicio === 'object' && 'id' in servicio) {
+      return Number((servicio as { id: number }).id);
+    }
+    return null;
+  };
+
+  const loadHorariosAsignacion = async (solicitud: SolicitudReprogramacionFlexible, fechaISO: string) => {
+    const servicioId = getSolicitudServicioId(solicitud);
+    if (!empleadoId || !servicioId) return [] as string[];
+    const response = await authenticatedFetch(
+      `/turnos/disponibilidad/?profesional_id=${empleadoId}&servicio=${servicioId}&fecha=${fechaISO}`
+    );
+    const data = response.ok ? await response.json() : null;
+    return horariosCadaHora(Array.isArray(data?.horarios) ? data.horarios : []);
+  };
+
+  const loadDisponibilidadAsignacion = async (solicitud: SolicitudReprogramacionFlexible) => {
+    try {
+      setLoadingAsignacionDisponibilidad(true);
+      const disponibles: FechaAsignacionDisponible[] = [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let index = 0; index < 14; index += 1) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + index);
+        const iso = toISODate(date);
+        const horarios = await loadHorariosAsignacion(solicitud, iso);
+        if (horarios.length > 0) {
+          disponibles.push({ date, iso });
+        }
+      }
+
+      setFechasAsignacionDisponibles(disponibles);
+      const primeraFecha = disponibles[0]?.iso || '';
+      setFechaAsignada(primeraFecha);
+      if (primeraFecha) {
+        const horarios = await loadHorariosAsignacion(solicitud, primeraFecha);
+        setHorariosAsignacionDisponibles(horarios);
+        setHorarioAsignado(horarios[0] || '');
+      }
+    } catch (err) {
+      console.error('Error cargando disponibilidad de asignacion:', err);
+      setErrorSolicitudes('No se pudo cargar la disponibilidad del profesional.');
+    } finally {
+      setLoadingAsignacionDisponibilidad(false);
+    }
+  };
+
+  const handleFechaAsignadaChange = async (iso: string) => {
+    if (!solicitudSeleccionada) return;
+    setFechaAsignada(iso);
+    setHorarioAsignado('');
+    const horarios = await loadHorariosAsignacion(solicitudSeleccionada, iso);
+    setHorariosAsignacionDisponibles(horarios);
+    setHorarioAsignado(horarios[0] || '');
   };
 
   const handleAsignarSolicitud = async (permitirSobreturno = false) => {
@@ -418,11 +500,12 @@ export default function AgendaEmpleadoPage() {
         permitir_sobreturno: permitirSobreturno,
       });
 
-      setAssignDialogOpen(false);
-      setSolicitudSeleccionada(null);
-      setSobreturnoConfirmado(false);
       await loadSolicitudesFlexibles();
       await loadTurnos(selectedDate);
+      setAsignacionExitosaMensaje(
+        `Reasignaste el turno para ${solicitudSeleccionada.cliente_nombre} para el ${formatShortDate(fechaAsignada)} a las ${horarioAsignado} hs.`
+      );
+      setAsignacionExitosaOpen(true);
     } catch (err: any) {
       console.error('Error asignando solicitud:', err);
       const message = err.message || 'No se pudo asignar el turno.';
@@ -2249,9 +2332,19 @@ export default function AgendaEmpleadoPage() {
 
           <div className="space-y-6">
             <div>
-              <p className="text-sm font-semibold text-slate-900 mb-3">Selecciona fecha (próximos 14 días)</p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {fechasDisponibles.map(({ date, iso }) => {
+              <p className="text-sm font-semibold text-slate-900 mb-3">Selecciona fecha (próximos 14 días con disponibilidad)</p>
+              {loadingAsignacionDisponibilidad ? (
+                <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Buscando días disponibles...
+                </div>
+              ) : fechasAsignacionDisponibles.length === 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  No hay días disponibles para este profesional en los próximos 14 días.
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {fechasAsignacionDisponibles.map(({ date, iso }) => {
                   const selected = fechaAsignada === iso;
                   const weekday = date.toLocaleDateString('es-AR', { weekday: 'short' }).toUpperCase();
                   const day = date.getDate().toString().padStart(2, '0');
@@ -2261,7 +2354,7 @@ export default function AgendaEmpleadoPage() {
                     <button
                       key={iso}
                       type="button"
-                      onClick={() => setFechaAsignada(iso)}
+                      onClick={() => void handleFechaAsignadaChange(iso)}
                       className={`rounded-2xl border px-3 py-2 text-center transition ${selected
                         ? 'border-blue-600 bg-blue-600 text-white'
                         : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300'
@@ -2274,12 +2367,13 @@ export default function AgendaEmpleadoPage() {
                   );
                 })}
               </div>
+              )}
             </div>
 
             <div>
-              <p className="text-sm font-semibold text-slate-900 mb-3">Selecciona horario (18 opciones)</p>
+              <p className="text-sm font-semibold text-slate-900 mb-3">Selecciona horario ({horariosAsignacionDisponibles.length} opciones disponibles)</p>
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                {HORARIOS_MANUALES.map((hora) => {
+                {horariosAsignacionDisponibles.map((hora) => {
                   const selected = horarioAsignado === hora;
                   return (
                     <button
@@ -2296,6 +2390,9 @@ export default function AgendaEmpleadoPage() {
                   );
                 })}
               </div>
+              {!loadingAsignacionDisponibilidad && fechaAsignada && horariosAsignacionDisponibles.length === 0 && (
+                <p className="mt-2 text-xs text-amber-700">No hay horarios disponibles para esta fecha.</p>
+              )}
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -2343,7 +2440,7 @@ export default function AgendaEmpleadoPage() {
             </Button>
             <Button
               onClick={() => handleAsignarSolicitud(false)}
-              disabled={procesandoSolicitud || !fechaAsignada || !horarioAsignado}
+              disabled={procesandoSolicitud || loadingAsignacionDisponibilidad || !fechaAsignada || !horarioAsignado}
             >
               {procesandoSolicitud ? (
                 <>
@@ -2357,6 +2454,27 @@ export default function AgendaEmpleadoPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={asignacionExitosaOpen} onOpenChange={setAsignacionExitosaOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Turno reasignado</AlertDialogTitle>
+            <AlertDialogDescription>{asignacionExitosaMensaje}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setAsignacionExitosaOpen(false);
+                setAssignDialogOpen(false);
+                setSolicitudSeleccionada(null);
+                setSobreturnoConfirmado(false);
+              }}
+            >
+              Aceptar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );

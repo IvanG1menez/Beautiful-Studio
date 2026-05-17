@@ -62,6 +62,9 @@ interface Turno {
   puede_reprogramar?: boolean;
   motivo_no_reprogramable?: string;
   reprogramacion_bloqueada_codigo?: string | null;
+  reprogramaciones_mensuales_usadas?: number;
+  reprogramaciones_mensuales_max?: number;
+  reprogramaciones_mensuales_restantes?: number;
   notas_cliente?: string;
   notas_empleado?: string;
   created_at: string;
@@ -207,6 +210,8 @@ export default function DashboardClientePage() {
     sala?: string;
     seniaPendienteLocal?: boolean;
   } | null>(null);
+  const [mensajeResultadoReprogramacion, setMensajeResultadoReprogramacion] = useState('');
+  const [resultadoReprogramacionDialogOpen, setResultadoReprogramacionDialogOpen] = useState(false);
   const [solicitudFlexibleCreada, setSolicitudFlexibleCreada] = useState(false);
   const [solicitudFlexibleMensaje, setSolicitudFlexibleMensaje] = useState('');
   const [solicitandoFlexible, setSolicitandoFlexible] = useState(false);
@@ -415,6 +420,13 @@ export default function DashboardClientePage() {
     if (turno.motivo_no_reprogramable) return turno.motivo_no_reprogramable;
     if (turno.estado === 'pendiente_manual') return 'Ya tenés una solicitud de reprogramación en revisión.';
     return 'Este turno no se puede reprogramar.';
+  };
+
+  const getReprogramacionCounter = (turno: Turno) => {
+    const usadas = Number(turno.reprogramaciones_mensuales_usadas ?? 0);
+    const max = Number(turno.reprogramaciones_mensuales_max ?? 1);
+    const restantes = Math.max(0, Number(turno.reprogramaciones_mensuales_restantes ?? max - usadas));
+    return `${restantes}/${max} disponibles`;
   };
 
   const getPeriodConfig = (period: 'morning' | 'afternoon') => {
@@ -945,6 +957,8 @@ export default function DashboardClientePage() {
           response.penalidad_aplicada ||
           isPenaltyApplied,
       });
+      setMensajeResultadoReprogramacion('Tu turno fue reprogramado correctamente. Revisá el nuevo detalle en tus turnos próximos.');
+      setResultadoReprogramacionDialogOpen(true);
       setPasoReprogramacion('result');
 
       if (response.penalidad_aplicada || isPenaltyApplied) {
@@ -1034,6 +1048,8 @@ export default function DashboardClientePage() {
             setReprogramDialogOpen(false);
             setPreferenceReprogramacionId('');
             await loadTurnosData();
+            setMensajeResultadoReprogramacion('Pago aprobado y turno reprogramado correctamente. Revisá el nuevo detalle en tus turnos próximos.');
+            setResultadoReprogramacionDialogOpen(true);
             toast.success('Pago aprobado y turno reprogramado correctamente.');
             return true;
           }
@@ -1100,20 +1116,25 @@ export default function DashboardClientePage() {
   const solicitarReprogramacionFlexible = async () => {
     if (!turnoParaReprogramar) return;
 
+    const aceptaPerderTurno = window.confirm(
+      'Si aceptás la reprogramación flexible, el turno que tenías asignado se libera como un hueco vacío, como si lo hubieras cancelado. La ventaja es que podés esperar confirmación del profesional que querés para un nuevo horario. ¿Querés continuar?'
+    );
+    if (!aceptaPerderTurno) return;
+
     try {
       setSolicitandoFlexible(true);
       setErrorReprogramacion('');
 
       const response = await turnosService.solicitarReprogramacionFlexible(turnoParaReprogramar.id, {
         motivo: motivoReprogramacion?.trim() || undefined,
-        preferencia_fecha: fechaReprogramacion || undefined,
-        preferencia_horario: nuevaFechaHora ? nuevaFechaHora.slice(11, 16) : undefined,
       });
 
       setSolicitudFlexibleCreada(true);
       setSolicitudFlexibleMensaje(
         `${response.message}. Tu solicitud quedó en revisión. El profesional asignará manualmente un nuevo horario disponible y te avisaremos cuando quede confirmado.`
       );
+      setMensajeResultadoReprogramacion('Tu solicitud flexible quedó en espera. El turno próximo queda pausado y el profesional asignará manualmente un nuevo horario disponible.');
+      setResultadoReprogramacionDialogOpen(true);
       toast.success(response.message);
       await loadTurnosData();
     } catch (error: any) {
@@ -1403,7 +1424,12 @@ export default function DashboardClientePage() {
                       Reprogramación no disponible
                     </span>
                   ) : (
-                    'Reprogramar turno'
+                    <span className="inline-flex items-center gap-2">
+                      Reprogramar turno
+                      <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-semibold">
+                        {getReprogramacionCounter(proximoCita)}
+                      </span>
+                    </span>
                   )}
                 </Button>
               </div>
@@ -1485,7 +1511,12 @@ export default function DashboardClientePage() {
                             No disponible
                           </span>
                         ) : (
-                          'Reprogramar'
+                          <span className="inline-flex items-center gap-2">
+                            Reprogramar
+                            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700">
+                              {getReprogramacionCounter(turno)}
+                            </span>
+                          </span>
                         )}
                       </Button>
                       {!puedeReprogramarTurno(turno) && (
@@ -2046,6 +2077,7 @@ export default function DashboardClientePage() {
                         <div className="mt-8 rounded-3xl bg-[#fbf7ff] p-5 text-left text-sm text-slate-700">
                           <p className="font-semibold text-slate-900">Cómo funciona</p>
                           <ul className="mt-3 space-y-2">
+                            <li>• Se cancela el horario próximo que querías reprogramar y queda en espera de asignación.</li>
                             <li>• El profesional revisará tu solicitud y asignará un nuevo horario disponible.</li>
                             <li>• No se solicita seña en este paso.</li>
                             <li>• Te notificaremos cuando el nuevo turno quede asignado.</li>
@@ -2233,6 +2265,23 @@ export default function DashboardClientePage() {
                 {creandoPagoReprogramacion ? 'Preparando pago...' : esperandoPagoReprogramacion ? 'Esperando pago...' : 'Abonar servicio completo'}
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={resultadoReprogramacionDialogOpen} onOpenChange={setResultadoReprogramacionDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reprogramación actualizada</DialogTitle>
+              <DialogDescription>
+                {mensajeResultadoReprogramacion}
+              </DialogDescription>
+            </DialogHeader>
+            <Button
+              className="mt-2 h-11 w-full rounded-xl bg-purple-600 text-white hover:bg-purple-700"
+              onClick={() => setResultadoReprogramacionDialogOpen(false)}
+            >
+              Entendido
+            </Button>
           </DialogContent>
         </Dialog>
 

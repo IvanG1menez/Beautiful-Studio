@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { ChevronDown, ChevronRight, Loader2, Save } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -26,7 +25,6 @@ export interface ServicioFormValues {
   duracion_minutos: string;
   descripcion: string;
   is_active: boolean;
-  permite_reacomodamiento: boolean;
   tipo_descuento_adelanto: 'PORCENTAJE' | 'MONTO_FIJO';
   valor_descuento_adelanto: string;
   bono_reacomodamiento_senia: string;
@@ -152,26 +150,24 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
         ? 24
         : parseInt(formData.horas_minimas_credito_cancelacion, 10);
 
-      if (formData.permite_reacomodamiento) {
-        if (isNaN(descuentoValor) || descuentoValor < 0) {
-          showNotification(
-            'Descuento inválido',
-            'El descuento debe ser un número igual o mayor a 0',
-            'error',
-          );
-          setLoading(false);
-          return;
-        }
+      if (isNaN(descuentoValor) || descuentoValor < 0) {
+        showNotification(
+          'Descuento inválido',
+          'El descuento debe ser un número igual o mayor a 0',
+          'error',
+        );
+        setLoading(false);
+        return;
+      }
 
-        if (isNaN(tiempoEspera) || tiempoEspera <= 0) {
-          showNotification(
-            'Tiempo de espera inválido',
-            'El tiempo de espera debe ser un número mayor a 0',
-            'error',
-          );
-          setLoading(false);
-          return;
-        }
+      if (isNaN(tiempoEspera) || tiempoEspera <= 0) {
+        showNotification(
+          'Tiempo de espera inválido',
+          'El tiempo de espera debe ser un número mayor a 0',
+          'error',
+        );
+        setLoading(false);
+        return;
       }
 
       if (isNaN(horasMinimasCredito) || horasMinimasCredito < 24) {
@@ -212,20 +208,6 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
         );
         setLoading(false);
         return;
-      }
-
-      let porcentajeSena = 0;
-      if (precio > 0 && montoSena > 0) {
-        porcentajeSena = (montoSena / precio) * 100;
-        if (porcentajeSena > 100) {
-          showNotification(
-            'Monto de seña inválido',
-            'El monto de seña no puede ser mayor que el precio del servicio',
-            'error',
-          );
-          setLoading(false);
-          return;
-        }
       }
 
       const payload: ServicioFormValues = {
@@ -545,7 +527,7 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
                 <div>
                   <p className="text-sm font-medium">Reacomodamiento de turnos</p>
                   <p className="text-xs text-muted-foreground">
-                    Configurá el descuento por adelanto y el tiempo de espera de respuesta
+                    Todos los servicios participan automáticamente; configurá bonos y espera de respuesta
                   </p>
                 </div>
                 {showReacomodamiento ? (
@@ -556,108 +538,90 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
               </button>
               {showReacomodamiento && (
                 <div className="space-y-4 px-4 py-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <Label htmlFor="permite_reacomodamiento" className="text-base font-medium">
-                        Permitir reacomodamiento de turnos
-                      </Label>
-                      <p className="text-sm text-muted-foreground">
-                        Habilita la lógica de rellenar huecos para este servicio
-                      </p>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="bono_reacomodamiento_senia">Bono para cliente con seña ($)</Label>
+                        <Input
+                          id="bono_reacomodamiento_senia"
+                          type="text"
+                          inputMode="numeric"
+                          value={formatWithThousands(formData.bono_reacomodamiento_senia)}
+                          onChange={e => handleCurrencyChange('bono_reacomodamiento_senia', e.target.value)}
+                          placeholder="1000"
+                        />
+                        <p className="text-sm text-muted-foreground">
+                          Se aplica cuando el cliente ofertado originalmente pagó seña.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="bono_reacomodamiento_pago_completo">Bono para cliente con pago completo ($)</Label>
+                        <Input
+                          id="bono_reacomodamiento_pago_completo"
+                          type="text"
+                          inputMode="numeric"
+                          value={formatWithThousands(formData.bono_reacomodamiento_pago_completo)}
+                          onChange={e => handleCurrencyChange('bono_reacomodamiento_pago_completo', e.target.value)}
+                          placeholder="2000"
+                        />
+                        <p className="text-sm text-muted-foreground">
+                          Se aplica cuando el cliente ofertado pagó el servicio completo.
+                        </p>
+                      </div>
                     </div>
-                    <Switch
-                      id="permite_reacomodamiento"
-                      checked={formData.permite_reacomodamiento}
-                      onCheckedChange={checked => handleInputChange('permite_reacomodamiento', checked)}
-                    />
-                  </div>
 
-                  {formData.permite_reacomodamiento && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="bono_reacomodamiento_senia">Bono para cliente con seña ($)</Label>
-                          <Input
-                            id="bono_reacomodamiento_senia"
-                            type="text"
-                            inputMode="numeric"
-                            value={formatWithThousands(formData.bono_reacomodamiento_senia)}
-                            onChange={e => handleCurrencyChange('bono_reacomodamiento_senia', e.target.value)}
-                            placeholder="1000"
-                          />
-                          <p className="text-sm text-muted-foreground">
-                            Se aplica cuando el cliente ofertado originalmente pagó seña.
-                          </p>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="bono_reacomodamiento_pago_completo">Bono para cliente con pago completo ($)</Label>
-                          <Input
-                            id="bono_reacomodamiento_pago_completo"
-                            type="text"
-                            inputMode="numeric"
-                            value={formatWithThousands(formData.bono_reacomodamiento_pago_completo)}
-                            onChange={e => handleCurrencyChange('bono_reacomodamiento_pago_completo', e.target.value)}
-                            placeholder="2000"
-                          />
-                          <p className="text-sm text-muted-foreground">
-                            Se aplica cuando el cliente ofertado pagó el servicio completo.
-                          </p>
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="tiempo_espera_respuesta">Minutos de espera de respuesta</Label>
+                        <Input
+                          id="tiempo_espera_respuesta"
+                          type="number"
+                          min="1"
+                          value={formData.tiempo_espera_respuesta}
+                          onChange={e => handleInputChange('tiempo_espera_respuesta', e.target.value)}
+                          placeholder="15"
+                        />
+                        <p className="text-sm text-muted-foreground">
+                          Tiempo antes de pasar la propuesta al siguiente cliente
+                        </p>
                       </div>
+                    </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="tiempo_espera_respuesta">Minutos de espera de respuesta</Label>
-                          <Input
-                            id="tiempo_espera_respuesta"
-                            type="number"
-                            min="1"
-                            value={formData.tiempo_espera_respuesta}
-                            onChange={e => handleInputChange('tiempo_espera_respuesta', e.target.value)}
-                            placeholder="15"
-                          />
-                          <p className="text-sm text-muted-foreground">
-                            Tiempo antes de pasar la propuesta al siguiente cliente
-                          </p>
-                        </div>
-                      </div>
+                    <div className="mt-2 rounded-md border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-sm text-purple-900">
+                      {(() => {
+                        const precio = parseFloat(formData.precio || '0') || 0;
+                        const bonoSenia = parseFloat(formData.bono_reacomodamiento_senia || '0') || 0;
+                        const bonoCompleto = parseFloat(formData.bono_reacomodamiento_pago_completo || '0') || 0;
 
-                      <div className="mt-2 rounded-md border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-sm text-purple-900">
-                        {(() => {
-                          const precio = parseFloat(formData.precio || '0') || 0;
-                          const bonoSenia = parseFloat(formData.bono_reacomodamiento_senia || '0') || 0;
-                          const bonoCompleto = parseFloat(formData.bono_reacomodamiento_pago_completo || '0') || 0;
+                        if (!precio) {
+                          return <span>Ingresá un precio y un monto de descuento para ver el valor con reacomodamiento.</span>;
+                        }
 
-                          if (!precio) {
-                            return <span>Ingresá un precio y un monto de descuento para ver el valor con reacomodamiento.</span>;
-                          }
-
-                          if (!bonoSenia && !bonoCompleto) {
-                            return (
-                              <span>
-                                Sin bonos por reacomodamiento configurados. El precio se mantiene en{' '}
-                                <strong>${precio.toFixed(2)}</strong>.
-                              </span>
-                            );
-                          }
-
+                        if (!bonoSenia && !bonoCompleto) {
                           return (
-                            <div className="space-y-1">
-                              <p>
-                                Cliente con seña: <strong>${Math.max(0, precio - bonoSenia).toFixed(2)}</strong>{' '}
-                                (bono ${bonoSenia.toFixed(2)}).
-                              </p>
-                              <p>
-                                Cliente con pago completo: <strong>${Math.max(0, precio - bonoCompleto).toFixed(2)}</strong>{' '}
-                                (bono ${bonoCompleto.toFixed(2)}).
-                              </p>
-                            </div>
+                            <span>
+                              Sin bonos por reacomodamiento configurados. El precio se mantiene en{' '}
+                              <strong>${precio.toFixed(2)}</strong>.
+                            </span>
                           );
-                        })()}
-                      </div>
+                        }
+
+                        return (
+                          <div className="space-y-1">
+                            <p>
+                              Cliente con seña: <strong>${Math.max(0, precio - bonoSenia).toFixed(2)}</strong>{' '}
+                              (bono ${bonoSenia.toFixed(2)}).
+                            </p>
+                            <p>
+                              Cliente con pago completo: <strong>${Math.max(0, precio - bonoCompleto).toFixed(2)}</strong>{' '}
+                              (bono ${bonoCompleto.toFixed(2)}).
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
             </div>

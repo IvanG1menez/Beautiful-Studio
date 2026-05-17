@@ -59,22 +59,28 @@ def obtener_estado_limite_reprogramacion_cliente_servicio(turno: Turno, ahora=No
         "Reprogramacion de turno",
         "Solicitud reprogramacion flexible",
     ]
-    ya_reprogramo = HistorialTurno.objects.filter(
+    config = ConfiguracionGlobal.get_config()
+    limite_mensual = max(1, int(getattr(config, "max_reprogramaciones_mensuales", 1) or 1))
+    reprogramaciones_mes = HistorialTurno.objects.filter(
         turno__cliente_id=turno.cliente_id,
         turno__servicio_id=turno.servicio_id,
         accion__in=acciones_reprogramacion,
         created_at__gte=inicio_mes,
     ).exclude(
         turno__notas_cliente__startswith="[TEST_REPROGRAMACION]"
-    ).exists()
+    ).count()
 
-    if ya_reprogramo:
+    if reprogramaciones_mes >= limite_mensual:
         servicio_nombre = getattr(turno.servicio, "nombre", "este servicio")
+        limite_texto = "una vez" if limite_mensual == 1 else f"{limite_mensual} veces"
         return {
             "puede_reprogramar": False,
             "codigo": "limite_mensual_servicio",
+            "usadas": reprogramaciones_mes,
+            "limite": limite_mensual,
+            "restantes": 0,
             "motivo": (
-                f"Ya reprogramaste {servicio_nombre} una vez este mes. "
+                f"Ya reprogramaste {servicio_nombre} {limite_texto} este mes. "
                 "Podras volver a reprogramar este servicio el mes siguiente."
             ),
         }
@@ -82,6 +88,9 @@ def obtener_estado_limite_reprogramacion_cliente_servicio(turno: Turno, ahora=No
     return {
         "puede_reprogramar": True,
         "codigo": "disponible",
+        "usadas": reprogramaciones_mes,
+        "limite": limite_mensual,
+        "restantes": max(0, limite_mensual - reprogramaciones_mes),
         "motivo": "",
     }
 

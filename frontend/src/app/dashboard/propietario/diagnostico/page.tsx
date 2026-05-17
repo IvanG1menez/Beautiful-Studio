@@ -83,10 +83,37 @@ interface ResultadoFidelizacion {
   resultados: ClienteCandidato[];
 }
 
+interface ResultadoRacha {
+  turno_id: number;
+  cliente: string;
+  estado_anterior: string;
+  estado_nuevo: string;
+  precio_anterior: number;
+  precio_final: number;
+  streak: {
+    streak_count: number;
+    last_completed_at: string | null;
+    next_expiration_at: string | null;
+  };
+  reward: {
+    milestone_number: number;
+    status: string;
+    bonus_amount: number;
+    applied_discount_amount: number;
+    reason: string;
+  } | null;
+  audit_logs: Array<{
+    event_type: string;
+    accion: string;
+    detalle: string;
+  }>;
+}
+
 export default function DiagnosticoPage() {
   const [loadingOptimizacion, setLoadingOptimizacion] = useState(false);
   const [loadingFidelizacion, setLoadingFidelizacion] = useState(false);
   const [loadingSimulacion, setLoadingSimulacion] = useState(false);
+  const [loadingRacha, setLoadingRacha] = useState(false);
 
   // Estado para Optimización
   const [turnoId, setTurnoId] = useState('');
@@ -101,6 +128,11 @@ export default function DiagnosticoPage() {
   const [diasInactividad, setDiasInactividad] = useState('');
   const [resultadoFidelizacion, setResultadoFidelizacion] = useState<ResultadoFidelizacion | null>(null);
   const [errorFidelizacion, setErrorFidelizacion] = useState<string>('');
+
+  // Estado para Rachas
+  const [turnoRachaId, setTurnoRachaId] = useState('');
+  const [resultadoRacha, setResultadoRacha] = useState<ResultadoRacha | null>(null);
+  const [errorRacha, setErrorRacha] = useState<string>('');
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('auth_token');
@@ -182,7 +214,7 @@ export default function DiagnosticoPage() {
     setResultadoFidelizacion(null);
 
     try {
-      const body: any = {
+      const body: { enviar_emails: boolean; dias_inactividad?: number } = {
         // En diagnóstico siempre enviamos los emails reales
         enviar_emails: true,
       };
@@ -209,6 +241,38 @@ export default function DiagnosticoPage() {
       setErrorFidelizacion('Error de conexión con el servidor');
     } finally {
       setLoadingFidelizacion(false);
+    }
+  };
+
+  const handleRacha = async () => {
+    if (!turnoRachaId) {
+      setErrorRacha('Por favor ingresa un ID de turno');
+      return;
+    }
+
+    setLoadingRacha(true);
+    setErrorRacha('');
+    setResultadoRacha(null);
+
+    try {
+      const response = await fetch('/api/turnos/diagnostico/fidelidad-racha/', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ turno_id: parseInt(turnoRachaId) }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setResultadoRacha(data);
+      } else {
+        setErrorRacha(data.error || 'Error al ejecutar fidelidad por racha');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorRacha('Error de conexión con el servidor');
+    } finally {
+      setLoadingRacha(false);
     }
   };
 
@@ -609,6 +673,81 @@ export default function DiagnosticoPage() {
             </Card>
           )}
         </div>
+      </div>
+
+      {/* FIDELIDAD POR RACHAS */}
+      <div className="mt-6 max-w-3xl">
+        <Card>
+          <CardHeader>
+            <CardTitle>Proceso 3: Fidelidad por Rachas</CardTitle>
+            <CardDescription>
+              Completa un turno para incrementar la racha y aplicar premio si alcanza un múltiplo de 5
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="turno_racha_id">ID del Turno a Completar</Label>
+              <Input
+                id="turno_racha_id"
+                type="number"
+                placeholder="Ej: 456"
+                value={turnoRachaId}
+                onChange={(e) => setTurnoRachaId(e.target.value)}
+                disabled={loadingRacha}
+              />
+              <p className="text-sm text-muted-foreground">
+                El script de preparación deja un cliente con 4 turnos completados y este quinto turno listo para completar.
+              </p>
+            </div>
+
+            <Button
+              onClick={handleRacha}
+              disabled={loadingRacha || !turnoRachaId}
+              className="w-full"
+            >
+              {loadingRacha ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Ejecutando...
+                </>
+              ) : (
+                <>
+                  <Play className="mr-2 h-4 w-4" />
+                  Completar Turno y Gatillar Racha
+                </>
+              )}
+            </Button>
+
+            {errorRacha && (
+              <Alert variant="destructive">
+                <XCircle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{errorRacha}</AlertDescription>
+              </Alert>
+            )}
+
+            {resultadoRacha && (
+              <Alert className="bg-green-50 border-green-200">
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <AlertTitle className="text-green-700">Racha procesada</AlertTitle>
+                <AlertDescription className="text-green-700">
+                  <div className="space-y-1 mt-2">
+                    <p><strong>Cliente:</strong> {resultadoRacha.cliente}</p>
+                    <p><strong>Racha actual:</strong> {resultadoRacha.streak.streak_count} turnos</p>
+                    <p><strong>Precio:</strong> ${resultadoRacha.precio_anterior.toFixed(2)} → ${resultadoRacha.precio_final.toFixed(2)}</p>
+                    {resultadoRacha.reward ? (
+                      <p>
+                        <strong>Premio:</strong> {resultadoRacha.reward.status} por hito #{resultadoRacha.reward.milestone_number}, descuento ${resultadoRacha.reward.applied_discount_amount.toFixed(2)}.
+                      </p>
+                    ) : (
+                      <p><strong>Premio:</strong> no aplica en este turno.</p>
+                    )}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

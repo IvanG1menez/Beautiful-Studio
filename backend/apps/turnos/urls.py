@@ -69,4 +69,9 @@ urlpatterns = [
         views_diagnostico.diagnostico_simular_no_respuesta,
         name="diagnostico-simular-no-respuesta",
     ),
+    path(
+        "diagnostico/fidelidad-racha/",
+        views_diagnostico.diagnostico_fidelidad_racha,
+        name="diagnostico-fidelidad-racha",
+    ),
 ]

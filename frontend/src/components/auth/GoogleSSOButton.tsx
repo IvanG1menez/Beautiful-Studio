@@ -51,7 +51,7 @@ export default function GoogleSSOButton() {
     try {
       // Necesita la URL pública (ngrok) porque Google redirige de vuelta a esa URL.
       // No usar el proxy de Next.js aquí — la redirección debe ser al backend directamente.
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const backendUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/api\/?$/, '');
       window.location.href = `${backendUrl}/api/auth/login/google-oauth2/`;
 
     } catch (error) {

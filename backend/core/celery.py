@@ -20,13 +20,18 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     # Enviar recordatorios de turnos 24 horas antes
     'enviar-recordatorios-diarios': {
-        'task': 'apps.notificaciones.tasks.enviar_recordatorios_turnos',
+        'task': 'apps.emails.tasks.enviar_recordatorios_turnos',
         'schedule': crontab(hour=9, minute=0),  # Todos los días a las 9:00 AM
     },
     # Enviar reporte diario a propietarios
     'enviar-reporte-diario': {
-        'task': 'apps.notificaciones.tasks.enviar_reporte_diario_propietarios',
+        'task': 'apps.emails.tasks.enviar_reporte_diario_propietarios',
         'schedule': crontab(hour=20, minute=0),  # Todos los días a las 8:00 PM
+    },
+    # Reincorporación de clientes inactivos
+    'enviar-emails-fidelizacion-clientes': {
+        'task': 'apps.emails.tasks.enviar_emails_fidelizacion_clientes',
+        'schedule': crontab(hour=11, minute=0),
     },
     # Alertas preventivas de vencimiento de racha (PA3)
     'enviar-alertas-vencimiento-racha': {
