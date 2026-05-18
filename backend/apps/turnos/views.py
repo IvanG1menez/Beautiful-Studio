@@ -1,6 +1,7 @@
 """Views para la app de turnos"""
 
 import logging
+import secrets
 import uuid
 from decimal import Decimal
 
@@ -19,9 +20,12 @@ from .serializers import (
     TurnoUpdateSerializer,
     ReprogramarTurnoSerializer,
     HistorialTurnoSerializer,
+    calcular_monto_pendiente_turno,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
 from apps.authentication.models import AuditoriaAcciones
+from apps.emails.models import PasswordResetToken
+from apps.emails.services import EmailService
 
 from apps.turnos.services.reasignacion_service import (
     responder_oferta_reasignacion,
@@ -48,6 +52,76 @@ def _registrar_auditoria_turno(request, accion: str, turno: Turno, detalles: dic
         )
     except Exception as exc:
         logger.warning("No se pudo registrar auditoria de turno: %s", exc)
+
+
+def _registrar_auditoria_staff(request, accion: str, modelo: str, objeto_id: int | None, detalles: dict) -> None:
+    try:
+        AuditoriaAcciones.objects.create(
+            usuario=request.user if request and request.user.is_authenticated else None,
+            accion=accion,
+            modelo_afectado=modelo,
+            objeto_id=objeto_id,
+            detalles=detalles,
+            ip_address=request.META.get("REMOTE_ADDR") if request else None,
+            user_agent=request.META.get("HTTP_USER_AGENT", "") if request else "",
+        )
+    except Exception as exc:
+        logger.warning("No se pudo registrar auditoria staff: %s", exc)
+
+
+def _enviar_link_crear_password_cliente(cliente, request=None, origen: str = "") -> bool:
+    user_obj = getattr(cliente, "user", None)
+    if not user_obj or not user_obj.email or user_obj.has_usable_password():
+        return False
+
+    PasswordResetToken.objects.filter(user=user_obj, used=False).update(used=True)
+    reset_token = PasswordResetToken.objects.create(
+        user=user_obj,
+        token=secrets.token_urlsafe(32),
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+    email_enviado = EmailService.enviar_email_recuperacion_password(
+        email=user_obj.email,
+        token=reset_token.token,
+        usuario_nombre=user_obj.first_name or "",
+    )
+    _registrar_auditoria_staff(
+        request,
+        "crear",
+        "PasswordResetToken",
+        reset_token.id,
+        {
+            "evento": "envio_link_crear_password_cliente",
+            "cliente_id": cliente.id,
+            "email": user_obj.email,
+            "origen": origen,
+            "email_enviado": email_enviado,
+        },
+    )
+    return bool(email_enviado)
+
+
+def _actualizar_telefono_cliente_staff(cliente, telefono: str, request=None, origen: str = "") -> None:
+    telefono = (telefono or "").strip()
+    if not telefono or not getattr(cliente, "user", None):
+        return
+    telefono_anterior = cliente.user.phone or ""
+    if telefono_anterior == telefono:
+        return
+    cliente.user.phone = telefono
+    cliente.user.save(update_fields=["phone"])
+    _registrar_auditoria_staff(
+        request,
+        "editar",
+        "Cliente",
+        cliente.id,
+        {
+            "evento": "telefono_cliente_actualizado_por_staff",
+            "telefono_anterior": telefono_anterior,
+            "telefono_nuevo": telefono,
+            "origen": origen,
+        },
+    )
 
 
 class TurnoViewSet(viewsets.ModelViewSet):
@@ -177,7 +251,7 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         return queryset
 
-    def _obtener_o_crear_cliente_desde_datos(self, datos: dict):
+    def _obtener_o_crear_cliente_desde_datos(self, datos: dict, request=None):
         """Obtiene o crea un cliente a partir de los datos básicos.
 
         Devuelve una tupla (cliente, ya_registrado) donde ``ya_registrado``
@@ -191,6 +265,12 @@ class TurnoViewSet(viewsets.ModelViewSet):
         if cliente_id:
             try:
                 cliente = Cliente.objects.select_related("user").get(pk=cliente_id)
+                _actualizar_telefono_cliente_staff(
+                    cliente,
+                    datos.get("telefono") or "",
+                    request=request,
+                    origen="reserva_staff_efectivo",
+                )
                 return cliente, True
             except Cliente.DoesNotExist:
                 pass
@@ -203,6 +283,12 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 Cliente.objects.select_related("user").filter(user__dni=dni).first()
             )
             if cliente:
+                _actualizar_telefono_cliente_staff(
+                    cliente,
+                    datos.get("telefono") or "",
+                    request=request,
+                    origen="reserva_staff_efectivo",
+                )
                 return cliente, True
 
         if email:
@@ -210,7 +296,21 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 Cliente.objects.select_related("user").filter(user__email=email).first()
             )
             if cliente:
+                dni_cliente = (getattr(cliente.user, "dni", "") or "").strip()
+                if not dni or dni_cliente != dni:
+                    raise ValueError(
+                        "Este email ya pertenece a un cliente registrado. Buscá al cliente por DNI o verificá los datos antes de continuar."
+                    )
+                _actualizar_telefono_cliente_staff(
+                    cliente,
+                    datos.get("telefono") or "",
+                    request=request,
+                    origen="reserva_staff_efectivo",
+                )
                 return cliente, True
+
+        if not email:
+            raise ValueError("El email es obligatorio para registrar un cliente nuevo.")
 
         nombre = (datos.get("nombre") or "").strip() or "Cliente"
         telefono = (datos.get("telefono") or "").strip() or None
@@ -222,23 +322,38 @@ class TurnoViewSet(viewsets.ModelViewSet):
         username_base = email or (dni and f"cliente-{dni}") or None
         if not username_base:
             username_base = f"cliente-{uuid.uuid4().hex[:8]}"
-
-        user_email = email or f"no-email-{uuid.uuid4().hex[:8]}@example.com"
+        username = username_base
+        counter = 1
+        while User.objects.filter(username=username).exists():
+            counter += 1
+            username = f"{username_base}-{counter}"
 
         user = User.objects.create_user(
-            username=username_base,
-            email=user_email,
+            username=username,
+            email=email,
             first_name=first_name,
             last_name=last_name,
         )
         user.role = "cliente"
         user.dni = dni or None
         user.phone = telefono
-        user.is_active = False
+        user.is_active = True
         user.set_unusable_password()
         user.save()
 
         cliente = Cliente.objects.create(user=user)
+        _registrar_auditoria_staff(
+            request,
+            "crear",
+            "Cliente",
+            cliente.id,
+            {
+                "evento": "cliente_creado_por_reserva_presencial",
+                "email": user.email,
+                "dni": dni,
+                "origen": "reserva_staff_efectivo",
+            },
+        )
         return cliente, False
 
     @action(detail=False, methods=["get"], url_path="historial")
@@ -293,6 +408,10 @@ class TurnoViewSet(viewsets.ModelViewSet):
         if serializer.instance is not None:
             serializer.instance._streak_actor_user = self.request.user
         turno = serializer.save()
+
+        if estado_anterior != "completado" and turno.estado == "completado" and not turno.fecha_hora_completado:
+            turno.fecha_hora_completado = timezone.now()
+            turno.save(update_fields=["fecha_hora_completado", "updated_at"])
 
         # Registrar cambio de estado en historial
         if estado_anterior != turno.estado:
@@ -461,9 +580,13 @@ class TurnoViewSet(viewsets.ModelViewSet):
             "nombre": data.get("nombre"),
             "telefono": data.get("telefono"),
         }
-        cliente, ya_registrado = self._obtener_o_crear_cliente_desde_datos(
-            cliente_datos
-        )
+        try:
+            cliente, ya_registrado = self._obtener_o_crear_cliente_desde_datos(
+                cliente_datos,
+                request=request,
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         tipo_pago_informado = (data.get("tipo_pago") or "").upper()
         paga_servicio_completo = bool(data.get("paga_servicio_completo", False))
@@ -548,10 +671,19 @@ class TurnoViewSet(viewsets.ModelViewSet):
             ),
         )
 
+        access_email_sent = False
+        if not ya_registrado:
+            access_email_sent = _enviar_link_crear_password_cliente(
+                cliente,
+                request=request,
+                origen="reserva_staff_efectivo",
+            )
+
         return Response(
             {
                 "message": "Turno creado exitosamente desde panel",
                 "turno": TurnoDetailSerializer(turno).data,
+                "access_email_sent": access_email_sent,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -982,6 +1114,8 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         turno.metodo_pago = metodo_pago
         turno.fecha_pago_registrado = timezone.now()
+        if calcular_monto_pendiente_turno(turno) <= Decimal("0.00"):
+            turno.tipo_pago = "PAGO_COMPLETO"
         turno.save()
 
         HistorialTurno.objects.create(
@@ -1012,8 +1146,25 @@ class TurnoViewSet(viewsets.ModelViewSet):
             )
 
         estado_anterior = turno.estado
+
+        if nuevo_estado == "completado" and estado_anterior != "completado":
+            pendiente = calcular_monto_pendiente_turno(turno)
+            if pendiente > Decimal("0.00"):
+                return Response(
+                    {
+                        "error": (
+                            "No se puede finalizar el turno: falta registrar "
+                            f"un pago de ${pendiente}."
+                        ),
+                        "monto_pendiente": str(pendiente),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         turno.estado = nuevo_estado
         turno._streak_actor_user = request.user
+        if nuevo_estado == "completado" and not turno.fecha_hora_completado:
+            turno.fecha_hora_completado = timezone.now()
 
         try:
             turno.full_clean()
@@ -1450,6 +1601,16 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         for turno in queryset:
             try:
+                pendiente = calcular_monto_pendiente_turno(turno)
+                if pendiente > Decimal("0.00"):
+                    errores.append(
+                        {
+                            "turno_id": turno.id,
+                            "error": f"Falta registrar un pago de ${pendiente}.",
+                            "monto_pendiente": str(pendiente),
+                        }
+                    )
+                    continue
                 turno.estado = "completado"
                 turno.fecha_hora_completado = timezone.now()
                 turno.save()
@@ -1506,6 +1667,16 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         for turno in turnos:
             try:
+                pendiente = calcular_monto_pendiente_turno(turno)
+                if pendiente > Decimal("0.00"):
+                    errores.append(
+                        {
+                            "turno_id": turno.id,
+                            "error": f"Falta registrar un pago de ${pendiente}.",
+                            "monto_pendiente": str(pendiente),
+                        }
+                    )
+                    continue
                 turno.estado = "completado"
                 turno.fecha_hora_completado = timezone.now()
                 turno.save()

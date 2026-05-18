@@ -11,6 +11,7 @@ Endpoints:
 
 import json
 import logging
+import secrets
 import uuid
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -34,14 +35,19 @@ from rest_framework.views import APIView
 from django.conf import settings
 
 from apps.turnos.models import StreakCoupon, Turno
+from apps.turnos.serializers import calcular_monto_pendiente_turno
 from apps.clientes.models import Cliente
 from apps.servicios.models import Servicio
 from apps.empleados.models import Empleado
+from apps.authentication.models import AuditoriaAcciones
+from apps.emails.models import PasswordResetToken
+from apps.emails.services import EmailService
 from .models import OrdenMercadoPagoPresencial, PagoMercadoPago, PreferenciaMercadoPagoCancelada
 from .serializers import (
     CancelarPagoStaffSerializer,
     ConfirmarPagoManualSerializer,
     ConfirmarPagoStaffSerializer,
+    CrearCobroTurnoStaffSerializer,
     CrearPreferenciaSerializer,
     CrearPreferenciaSinTurnoSerializer,
     CrearPreferenciaReprogramacionSerializer,
@@ -55,6 +61,72 @@ from apps.turnos.services.reprogramacion_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _registrar_auditoria_staff(usuario, accion: str, modelo: str, objeto_id: int | None, detalles: dict) -> None:
+    try:
+        AuditoriaAcciones.objects.create(
+            usuario=usuario,
+            accion=accion,
+            modelo_afectado=modelo,
+            objeto_id=objeto_id,
+            detalles=detalles,
+        )
+    except Exception as exc:
+        logger.warning("No se pudo registrar auditoria staff: %s", exc)
+
+
+def _enviar_link_crear_password(cliente: Cliente, usuario_actor=None, origen: str = "") -> None:
+    user_obj = getattr(cliente, "user", None)
+    if not user_obj or not user_obj.email or user_obj.has_usable_password():
+        return
+
+    PasswordResetToken.objects.filter(user=user_obj, used=False).update(used=True)
+    reset_token = PasswordResetToken.objects.create(
+        user=user_obj,
+        token=secrets.token_urlsafe(32),
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+    EmailService.enviar_email_recuperacion_password(
+        email=user_obj.email,
+        token=reset_token.token,
+        usuario_nombre=user_obj.first_name or "",
+    )
+    _registrar_auditoria_staff(
+        usuario_actor,
+        "crear",
+        "PasswordResetToken",
+        reset_token.id,
+        {
+            "evento": "envio_link_crear_password_cliente",
+            "cliente_id": cliente.id,
+            "email": user_obj.email,
+            "origen": origen,
+        },
+    )
+
+
+def _actualizar_telefono_cliente_staff(cliente: Cliente, telefono: str, usuario_actor=None, origen: str = "") -> None:
+    telefono = (telefono or "").strip()
+    if not telefono or not getattr(cliente, "user", None):
+        return
+    telefono_anterior = cliente.user.phone or ""
+    if telefono_anterior == telefono:
+        return
+    cliente.user.phone = telefono
+    cliente.user.save(update_fields=["phone"])
+    _registrar_auditoria_staff(
+        usuario_actor,
+        "editar",
+        "Cliente",
+        cliente.id,
+        {
+            "evento": "telefono_cliente_actualizado_por_staff",
+            "telefono_anterior": telefono_anterior,
+            "telefono_nuevo": telefono,
+            "origen": origen,
+        },
+    )
 
 
 def _expire_stale_streak_coupons(cliente):
@@ -102,8 +174,20 @@ def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[
     from apps.users.models import User
 
     cliente_id = turno_payload.get("cliente_id")
+    usuario_actor = None
+    staff_user_id = turno_payload.get("staff_user_id")
+    if staff_user_id:
+        usuario_actor = User.objects.filter(pk=staff_user_id).first()
+
     if cliente_id:
-        return Cliente.objects.select_related("user").get(pk=cliente_id), True
+        cliente = Cliente.objects.select_related("user").get(pk=cliente_id)
+        _actualizar_telefono_cliente_staff(
+            cliente,
+            turno_payload.get("walkin_telefono") or "",
+            usuario_actor=usuario_actor,
+            origen="reserva_presencial_qr",
+        )
+        return cliente, True
 
     dni = (turno_payload.get("walkin_dni") or "").strip()
     email = (turno_payload.get("walkin_email") or "").strip().lower()
@@ -116,13 +200,27 @@ def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[
     if cliente is None and email:
         cliente = Cliente.objects.select_related("user").filter(user__email=email).first()
     if cliente is not None:
+        dni_cliente = (getattr(cliente.user, "dni", "") or "").strip()
+        if email and (not dni or dni_cliente != dni):
+            raise ValueError(
+                "Este email ya pertenece a un cliente registrado. Buscá al cliente por DNI o verificá los datos antes de continuar."
+            )
+        _actualizar_telefono_cliente_staff(
+            cliente,
+            telefono,
+            usuario_actor=usuario_actor,
+            origen="reserva_presencial_qr",
+        )
         return cliente, True
 
     partes_nombre = nombre.split(" ", 1)
     first_name = partes_nombre[0]
     last_name = partes_nombre[1] if len(partes_nombre) > 1 else ""
 
-    user_obj = User.objects.filter(email=email).first() if email else None
+    if not email:
+        raise ValueError("El email es obligatorio para registrar un cliente nuevo.")
+
+    user_obj = User.objects.filter(email=email).first()
     if user_obj is None and dni:
         user_obj = User.objects.filter(dni=dni).first()
 
@@ -134,10 +232,9 @@ def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[
             counter += 1
             username = f"{username_base}-{counter}"
 
-        user_email = email or f"no-email-{uuid.uuid4().hex[:8]}@example.com"
         user_obj = User.objects.create_user(
             username=username,
-            email=user_email,
+            email=email,
             first_name=first_name,
             last_name=last_name,
         )
@@ -167,6 +264,24 @@ def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[
             user_obj.save(update_fields=campos_update)
 
     cliente, created = Cliente.objects.get_or_create(user=user_obj)
+    if created:
+        _registrar_auditoria_staff(
+            usuario_actor,
+            "crear",
+            "Cliente",
+            cliente.id,
+            {
+                "evento": "cliente_creado_por_reserva_presencial",
+                "email": user_obj.email,
+                "dni": dni,
+                "origen": "reserva_presencial_qr",
+            },
+        )
+        _enviar_link_crear_password(
+            cliente,
+            usuario_actor=usuario_actor,
+            origen="reserva_presencial_qr",
+        )
     return cliente, not created
 
 
@@ -692,6 +807,18 @@ class CrearPreferenciaStaffView(APIView):
             cliente = (
                 Cliente.objects.select_related("user").filter(user__email=email).first()
             )
+            if cliente is not None:
+                dni_cliente = (getattr(cliente.user, "dni", "") or "").strip()
+                if not dni or dni_cliente != dni:
+                    return Response(
+                        {
+                            "detail": (
+                                "Este email ya pertenece a un cliente registrado. "
+                                "Buscá al cliente por DNI o verificá los datos antes de continuar."
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
         if cliente is None and not email:
             return Response(
@@ -775,6 +902,7 @@ class CrearPreferenciaStaffView(APIView):
             "canal_reserva": canal_reserva,
             "metodo_pago": "mercadopago_qr",
             "es_cliente_registrado": ya_registrado,
+            "staff_user_id": user.pk,
             "walkin_nombre": data.get("nombre") or "",
             "walkin_dni": dni,
             "walkin_email": email,
@@ -1067,6 +1195,175 @@ class CancelarPagoStaffView(APIView):
         return Response({"status": "cancelled"}, status=status.HTTP_200_OK)
 
 
+class CrearCobroTurnoStaffView(APIView):
+    """Crea un QR para cobrar el saldo pendiente de un turno existente."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = CrearCobroTurnoStaffSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        es_staff_user = bool(
+            user.is_staff
+            or getattr(user, "role", None)
+            in ["propietario", "superusuario", "profesional"]
+        )
+
+        try:
+            turno = Turno.objects.select_related("cliente__user", "empleado", "servicio").get(
+                pk=serializer.validated_data["turno_id"]
+            )
+        except Turno.DoesNotExist:
+            return Response(
+                {"detail": "No se encontró el turno."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        es_cliente_duenio = hasattr(user, "cliente_profile") and turno.cliente_id == user.cliente_profile.id
+
+        if not es_staff_user and not es_cliente_duenio:
+            return Response(
+                {"detail": "No tiene permisos para cobrar este turno."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if getattr(user, "role", None) == "profesional":
+            profesional = getattr(user, "profesional_profile", None)
+            if not profesional or turno.empleado_id != profesional.id:
+                return Response(
+                    {"detail": "No puede cobrar un turno que no está asignado a usted."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        monto_pendiente = calcular_monto_pendiente_turno(turno)
+        if monto_pendiente <= Decimal("0.00"):
+            return Response(
+                {"detail": "El turno no tiene saldo pendiente."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        monto_final = round(float(monto_pendiente), 2)
+        min_mp_amount = float(getattr(settings, "MP_MIN_AMOUNT", 100))
+        if monto_final < min_mp_amount:
+            return Response(
+                {
+                    "detail": (
+                        f"El monto a cobrar (${monto_final:.2f}) es inferior al mínimo "
+                        f"permitido por Mercado Pago (${min_mp_amount:.2f} ARS)."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = {
+            "tipo_movimiento": "pago_saldo_turno",
+            "turno_id": turno.pk,
+            "monto_cobrado": str(monto_pendiente),
+            "metodo_pago": "mercadopago_qr",
+            "staff_user_id": user.pk,
+            "cliente_id": turno.cliente_id,
+        }
+        notification_url = getattr(settings, "MERCADO_PAGO_WEBHOOK_URL", "")
+        mp_env = (getattr(settings, "MP_ENV", "prod") or "prod").lower()
+        access_token = (getattr(settings, "MP_ACCESS_TOKEN", "") or "").strip()
+        token_env = "test" if access_token.startswith("TEST-") else "prod"
+
+        if getattr(settings, "MP_QR_NATIVE_ENABLED", True):
+            qr_access_token = (getattr(settings, "MP_QR_ACCESS_TOKEN", "") or "").strip()
+            qr_collector_id = str(
+                getattr(settings, "MP_QR_COLLECTOR_ID", "")
+                or getattr(settings, "MP_QR_SELLER_COLLECTOR_ID", "")
+            ).strip()
+            qr_pos_external_id = str(getattr(settings, "MP_QR_POS_EXTERNAL_ID", "")).strip()
+            if not qr_access_token or not qr_collector_id or not qr_pos_external_id:
+                return Response(
+                    {
+                        "detail": (
+                            "Configuración QR incompleta: revisá MP_QR_ACCESS_TOKEN, "
+                            "MP_QR_COLLECTOR_ID y MP_QR_POS_EXTERNAL_ID."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            reference_id = f"turno-saldo-{turno.pk}-{uuid.uuid4().hex}"
+            try:
+                orden_mp = services.crear_orden_qr_dinamico(
+                    collector_id=qr_collector_id,
+                    external_pos_id=qr_pos_external_id,
+                    reference_id=reference_id,
+                    titulo=f"Saldo turno #{turno.pk}",
+                    descripcion=f"Saldo pendiente - {turno.servicio.nombre}",
+                    monto=monto_final,
+                    notification_url=notification_url,
+                )
+            except Exception as exc:
+                logger.error("Error creando QR para saldo de turno: %s", exc)
+                return Response(
+                    {"detail": f"Mercado Pago rechazó el QR nativo: {exc}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            qr_data = orden_mp.get("qr_data") or orden_mp.get("qr") or ""
+            if not qr_data:
+                return Response(
+                    {"detail": "Mercado Pago creó la orden QR, pero no devolvió datos de QR."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            OrdenMercadoPagoPresencial.objects.create(
+                reference_id=reference_id,
+                payload=payload,
+                qr_data=qr_data,
+                monto=Decimal(str(monto_final)),
+            )
+            qr_public_key = getattr(settings, "MP_QR_PUBLIC_KEY", "") or getattr(settings, "MP_PUBLIC_KEY", "")
+            return Response(
+                {
+                    "status": "pending",
+                    "preference_id": reference_id,
+                    "qr_data": qr_data,
+                    "qr_init_point": qr_data,
+                    "qr_native": True,
+                    "mp_env": mp_env,
+                    "mp_token_env": token_env,
+                    "qr_link_kind": "qr_data",
+                    "public_key": qr_public_key,
+                    "qr_public_key": qr_public_key,
+                    "monto": str(monto_pendiente),
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        resultado = services.crear_preferencia(
+            titulo=f"Saldo turno #{turno.pk}",
+            descripcion=f"Saldo pendiente - {turno.servicio.nombre}",
+            monto=monto_final,
+            external_reference=json.dumps(payload),
+            notification_url=notification_url,
+            payer_email=getattr(turno.cliente.user, "email", "") if turno.cliente_id else "",
+        )
+        qr_init_point = resultado["sandbox_init_point"] if token_env == "test" else resultado["init_point"]
+        return Response(
+            {
+                "status": "pending",
+                "preference_id": resultado["preference_id"],
+                "init_point": resultado["init_point"],
+                "sandbox_init_point": resultado["sandbox_init_point"],
+                "qr_init_point": qr_init_point,
+                "mp_env": mp_env,
+                "mp_token_env": token_env,
+                "qr_link_kind": "sandbox_init_point" if token_env == "test" else "init_point",
+                "public_key": getattr(settings, "MP_PUBLIC_KEY", ""),
+                "monto": str(monto_pendiente),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class ConfirmarCobroManualView(APIView):
     """Registra un cobro confirmado manualmente cuando MP no confirma a tiempo."""
 
@@ -1116,13 +1413,20 @@ class ConfirmarCobroManualView(APIView):
                 reference_id=preference_id,
             ).first()
             if orden_presencial is not None:
-                if not es_staff_user:
+                orden_payload = dict(orden_presencial.payload or {})
+                es_pago_saldo_turno = orden_payload.get("tipo_movimiento") == "pago_saldo_turno"
+                es_cliente_duenio = False
+                if es_pago_saldo_turno and hasattr(user, "cliente_profile"):
+                    es_cliente_duenio = int(orden_payload.get("cliente_id") or 0) == user.cliente_profile.id
+
+                if not es_staff_user and not es_cliente_duenio:
                     return Response(
                         {"detail": "No tiene permisos para confirmar cobros presenciales."},
                         status=status.HTTP_403_FORBIDDEN,
                     )
-                orden_payload = dict(orden_presencial.payload or {})
                 orden_payload["metodo_pago"] = "mercadopago_manual"
+                if es_staff_user:
+                    orden_payload["staff_user_id"] = user.pk
                 orden_presencial.payload = orden_payload
                 orden_presencial.save(update_fields=["payload", "actualizado_en"])
                 webhook._crear_turno_desde_orden_presencial(
@@ -1257,6 +1561,15 @@ class WebhookMercadoPagoView(APIView):
           - Si el slot (empleado, fecha_hora) ya está ocupado → reutiliza ese
             Turno y le asocia el PagoMercadoPago sin duplicar el Turno.
         """
+        if turno_payload.get("tipo_movimiento") == "pago_saldo_turno":
+            self._registrar_pago_saldo_turno_desde_payload(
+                turno_payload,
+                payment_id,
+                mp_preference_id,
+                monto_cobrado_override=monto_cobrado_override,
+            )
+            return
+
         # La API de MP a veces omite preference_id en el objeto payment.
         # En ese caso, el webhook merchant_order (que siempre lo tiene) creará el
         # PagoMercadoPago correctamente. Aquí simplemente no hacemos nada.
@@ -1439,6 +1752,97 @@ class WebhookMercadoPagoView(APIView):
             mp_preference_id,
         )
 
+    def _registrar_pago_saldo_turno_desde_payload(
+        self,
+        payload: dict,
+        payment_id: str,
+        mp_preference_id: str,
+        monto_cobrado_override: float | None = None,
+    ) -> None:
+        """Registra un pago MP/manual sobre un turno existente sin crear otro turno."""
+        if not mp_preference_id:
+            logger.warning("Pago saldo turno sin preference_id para payment_id=%s", payment_id)
+            return
+
+        pago_por_preference = PagoMercadoPago.objects.filter(
+            preference_id=mp_preference_id
+        ).first()
+        if pago_por_preference is not None and pago_por_preference.estado == "approved":
+            return
+
+        turno = Turno.objects.select_related("cliente", "servicio").get(pk=payload["turno_id"])
+        monto_cobrado = Decimal(
+            str(monto_cobrado_override or payload.get("monto_cobrado") or 0)
+        )
+        if monto_cobrado <= Decimal("0.00"):
+            raise ValueError("El monto cobrado debe ser mayor a cero.")
+
+        metodo_pago_turno = "mercadopago_qr"
+        metodo_payload = payload.get("metodo_pago") or "mercadopago_qr"
+        staff_user = None
+        staff_user_id = payload.get("staff_user_id")
+        if staff_user_id:
+            try:
+                from apps.users.models import User
+
+                staff_user = User.objects.filter(pk=staff_user_id).first()
+            except Exception:
+                staff_user = None
+
+        with transaction.atomic():
+            if pago_por_preference is not None:
+                pago_por_preference.estado = "approved"
+                pago_por_preference.payment_id = str(payment_id)
+                pago_por_preference.monto = monto_cobrado
+                pago_por_preference.save(
+                    update_fields=["estado", "payment_id", "monto", "actualizado_en"]
+                )
+            else:
+                PagoMercadoPago.objects.create(
+                    preference_id=mp_preference_id,
+                    turno=turno,
+                    cliente=turno.cliente,
+                    payment_id=str(payment_id),
+                    init_point="",
+                    monto=monto_cobrado,
+                    moneda=settings.MP_CURRENCY_ID,
+                    descripcion=f"Saldo turno #{turno.pk} — {turno.servicio.nombre}",
+                    estado="approved",
+                )
+
+            senia_actual = Decimal(turno.senia_pagada or 0)
+            turno.senia_pagada = senia_actual + monto_cobrado
+            turno.metodo_pago = metodo_pago_turno
+            turno.fecha_pago_registrado = timezone.now()
+            if calcular_monto_pendiente_turno(turno) <= Decimal("0.00"):
+                turno.tipo_pago = "PAGO_COMPLETO"
+            elif not turno.tipo_pago:
+                turno.tipo_pago = "SENIA"
+            turno.save(
+                update_fields=[
+                    "senia_pagada",
+                    "metodo_pago",
+                    "fecha_pago_registrado",
+                    "tipo_pago",
+                    "updated_at",
+                ]
+            )
+
+            if staff_user is not None:
+                from apps.turnos.models import HistorialTurno
+
+                HistorialTurno.objects.create(
+                    turno=turno,
+                    usuario=staff_user,
+                    accion="Pago registrado manualmente" if metodo_payload == "mercadopago_manual" else "Pago Mercado Pago registrado",
+                    estado_anterior=turno.estado,
+                    estado_nuevo=turno.estado,
+                    observaciones=(
+                        f"Cobro de saldo registrado por {metodo_payload}. "
+                        f"Monto: {monto_cobrado}. Operacion: {payment_id}."
+                    ),
+                )
+
     def _reprogramar_turno_desde_payload(
         self,
         payload: dict,
@@ -1553,7 +1957,8 @@ class WebhookMercadoPagoView(APIView):
         try:
             parsed = json.loads(external_reference)
             if isinstance(parsed, dict) and (
-                "cliente_id" in parsed or parsed.get("tipo_movimiento") == "reprogramacion_turno"
+                "cliente_id" in parsed
+                or parsed.get("tipo_movimiento") in {"reprogramacion_turno", "pago_saldo_turno"}
             ):
                 return parsed
         except (json.JSONDecodeError, TypeError, ValueError):
@@ -1822,7 +2227,7 @@ class VerificarPagoView(APIView):
             if not pago:
                 raise PagoMercadoPago.DoesNotExist
             return Response(
-                {"status": "approved", "turno_id": pago.turno.pk},
+                {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
                 status=status.HTTP_200_OK,
             )
         except PagoMercadoPago.DoesNotExist:
@@ -1837,7 +2242,7 @@ class VerificarPagoView(APIView):
                     ).first()
                     if pago:
                         return Response(
-                            {"status": "approved", "turno_id": pago.turno.pk},
+                            {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
                             status=status.HTTP_200_OK,
                         )
                 if PreferenciaMercadoPagoCancelada.objects.filter(preference_id=preference_id).exists():
@@ -1905,7 +2310,7 @@ class VerificarPagoView(APIView):
                     ).first()
                     if pago:
                         return Response(
-                            {"status": "approved", "turno_id": pago.turno.pk},
+                            {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
                             status=status.HTTP_200_OK,
                         )
                     return Response({"status": "pending"}, status=status.HTTP_200_OK)
@@ -1934,7 +2339,7 @@ class VerificarPagoView(APIView):
                 ).first()
                 if pago:
                     return Response(
-                        {"status": "approved", "turno_id": pago.turno.pk},
+                        {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
                         status=status.HTTP_200_OK,
                     )
                 return Response({"status": "pending"}, status=status.HTTP_200_OK)

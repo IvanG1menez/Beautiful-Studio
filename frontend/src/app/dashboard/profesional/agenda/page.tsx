@@ -14,6 +14,16 @@ import { Badge } from '@/components/ui/badge';
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
@@ -28,9 +38,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatTime, toISODate } from '@/lib/dateUtils';
 import { Turno } from '@/types';
-import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
+import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, ExternalLink, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
   pendiente: 'bg-yellow-100 text-yellow-800',
@@ -92,6 +102,18 @@ export default function AgendaEmpleadoPage() {
   const [datosPruebaActivos, setDatosPruebaActivos] = useState(false);
   const [cantidadDatosPrueba, setCantidadDatosPrueba] = useState(0);
   const [procesandoDatosPrueba, setProcesandoDatosPrueba] = useState(false);
+  const [cobroDialogOpen, setCobroDialogOpen] = useState(false);
+  const [cobroMetodo, setCobroMetodo] = useState<'efectivo' | 'mercadopago_qr'>('efectivo');
+  const [procesandoCobro, setProcesandoCobro] = useState(false);
+  const [qrPreferenceId, setQrPreferenceId] = useState('');
+  const [qrPaymentLink, setQrPaymentLink] = useState('');
+  const [qrPaymentCode, setQrPaymentCode] = useState('');
+  const [qrPaymentCodeError, setQrPaymentCodeError] = useState('');
+  const [qrStatusMessage, setQrStatusMessage] = useState('');
+  const [qrWaitingPayment, setQrWaitingPayment] = useState(false);
+  const [qrPaymentApproved, setQrPaymentApproved] = useState(false);
+  const [qrNative, setQrNative] = useState(false);
+  const qrPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const fechaParam = searchParams.get('fecha');
@@ -347,6 +369,15 @@ export default function AgendaEmpleadoPage() {
       return;
     }
 
+    const seleccionados = turnosPendientes.filter((turno) => selectedPendientesIds.includes(turno.id));
+    const conSaldoPendiente = seleccionados.filter((turno) => getMontoPendienteTurno(turno) > 0.01);
+    if (conSaldoPendiente.length > 0) {
+      alert(
+        `No se pueden completar ${conSaldoPendiente.length} turno(s) porque tienen saldo pendiente. Cobrales desde la tarjeta del turno antes de finalizarlos.`
+      );
+      return;
+    }
+
     try {
       setProcesandoPendientes(true);
 
@@ -567,6 +598,11 @@ export default function AgendaEmpleadoPage() {
 
   // Validar antes de completar
   const handleFinalizarClick = (turno: Turno) => {
+    if (getMontoPendienteTurno(turno) > 0.01) {
+      abrirCobroPendiente(turno);
+      return;
+    }
+
     // Validar fecha
     const validacionFecha = validarFechaTurno(turno);
     if (!validacionFecha.valido) {
@@ -617,6 +653,12 @@ export default function AgendaEmpleadoPage() {
 
     // Confirmación final usando dialog
     if (nuevoEstado === 'completado') {
+      if (getMontoPendienteTurno(turnoActual) > 0.01) {
+        setCambioEstadoDialog(false);
+        abrirCobroPendiente(turnoActual);
+        return;
+      }
+
       setConfirmMessage('¿Estás seguro de que deseas finalizar este turno?');
       setConfirmAction(() => async () => {
         await ejecutarCambioEstado();
@@ -817,8 +859,185 @@ export default function AgendaEmpleadoPage() {
 
   const getPagoLabelTurno = (turno: Turno): string => {
     const pagadoCompleto = Boolean((turno as any).pagado_completo);
-    return pagadoCompleto ? 'Servicio completo' : 'Seña';
+    const senia = Number(turno.senia_pagada || 0);
+    if (pagadoCompleto) return 'Pagado completo';
+    if (senia > 0) return 'Seña abonada';
+    return 'Sin pago';
   };
+
+  const formatCurrency = (value: number | string | null | undefined): string => {
+    const amount = Number(value || 0);
+    return amount.toLocaleString('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+      maximumFractionDigits: 0,
+    });
+  };
+
+  const getPrecioTotalTurno = (turno: Turno): number => Number(
+    turno.precio_final || (turno as any).servicio_precio || turno.servicio?.precio || 0
+  );
+
+  const getCanalReservaLabel = (canal?: string | null): string => {
+    if (canal === 'web_cliente') return 'Reserva web cliente';
+    if (canal === 'panel_profesional') return 'Panel profesional';
+    if (canal === 'panel_propietario') return 'Panel propietario';
+    return 'Origen no informado';
+  };
+
+  const getMovimientoTurnoLabel = (turno: Turno): string | null => {
+    const movimiento = (turno as any).ultimo_movimiento_reprogramacion;
+    if (!movimiento) return null;
+    if (movimiento.tipo === 'adelantado') return 'Adelantado';
+    if (movimiento.tipo === 'postergado') return 'Postergado';
+    return 'Reprogramado';
+  };
+
+  const resetQrCobro = () => {
+    if (qrPollingRef.current) {
+      clearInterval(qrPollingRef.current);
+      qrPollingRef.current = null;
+    }
+    setQrPreferenceId('');
+    setQrPaymentLink('');
+    setQrPaymentCode('');
+    setQrPaymentCodeError('');
+    setQrStatusMessage('');
+    setQrWaitingPayment(false);
+    setQrPaymentApproved(false);
+    setQrNative(false);
+  };
+
+  const abrirCobroPendiente = (turno: Turno) => {
+    resetQrCobro();
+    setTurnoActual(turno);
+    setNuevoEstado('completado');
+    setNotasEmpleado(turno.notas_empleado || '');
+    setCobroMetodo('efectivo');
+    setCobroDialogOpen(true);
+  };
+
+  const finalizarTurnoActual = async () => {
+    await ejecutarCambioEstado();
+    setCobroDialogOpen(false);
+    resetQrCobro();
+  };
+
+  const registrarEfectivoYFinalizar = async () => {
+    if (!turnoActual) return;
+    const montoPendiente = getMontoPendienteTurno(turnoActual);
+    try {
+      setProcesandoCobro(true);
+      const response = await authenticatedFetch(`/turnos/${turnoActual.id}/registrar-pago/`, {
+        method: 'POST',
+        body: JSON.stringify({ monto: montoPendiente, metodo_pago: 'efectivo' }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.detail || 'No se pudo registrar el pago');
+      }
+      await finalizarTurnoActual();
+    } catch (err: any) {
+      alert(err.message || 'No se pudo registrar el pago y finalizar el turno.');
+    } finally {
+      setProcesandoCobro(false);
+    }
+  };
+
+  const generarQrSaldo = async () => {
+    if (!turnoActual) return;
+    try {
+      setProcesandoCobro(true);
+      setQrPaymentCodeError('');
+      const response = await authenticatedFetch('/mercadopago/cobro-turno-staff/', {
+        method: 'POST',
+        body: JSON.stringify({ turno_id: turnoActual.id }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.error || 'No se pudo generar el QR');
+      }
+      const pref = await response.json();
+      const qrLink = pref.qr_data || pref.qr_init_point || pref.init_point || '';
+      setQrPreferenceId(pref.preference_id);
+      setQrPaymentLink(qrLink);
+      setQrNative(Boolean(pref.qr_native));
+      setQrStatusMessage('Escaneá el QR y completá el pago desde Mercado Pago.');
+      setQrWaitingPayment(true);
+
+      if (qrPollingRef.current) clearInterval(qrPollingRef.current);
+      let attempts = 0;
+      qrPollingRef.current = setInterval(async () => {
+        try {
+          attempts += 1;
+          if (attempts > 100) {
+            if (qrPollingRef.current) clearInterval(qrPollingRef.current);
+            qrPollingRef.current = null;
+            setQrWaitingPayment(false);
+            setQrStatusMessage('No se confirmó automáticamente. Podés cargar el número de operación o forzar el recibimiento para pruebas.');
+            return;
+          }
+          const statusResponse = await authenticatedFetch(`/mercadopago/verificar-pago/${pref.preference_id}/`);
+          const body = await statusResponse.json();
+          if (body.status === 'approved') {
+            if (qrPollingRef.current) clearInterval(qrPollingRef.current);
+            qrPollingRef.current = null;
+            setQrWaitingPayment(false);
+            setQrPaymentApproved(true);
+            setQrPaymentCode(String(body.payment_id || ''));
+            setQrStatusMessage('Pago confirmado por Mercado Pago. Revisá/cargá el número de operación y finalizá el turno.');
+          } else if (body.status === 'cancelled') {
+            if (qrPollingRef.current) clearInterval(qrPollingRef.current);
+            qrPollingRef.current = null;
+            setQrWaitingPayment(false);
+            setQrStatusMessage('La transacción fue cancelada. Generá un nuevo QR para continuar.');
+          }
+        } catch (error) {
+          console.error('Error verificando pago QR:', error);
+        }
+      }, 3000);
+    } catch (err: any) {
+      setQrPaymentCodeError(err.message || 'No se pudo generar el QR');
+    } finally {
+      setProcesandoCobro(false);
+    }
+  };
+
+  const confirmarQrYFinalizar = async () => {
+    if (!turnoActual || !qrPreferenceId) return;
+    const paymentId = qrPaymentCode.trim();
+    if (!paymentId) {
+      setQrPaymentCodeError('Ingresá el número de operación o una referencia de prueba.');
+      return;
+    }
+    try {
+      setProcesandoCobro(true);
+      setQrPaymentCodeError('');
+      const response = await authenticatedFetch('/mercadopago/confirmar-cobro-manual/', {
+        method: 'POST',
+        body: JSON.stringify({
+          preference_id: qrPreferenceId,
+          payment_id: paymentId,
+          motivo: 'Cobro de saldo de turno confirmado por profesional',
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.error || 'No se pudo confirmar el cobro');
+      }
+      await finalizarTurnoActual();
+    } catch (err: any) {
+      setQrPaymentCodeError(err.message || 'No se pudo confirmar el cobro y finalizar.');
+    } finally {
+      setProcesandoCobro(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (qrPollingRef.current) clearInterval(qrPollingRef.current);
+    };
+  }, []);
 
   // Cuando entro a vista mensual o cambia el mes, cargo turnos del mes
   useEffect(() => {
@@ -1450,12 +1669,38 @@ export default function AgendaEmpleadoPage() {
                                     </div>
                                   )}
 
-                                  <div className="text-sm text-gray-500">
-                                    Precio: $
-                                    {turno.precio_final ||
-                                      (turno as any).servicio_precio ||
-                                      turno.servicio?.precio ||
-                                      '0'}
+                                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                                      <Badge variant={(turno as any).pagado_completo ? 'default' : 'secondary'}>
+                                        {getPagoLabelTurno(turno)}
+                                      </Badge>
+                                      {getMovimientoTurnoLabel(turno) && (
+                                        <Badge variant="outline">{getMovimientoTurnoLabel(turno)}</Badge>
+                                      )}
+                                      {Boolean((turno as any).reacomodamiento_exitoso) && (
+                                        <Badge className="bg-indigo-600 hover:bg-indigo-600">Reacomodado</Badge>
+                                      )}
+                                    </div>
+                                    <div className="grid gap-2 sm:grid-cols-3">
+                                      <div>
+                                        <p className="text-xs font-medium uppercase text-slate-500">Total</p>
+                                        <p className="font-semibold text-slate-900">{formatCurrency(getPrecioTotalTurno(turno))}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-medium uppercase text-slate-500">Abonado</p>
+                                        <p className="font-semibold text-slate-900">{formatCurrency(turno.senia_pagada || 0)}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-medium uppercase text-slate-500">Pendiente</p>
+                                        <p className={getMontoPendienteTurno(turno) > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-emerald-700'}>
+                                          {formatCurrency(getMontoPendienteTurno(turno))}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                                      <span>{getCanalReservaLabel(turno.canal_reserva)}</span>
+                                      {turno.metodo_pago && <span>Metodo: {turno.metodo_pago}</span>}
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -1794,6 +2039,164 @@ export default function AgendaEmpleadoPage() {
           </div>
         )}
       </div>
+
+      <Dialog
+        open={cobroDialogOpen}
+        onOpenChange={(open) => {
+          setCobroDialogOpen(open);
+          if (!open) resetQrCobro();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Cobrar saldo pendiente</DialogTitle>
+            <DialogDescription>
+              Para finalizar este turno primero registrá el pago faltante.
+            </DialogDescription>
+          </DialogHeader>
+
+          {turnoActual && (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-slate-950">
+                      {(turnoActual as any).cliente_nombre || turnoActual.cliente?.nombre_completo || 'Cliente'}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {(turnoActual as any).servicio_nombre || turnoActual.servicio?.nombre || 'Servicio'}
+                    </p>
+                  </div>
+                  <Badge variant="secondary">{getPagoLabelTurno(turnoActual)}</Badge>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs uppercase text-slate-500">Total</p>
+                    <p className="font-semibold">{formatCurrency(getPrecioTotalTurno(turnoActual))}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-slate-500">Abonado</p>
+                    <p className="font-semibold">{formatCurrency(turnoActual.senia_pagada || 0)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-slate-500">A cobrar</p>
+                    <p className="font-semibold text-amber-700">{formatCurrency(getMontoPendienteTurno(turnoActual))}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setCobroMetodo('efectivo')}
+                  className={`rounded-xl border p-4 text-left transition ${cobroMetodo === 'efectivo' ? 'border-green-500 bg-green-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <DollarSign className="mb-2 h-5 w-5 text-green-600" />
+                  <p className="font-semibold">Efectivo</p>
+                  <p className="text-sm text-slate-500">Registrar cobro local y finalizar.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCobroMetodo('mercadopago_qr')}
+                  className={`rounded-xl border p-4 text-left transition ${cobroMetodo === 'mercadopago_qr' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <CreditCard className="mb-2 h-5 w-5 text-blue-600" />
+                  <p className="font-semibold">Mercado Pago QR</p>
+                  <p className="text-sm text-slate-500">QR, operación y opción forzada de prueba.</p>
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="notas-cierre">Notas internas al finalizar</Label>
+                <Textarea
+                  id="notas-cierre"
+                  value={notasEmpleado}
+                  onChange={(event) => setNotasEmpleado(event.target.value)}
+                  placeholder="Observaciones opcionales del cierre..."
+                  rows={3}
+                />
+              </div>
+
+              {cobroMetodo === 'mercadopago_qr' && (
+                <div className="space-y-4 rounded-xl border p-4">
+                  {!qrPreferenceId ? (
+                    <Button type="button" onClick={generarQrSaldo} disabled={procesandoCobro} className="w-full">
+                      {procesandoCobro ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Generar QR por saldo pendiente
+                    </Button>
+                  ) : (
+                    <>
+                      {qrPaymentLink && (
+                        <div className="flex justify-center rounded-lg border bg-white p-4">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPaymentLink)}`}
+                            alt="QR de pago Mercado Pago"
+                            className="h-60 w-60"
+                          />
+                        </div>
+                      )}
+                      <div className={`rounded-md border px-3 py-2 text-sm ${qrPaymentApproved ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                        <div className="flex items-center justify-center gap-2">
+                          {qrWaitingPayment && !qrPaymentApproved && <Loader2 className="h-4 w-4 animate-spin" />}
+                          <span>{qrStatusMessage || 'Esperando pago...'}</span>
+                        </div>
+                      </div>
+                      {!qrNative && qrPaymentLink && (
+                        <Button type="button" variant="outline" onClick={() => window.open(qrPaymentLink, '_blank')}>
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Abrir link
+                        </Button>
+                      )}
+                      <div className="space-y-2">
+                        <Label htmlFor="qr-payment-code">Número de operación o referencia de prueba</Label>
+                        <Input
+                          id="qr-payment-code"
+                          value={qrPaymentCode}
+                          onChange={(event) => setQrPaymentCode(event.target.value.trim())}
+                          placeholder="Ej: 1234567890"
+                        />
+                        <p className="text-xs text-slate-500">
+                          Si Mercado Pago falla, cargá una referencia y usá la confirmación forzada solo para pruebas.
+                        </p>
+                        {qrPaymentCodeError && <p className="text-xs text-red-600">{qrPaymentCodeError}</p>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCobroDialogOpen(false)}
+              disabled={procesandoCobro}
+            >
+              Cancelar
+            </Button>
+            {cobroMetodo === 'efectivo' ? (
+              <Button type="button" onClick={registrarEfectivoYFinalizar} disabled={procesandoCobro}>
+                {procesandoCobro ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Registrar efectivo y finalizar
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={confirmarQrYFinalizar}
+                disabled={procesandoCobro || !qrPreferenceId || !qrPaymentCode.trim()}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {procesandoCobro ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Confirmar/forzar recibimiento y finalizar
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog para cambiar estado */}
       <AlertDialog open={cambioEstadoDialog} onOpenChange={setCambioEstadoDialog}>
         <AlertDialogContent>

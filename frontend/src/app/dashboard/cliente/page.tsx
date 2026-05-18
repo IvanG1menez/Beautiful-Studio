@@ -2319,7 +2319,7 @@ export default function DashboardClientePage() {
                       onClick={confirmarCobroManualReprogramacion}
                       disabled={!manualReprogramacionCode.trim() || confirmandoManualReprogramacion}
                     >
-                      {confirmandoManualReprogramacion ? 'Confirmando...' : 'Confirmar'}
+                      {confirmandoManualReprogramacion ? 'Forzando...' : 'Forzar pago'}
                     </Button>
                   </div>
                   <p className="mt-2 text-xs text-amber-800">

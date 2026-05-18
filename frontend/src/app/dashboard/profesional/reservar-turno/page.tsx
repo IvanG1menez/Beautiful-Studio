@@ -109,6 +109,22 @@ const isPastOrSunday = (date: Date) => {
   return candidate < today || candidate.getDay() === 0;
 };
 
+const fechaKey = (date: Date) => format(date, 'yyyy-MM-dd');
+
+const getDiasDelMes = (date: Date) => {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const days: Date[] = [];
+
+  for (let day = new Date(first); day <= last; day.setDate(day.getDate() + 1)) {
+    days.push(new Date(day));
+  }
+
+  return days;
+};
+
 export default function ReservarTurnoProfesionalPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -135,6 +151,9 @@ export default function ReservarTurnoProfesionalPage() {
 
   const [servicioSeleccionado, setServicioSeleccionado] = useState<ServicioReserva | null>(null);
   const [fechaSeleccionada, setFechaSeleccionada] = useState<Date | undefined>(undefined);
+  const [mesCalendario, setMesCalendario] = useState(new Date());
+  const [disponibilidadCalendario, setDisponibilidadCalendario] = useState<Record<string, boolean>>({});
+  const [loadingCalendario, setLoadingCalendario] = useState(false);
   const [horariosDisponibles, setHorariosDisponibles] = useState<string[]>([]);
   const [horaSeleccionada, setHoraSeleccionada] = useState('');
   const [minutoSeleccionado, setMinutoSeleccionado] = useState('');
@@ -145,7 +164,6 @@ export default function ReservarTurnoProfesionalPage() {
 
   const [metodoPago, setMetodoPago] = useState<MetodoPago>('efectivo');
   const [tipoPago, setTipoPago] = useState<TipoPago>('PAGO_COMPLETO');
-  const [montoRecibido, setMontoRecibido] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -162,6 +180,12 @@ export default function ReservarTurnoProfesionalPage() {
   const [qrNative, setQrNative] = useState(false);
   const [paymentStatusMessage, setPaymentStatusMessage] = useState('');
   const [qrLinkKind, setQrLinkKind] = useState('');
+  const [qrPaymentApproved, setQrPaymentApproved] = useState(false);
+  const [qrConfirmation, setQrConfirmation] = useState<{
+    turnoId: number;
+    paymentId: string;
+    paymentMethod: 'mercadopago' | 'efectivo';
+  } | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clienteBloqueado = clienteRegistrado === true && Boolean(clienteData);
@@ -185,14 +209,11 @@ export default function ReservarTurnoProfesionalPage() {
   const montoSeniaFijo = servicioSeleccionado ? Number(servicioSeleccionado.monto_sena_fijo) || 0 : 0;
   const montoSenia = montoSeniaFijo > 0 ? montoSeniaFijo : (precioServicio * porcentajeSena) / 100;
   const montoACobrar = tipoPago === 'PAGO_COMPLETO' ? precioServicio : montoSenia;
-  const montoRecibidoNumerico = Number(montoRecibido.replace(',', '.')) || 0;
-  const vuelto = Math.max(0, montoRecibidoNumerico - montoACobrar);
-  const pagoExacto = metodoPago === 'efectivo' && tipoPago === 'PAGO_COMPLETO' && montoRecibidoNumerico === montoACobrar && montoACobrar > 0;
   const nombreIncompleto = clienteRegistrado === false && !clienteNombre.trim();
   const apellidoIncompleto = clienteRegistrado === false && !clienteApellido.trim();
   const telefonoIncompleto = clienteRegistrado === false && !clienteTelefono.trim();
-  const emailRequeridoQr = metodoPago === 'mercadopago_qr' && clienteRegistrado === false;
-  const emailIncompletoQr = emailRequeridoQr && !clienteEmail.trim();
+  const emailRequeridoClienteNuevo = clienteRegistrado === false;
+  const emailIncompletoClienteNuevo = emailRequeridoClienteNuevo && !clienteEmail.trim();
   const timeToMinutes = (time: string) => {
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
@@ -207,6 +228,12 @@ export default function ReservarTurnoProfesionalPage() {
   const horariosParaMostrar = fechaSeleccionada
     ? horariosDisponiblesCadaHora
     : HORARIOS_REFERENCIA;
+
+  const resumenClienteNombre = `${clienteNombre} ${clienteApellido}`.trim() || clienteData?.user?.full_name || 'Cliente';
+  const fechaTurnoResumen = fechaSeleccionada && horarioSeleccionado
+    ? `${format(fechaSeleccionada, "d 'de' MMMM yyyy", { locale: es })} - ${horarioSeleccionado} hs`
+    : '';
+
 
   useEffect(() => {
     const fetchServicios = async () => {
@@ -362,7 +389,7 @@ export default function ReservarTurnoProfesionalPage() {
         const data = await profesionalTurnosApi.buscarClientePorEmail(email);
         if (data.registrado) {
           setEmailAsociado(true);
-          setEmailError('Este mail ya pertenece a un cliente asociado');
+          setEmailError('Este email ya pertenece a un cliente registrado. Busca al cliente por DNI o verifica los datos antes de continuar.');
         } else {
           setEmailAsociado(false);
         }
@@ -402,7 +429,76 @@ export default function ReservarTurnoProfesionalPage() {
     }
   }, [servicioSeleccionado, user?.empleado_id]);
 
+  useEffect(() => {
+    if (!servicioSeleccionado || !user?.empleado_id) {
+      setDisponibilidadCalendario({});
+      return;
+    }
+
+    const controller = new AbortController();
+    const fetchDisponibilidadMes = async () => {
+      const dias = getDiasDelMes(mesCalendario).filter((date) => !isPastOrSunday(date));
+
+      setLoadingCalendario(true);
+      try {
+        const resultados = await Promise.all(
+          dias.map(async (date) => {
+            const key = fechaKey(date);
+            try {
+              const res = await apiClient.get<HorarioDisponible>('/turnos/disponibilidad/', {
+                params: {
+                  servicio: servicioSeleccionado.id,
+                  empleado: user.empleado_id,
+                  fecha: key,
+                },
+                signal: controller.signal,
+              });
+              return [key, Boolean(res.data.horarios?.length)] as const;
+            } catch {
+              return [key, false] as const;
+            }
+          }),
+        );
+
+        if (!controller.signal.aborted) {
+          setDisponibilidadCalendario((prev) => ({
+            ...prev,
+            ...Object.fromEntries(resultados),
+          }));
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoadingCalendario(false);
+      }
+    };
+
+    void fetchDisponibilidadMes();
+
+    return () => controller.abort();
+  }, [servicioSeleccionado, user?.empleado_id, mesCalendario]);
+
+  useEffect(() => {
+    if (!fechaSeleccionada) return;
+    const disponible = disponibilidadCalendario[fechaKey(fechaSeleccionada)];
+    if (disponible === false) {
+      setFechaSeleccionada(undefined);
+      setHorariosDisponibles([]);
+      setHoraSeleccionada('');
+      setMinutoSeleccionado('');
+    }
+  }, [disponibilidadCalendario, fechaSeleccionada]);
+
+  const fechaDeshabilitada = (date: Date) => {
+    if (isPastOrSunday(date)) return true;
+    if (!servicioSeleccionado || !user?.empleado_id) return true;
+    if (!datosClienteCompletos || emailIncompletoClienteNuevo || dniError || telefonoError || emailError || emailAsociado) return true;
+
+    const key = fechaKey(date);
+    const disponibilidad = disponibilidadCalendario[key];
+    return disponibilidad !== true;
+  };
+
   const handleFechaChange = (date: Date | undefined) => {
+    if (date && fechaDeshabilitada(date)) return;
     setFechaSeleccionada(date);
     setHoraSeleccionada('');
     setMinutoSeleccionado('');
@@ -423,10 +519,12 @@ export default function ReservarTurnoProfesionalPage() {
   }, [cargarDisponibilidadFecha, fechaSeleccionada]);
 
   useEffect(() => {
-    if (tipoPago !== 'PAGO_COMPLETO' || metodoPago !== 'efectivo') {
-      setMontoRecibido('');
-    }
-  }, [tipoPago, metodoPago]);
+    setDisponibilidadCalendario({});
+    setFechaSeleccionada(undefined);
+    setHorariosDisponibles([]);
+    setHoraSeleccionada('');
+    setMinutoSeleccionado('');
+  }, [servicioSeleccionado?.id, user?.empleado_id]);
 
   const fechaHoraIso = () => {
     if (!fechaSeleccionada || !horarioSeleccionado) return '';
@@ -438,6 +536,7 @@ export default function ReservarTurnoProfesionalPage() {
   ) => {
     if (clienteRegistrado && clienteData) {
       payload.cliente_id = clienteData.id;
+      payload.telefono = clienteTelefono || undefined;
       return;
     }
 
@@ -451,10 +550,13 @@ export default function ReservarTurnoProfesionalPage() {
     ? Boolean(clienteData)
     : Boolean(dni && clienteNombre.trim() && clienteApellido.trim() && clienteTelefono.trim());
 
-  const pagoCompletoValido =
-    metodoPago !== 'efectivo' ||
-    tipoPago !== 'PAGO_COMPLETO' ||
-    montoRecibidoNumerico >= montoACobrar;
+  useEffect(() => {
+    if (datosClienteCompletos && !emailIncompletoClienteNuevo && !dniError && !telefonoError && !emailError && !emailAsociado) return;
+    setFechaSeleccionada(undefined);
+    setHorariosDisponibles([]);
+    setHoraSeleccionada('');
+    setMinutoSeleccionado('');
+  }, [datosClienteCompletos, emailIncompletoClienteNuevo, dniError, telefonoError, emailError, emailAsociado]);
 
   const puedeConfirmar = Boolean(
     profesionalInicializado &&
@@ -464,8 +566,7 @@ export default function ReservarTurnoProfesionalPage() {
     fechaSeleccionada &&
     horarioDisponible &&
     datosClienteCompletos &&
-    !emailIncompletoQr &&
-    pagoCompletoValido &&
+    !emailIncompletoClienteNuevo &&
     !dniError &&
     !telefonoError &&
     !emailError &&
@@ -499,9 +600,13 @@ export default function ReservarTurnoProfesionalPage() {
     setSuccessMessage('');
 
     try {
-      await profesionalTurnosApi.reservarStaff(payload);
-      setSuccessMessage('Turno reservado correctamente');
-      router.push('/dashboard/profesional/agenda');
+      const result = await profesionalTurnosApi.reservarStaff(payload);
+      setQrConfirmation({
+        turnoId: result.turno.id,
+        paymentId: 'Efectivo',
+        paymentMethod: 'efectivo',
+      });
+      setQrDialogOpen(true);
     } catch (e: unknown) {
       setError(getErrorMessage(e, 'Error al reservar turno'));
     } finally {
@@ -543,7 +648,9 @@ export default function ReservarTurnoProfesionalPage() {
       setQrNative(Boolean(pref.qr_native));
       setPaymentCode('');
       setPaymentCodeError('');
-      setPaymentStatusMessage('Esperando confirmacion de Mercado Pago...');
+      setQrConfirmation(null);
+      setQrPaymentApproved(false);
+      setPaymentStatusMessage('Escanea el QR y completa el pago.');
       setIsWaitingPayment(true);
       setQrDialogOpen(true);
 
@@ -564,10 +671,8 @@ export default function ReservarTurnoProfesionalPage() {
             clearInterval(pollingRef.current!);
             pollingRef.current = null;
             setIsWaitingPayment(false);
-            setPaymentStatusMessage('Pago aprobado. Creando turno...');
-            setQrDialogOpen(false);
-            setSuccessMessage('Pago aprobado y turno creado');
-            router.push('/dashboard/profesional/agenda');
+            setQrPaymentApproved(true);
+            setPaymentStatusMessage('Pago confirmado. Ingresa el numero real de operacion para finalizar la reserva.');
           }
           if (body.status === 'cancelled') {
             clearInterval(pollingRef.current!);
@@ -593,7 +698,7 @@ export default function ReservarTurnoProfesionalPage() {
               : body.detail
                 ? ` ${body.detail}`
                 : '';
-            setPaymentStatusMessage(`Esperando confirmacion de Mercado Pago... (${pollingAttempts}).${detalle}`);
+            setPaymentStatusMessage(`Escanea el QR y completa el pago.${detalle}`);
           }
         } catch (pollingError: unknown) {
           clearInterval(pollingRef.current!);
@@ -633,9 +738,12 @@ export default function ReservarTurnoProfesionalPage() {
         pollingRef.current = null;
       }
       setIsWaitingPayment(false);
-      setQrDialogOpen(false);
-      setSuccessMessage(`Cobro confirmado y turno creado #${result.turno_id}`);
-      router.push('/dashboard/profesional/agenda');
+      setPaymentStatusMessage('Cobro confirmado y turno creado.');
+      setQrConfirmation({
+        turnoId: result.turno_id,
+        paymentId: codigoLimpio,
+        paymentMethod: 'mercadopago',
+      });
     } catch (e: unknown) {
       setPaymentCodeError(getErrorMessage(e, 'No se pudo confirmar el cobro manual.'));
     } finally {
@@ -644,6 +752,18 @@ export default function ReservarTurnoProfesionalPage() {
   };
 
   const handleQrDialogOpenChange = (open: boolean) => {
+    if (!open && qrConfirmation) {
+      setQrDialogOpen(false);
+      return;
+    }
+    if (!open && preferenceId && !qrConfirmation) {
+      if (isWaitingPayment) {
+        setCancelPaymentDialogOpen(true);
+      } else {
+        setPaymentCodeError('Para cerrar esta pantalla primero ingresa el numero real de operacion.');
+      }
+      return;
+    }
     if (!open && isWaitingPayment) {
       setCancelPaymentDialogOpen(true);
       return;
@@ -665,6 +785,8 @@ export default function ReservarTurnoProfesionalPage() {
     setPaymentLink('');
     setQrNative(false);
     setQrLinkKind('');
+    setQrConfirmation(null);
+    setQrPaymentApproved(false);
     setPaymentCode('');
     setPaymentCodeError('');
     setPaymentStatusMessage('');
@@ -676,6 +798,18 @@ export default function ReservarTurnoProfesionalPage() {
     } catch (e: unknown) {
       setError(getErrorMessage(e, 'No se pudo cancelar la transaccion en el backend. Revisá el pago antes de generar otro QR.'));
     }
+  };
+
+  const aceptarConfirmacionQr = () => {
+    setQrDialogOpen(false);
+    setPreferenceId('');
+    setPaymentLink('');
+    setPaymentCode('');
+    setPaymentCodeError('');
+    setQrConfirmation(null);
+    setQrPaymentApproved(false);
+    setSuccessMessage('Turno confirmado correctamente');
+    router.push('/dashboard/profesional/agenda');
   };
 
   useEffect(() => {
@@ -777,7 +911,7 @@ export default function ReservarTurnoProfesionalPage() {
                 <Alert className="border-orange-200 bg-orange-50 text-orange-900">
                   <AlertCircle className="h-4 w-4 text-orange-700" />
                   <AlertTitle>Cliente no registrado</AlertTitle>
-                  <AlertDescription>Los beneficios de lealtad no se aplicaran</AlertDescription>
+                  <AlertDescription>El cliente no esta registrado en el sistema.</AlertDescription>
                 </Alert>
               )}
 
@@ -834,20 +968,20 @@ export default function ReservarTurnoProfesionalPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">{emailRequeridoQr ? 'Email *' : 'Email opcional'}</Label>
+                <Label htmlFor="email">{emailRequeridoClienteNuevo ? 'Email *' : 'Email opcional'}</Label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <Input
                     id="email"
                     type="email"
-                    placeholder="cliente@ejemplo.com"
+                    placeholder="ejemplo.cliente.beautiful@gmail.com"
                     value={clienteEmail}
                     onChange={(e) => setClienteEmail(e.target.value)}
                     disabled={clienteBloqueado}
                     className="pl-9"
                   />
                 </div>
-                {emailIncompletoQr && <p className="mt-1 text-xs text-red-600">Obligatorio para registrar al cliente y enviar la confirmacion del pago.</p>}
+                {emailIncompletoClienteNuevo && <p className="mt-1 text-xs text-red-600">Obligatorio para registrar al cliente y enviarle el acceso al sistema.</p>}
                 {emailError && <p className="mt-1 text-xs text-red-600">{emailError}</p>}
               </div>
 
@@ -860,10 +994,10 @@ export default function ReservarTurnoProfesionalPage() {
                     placeholder="+54 9 11 2345-6789"
                     value={clienteTelefono}
                     onChange={(e) => setClienteTelefono(e.target.value.replace(/[^\d+\s()-]/g, ''))}
-                    disabled={clienteBloqueado}
                     className={`pl-9 ${telefonoIncompleto ? 'border-red-300 focus-visible:ring-red-200' : ''}`}
                   />
                 </div>
+                {clienteBloqueado && <p className="text-xs text-slate-500">Podés actualizar el teléfono si el cliente pide usar otro número.</p>}
                 {telefonoIncompleto && <p className="text-xs text-red-600">Obligatorio para avisar en caso de imprevistos</p>}
                 {telefonoError && <p className="mt-1 text-xs text-red-600">{telefonoError}</p>}
               </div>
@@ -883,7 +1017,11 @@ export default function ReservarTurnoProfesionalPage() {
                 <Label>Fecha</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="h-10 w-full justify-start text-left font-normal">
+                    <Button
+                      variant="outline"
+                      disabled={!datosClienteCompletos || emailIncompletoClienteNuevo || Boolean(dniError || telefonoError || emailError || emailAsociado)}
+                      className="h-10 w-full justify-start text-left font-normal"
+                    >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {fechaSeleccionada
                         ? format(fechaSeleccionada, 'dd/MM/yyyy')
@@ -893,12 +1031,23 @@ export default function ReservarTurnoProfesionalPage() {
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
+                      month={mesCalendario}
+                      onMonthChange={setMesCalendario}
                       selected={fechaSeleccionada}
                       onSelect={handleFechaChange}
-                      disabled={isPastOrSunday}
+                      disabled={fechaDeshabilitada}
                     />
                   </PopoverContent>
                 </Popover>
+                {loadingCalendario && (
+                  <p className="flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Cargando dias disponibles...
+                  </p>
+                )}
+                {(!datosClienteCompletos || emailIncompletoClienteNuevo || dniError || telefonoError || emailError || emailAsociado) && (
+                  <p className="text-xs text-slate-500">Primero completa los datos del cliente para elegir fecha y horario.</p>
+                )}
                 {fechaSeleccionada?.getDay() === 0 && (
                   <p className="text-xs text-amber-700">Los domingos el salon permanece cerrado.</p>
                 )}
@@ -917,7 +1066,7 @@ export default function ReservarTurnoProfesionalPage() {
                           key={horario}
                           type="button"
                           variant="outline"
-                          disabled={!fechaSeleccionada || loadingHorarios || !disponible}
+                          disabled={!datosClienteCompletos || !fechaSeleccionada || loadingHorarios || !disponible}
                           onClick={() => handleHorarioClick(horario)}
                           className={`h-9 rounded-md text-sm font-medium ${
                             seleccionado
@@ -945,9 +1094,6 @@ export default function ReservarTurnoProfesionalPage() {
                 )}
                 {horarioNoDisponible && (
                   <p className="text-xs font-medium text-red-600">No disponible</p>
-                )}
-                {!!fechaSeleccionada && !loadingHorarios && horariosDisponibles.length === 0 && (
-                  <p className="text-xs text-amber-700">No hay horarios disponibles para esa fecha.</p>
                 )}
               </div>
 
@@ -988,7 +1134,7 @@ export default function ReservarTurnoProfesionalPage() {
                   }`}
                 >
                   <CreditCard className="h-4 w-4" />
-                  <span className="font-medium">Efectivo / Caja</span>
+                  <span className="font-medium">Efectivo</span>
                 </button>
                 <button
                   type="button"
@@ -1045,32 +1191,6 @@ export default function ReservarTurnoProfesionalPage() {
                   </span>
                   <span className={`h-4 w-4 rounded-full border ${tipoPago === 'SENIA' ? 'border-emerald-500 bg-emerald-500 ring-4 ring-emerald-100' : 'border-slate-300'}`} />
                 </button>
-
-                {metodoPago === 'efectivo' && tipoPago === 'PAGO_COMPLETO' && (
-                  <div className="rounded-md border border-yellow-300 bg-yellow-50 p-4">
-                    <Label htmlFor="monto-recibido">Monto recibido</Label>
-                    <Input
-                      id="monto-recibido"
-                      inputMode="decimal"
-                      placeholder="Cuanto pago el cliente?"
-                      value={montoRecibido}
-                      onChange={(e) => setMontoRecibido(e.target.value.replace(/[^\d.,]/g, ''))}
-                      className="mt-2 border-yellow-300 bg-yellow-50 focus-visible:ring-yellow-200"
-                    />
-                    <div className="mt-3 flex items-center justify-between text-sm">
-                      <span className="text-slate-600">Vuelto</span>
-                      <span className="font-semibold text-slate-950">{formatCurrency(vuelto)}</span>
-                    </div>
-                    {pagoExacto && (
-                      <p className="mt-2 text-sm font-medium text-emerald-700">
-                        Pago exacto - Marcar como Pagado Total
-                      </p>
-                    )}
-                    {montoRecibidoNumerico > 0 && montoRecibidoNumerico < montoACobrar && (
-                      <p className="mt-2 text-sm text-red-600">El monto recibido no cubre el pago total.</p>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
 
@@ -1110,86 +1230,145 @@ export default function ReservarTurnoProfesionalPage() {
         </div>
 
         <Dialog open={qrDialogOpen} onOpenChange={handleQrDialogOpenChange}>
-          <DialogContent className="sm:max-w-md" showCloseButton={!isWaitingPayment}>
+          <DialogContent className="sm:max-w-md" showCloseButton={Boolean(qrConfirmation)}>
             <DialogHeader>
-              <DialogTitle>Escanear QR de Mercado Pago</DialogTitle>
+              <DialogTitle>{qrConfirmation ? 'Turno confirmado' : 'Escanear QR de Mercado Pago'}</DialogTitle>
               <DialogDescription>
-                Pedile al cliente que escanee el QR y complete el pago desde su celular.
+                {qrConfirmation
+                  ? 'El pago quedo registrado y el turno fue creado correctamente.'
+                  : 'Pedile al cliente que escanee el QR y complete el pago desde su celular.'}
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4">
-              <div className="rounded-lg border bg-slate-50 p-4 text-center">
-                <p className="text-sm text-slate-600">Monto a cobrar</p>
-                <p className="mt-1 text-3xl font-bold text-slate-950">{formatCurrency(montoACobrar)}</p>
-                <p className="mt-1 text-sm text-slate-600">{servicioSeleccionado?.nombre}</p>
-              </div>
-
-              {paymentLink && (
-                <div className="flex justify-center rounded-lg border bg-white p-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(paymentLink)}`}
-                    alt="QR de pago Mercado Pago"
-                    className="h-64 w-64"
-                  />
+            {qrConfirmation ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="h-5 w-5" />
+                    Reserva creada y notificaciones enviadas
+                  </div>
+                  <p className="mt-2 text-sm text-emerald-800">
+                    {qrConfirmation.paymentMethod === 'mercadopago'
+                      ? `Operacion Mercado Pago: ${qrConfirmation.paymentId}`
+                      : 'Pago registrado: Efectivo'}
+                  </p>
                 </div>
-              )}
 
-              <div className="flex items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                {isWaitingPayment && <Loader2 className="h-4 w-4 animate-spin" />}
-                <span>{paymentStatusMessage || (isWaitingPayment ? 'Esperando confirmacion de Mercado Pago...' : 'Pago pendiente de confirmacion.')}</span>
-              </div>
-
-              <Alert className="border-blue-200 bg-blue-50 text-blue-950">
-                <AlertTitle>{mpEnv === 'test' || mpEnv === 'sandbox' ? 'Modo prueba Mercado Pago' : 'Pago Mercado Pago'}</AlertTitle>
-                <AlertDescription>
-                  {qrNative
-                    ? 'Este es un QR nativo para la app de Mercado Pago. El lector interno deberia mostrar el concepto de la orden.'
-                    : `Usando ${qrLinkKind || 'link de pago'}. Si el lector interno de Mercado Pago muestra Producto o falla, escanea con la camara del celular o usa Abrir link.`}
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-2 rounded-lg border p-3">
-                <Label htmlFor="payment-code">Numero de operacion (obligatorio)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="payment-code"
-                    placeholder="Ej: 1234567890"
-                    value={paymentCode}
-                    onChange={(e) => setPaymentCode(e.target.value.replace(/\D/g, ''))}
-                    disabled={isConfirmingPaymentCode}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={confirmarPagoPorCodigo}
-                    disabled={!paymentCode.trim() || isConfirmingPaymentCode}
-                  >
-                    {isConfirmingPaymentCode ? 'Confirmando...' : 'Confirmar cobro'}
-                  </Button>
+                <div className="rounded-lg border bg-white p-4 text-sm">
+                  <div className="grid gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Cliente</p>
+                      <p className="font-semibold text-slate-950">{resumenClienteNombre}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Fecha y hora</p>
+                      <p className="font-semibold text-slate-950">{fechaTurnoResumen}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Servicio</p>
+                      <p className="font-semibold text-slate-950">{servicioSeleccionado?.nombre}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase text-slate-500">Pago</p>
+                        <p className="font-semibold text-slate-950">{tipoPago === 'PAGO_COMPLETO' ? 'Servicio completo' : 'Sena'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium uppercase text-slate-500">Monto</p>
+                        <p className="font-semibold text-slate-950">{formatCurrency(montoACobrar)}</p>
+                      </div>
+                    </div>
+                    {clienteTelefono && (
+                      <div>
+                        <p className="text-xs font-medium uppercase text-slate-500">Telefono</p>
+                        <p className="font-semibold text-slate-950">{clienteTelefono}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500">
-                  Usalo solo si verificaste en tu cuenta que el dinero fue recibido. Se registra el numero de operacion y se crea el turno.
-                </p>
-                {paymentCodeError && <p className="text-xs text-red-600">{paymentCodeError}</p>}
               </div>
-            </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-slate-50 p-4 text-center">
+                  <p className="text-sm text-slate-600">Monto a cobrar</p>
+                  <p className="mt-1 text-3xl font-bold text-slate-950">{formatCurrency(montoACobrar)}</p>
+                  <p className="mt-1 text-sm text-slate-600">{servicioSeleccionado?.nombre}</p>
+                </div>
+
+                {paymentLink && (
+                  <div className="flex justify-center rounded-lg border bg-white p-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(paymentLink)}`}
+                      alt="QR de pago Mercado Pago"
+                      className="h-64 w-64"
+                    />
+                  </div>
+                )}
+
+                <div className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm ${qrPaymentApproved ? 'border-emerald-200 bg-emerald-50 font-serif text-base font-semibold text-emerald-950' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                  {isWaitingPayment && !qrPaymentApproved && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {qrPaymentApproved && <CheckCircle2 className="h-4 w-4" />}
+                  <span>{paymentStatusMessage || 'Escanea el QR y completa el pago.'}</span>
+                </div>
+
+                <Alert className="border-blue-200 bg-blue-50 text-blue-950">
+                  <AlertTitle>{mpEnv === 'test' || mpEnv === 'sandbox' ? 'Modo prueba Mercado Pago' : 'Pago Mercado Pago'}</AlertTitle>
+                  <AlertDescription>
+                    {qrNative
+                      ? 'Este es un QR nativo para la app de Mercado Pago. El lector interno deberia mostrar el concepto de la orden.'
+                      : `Usando ${qrLinkKind || 'link de pago'}. Si el lector interno de Mercado Pago muestra Producto o falla, escanea con la camara del celular o usa Abrir link.`}
+                  </AlertDescription>
+                </Alert>
+
+                <div className="space-y-2 rounded-lg border p-3">
+                  <Label htmlFor="payment-code">Numero real de operacion (obligatorio)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="payment-code"
+                      placeholder="Ej: 1234567890"
+                      value={paymentCode}
+                      onChange={(e) => setPaymentCode(e.target.value.replace(/\D/g, ''))}
+                      disabled={isConfirmingPaymentCode}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={confirmarPagoPorCodigo}
+                      disabled={!paymentCode.trim() || isConfirmingPaymentCode}
+                    >
+                      {isConfirmingPaymentCode ? 'Forzando...' : 'Forzar pago'}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    No cierres esta pantalla hasta cargar el numero real que figura en Mercado Pago. Al confirmarlo se crea el turno y se envian las notificaciones.
+                  </p>
+                  {paymentCodeError && <p className="text-xs text-red-600">{paymentCodeError}</p>}
+                </div>
+              </div>
+            )}
 
             <DialogFooter>
-              {paymentLink && !qrNative && (
+              {qrConfirmation ? (
+                <Button type="button" onClick={aceptarConfirmacionQr} className="w-full">
+                  Aceptar
+                </Button>
+              ) : paymentLink && !qrNative ? (
                 <Button type="button" variant="outline" onClick={() => window.open(paymentLink, '_blank')}>
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Abrir link
                 </Button>
+              ) : null}
+              {!qrConfirmation && (
+                <Button
+                  type="button"
+                  variant={isWaitingPayment ? 'destructive' : 'secondary'}
+                  disabled={!isWaitingPayment}
+                  onClick={() => setCancelPaymentDialogOpen(true)}
+                >
+                  {isWaitingPayment ? 'Cancelar transaccion' : 'Ingrese numero de operacion'}
+                </Button>
               )}
-              <Button
-                type="button"
-                variant={isWaitingPayment ? 'destructive' : 'secondary'}
-                onClick={() => (isWaitingPayment ? setCancelPaymentDialogOpen(true) : setQrDialogOpen(false))}
-              >
-                {isWaitingPayment ? 'Cancelar transaccion' : 'Cerrar'}
-              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

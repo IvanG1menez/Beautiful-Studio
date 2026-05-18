@@ -122,6 +122,12 @@ class CancelarPagoStaffSerializer(serializers.Serializer):
         return preference_id
 
 
+class CrearCobroTurnoStaffSerializer(serializers.Serializer):
+    """Valida la creación de un QR para cobrar saldo de un turno existente."""
+
+    turno_id = serializers.IntegerField(min_value=1)
+
+
 class ConfirmarPagoManualSerializer(serializers.Serializer):
     """Valida el cierre manual de un pago cuando Mercado Pago no confirma a tiempo."""
 

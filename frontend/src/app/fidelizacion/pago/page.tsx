@@ -3,6 +3,8 @@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { getAuthHeaders, getJsonAuthHeaders } from "@/lib/auth-headers";
 import {
   AlertCircle,
@@ -87,6 +89,9 @@ export default function PagoFidelizacionPage() {
   const mpTabCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [mpTabClosed, setMpTabClosed] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [manualPaymentCode, setManualPaymentCode] = useState("");
+  const [manualPaymentError, setManualPaymentError] = useState("");
+  const [confirmingManualPayment, setConfirmingManualPayment] = useState(false);
   const comprobanteRef = useRef<HTMLDivElement | null>(null);
 
   // Cargar datos de servicio y profesional
@@ -328,6 +333,49 @@ export default function PagoFidelizacionPage() {
     }
     setIsWaitingPayment(false);
     setPreferenceId("");
+    setManualPaymentCode("");
+    setManualPaymentError("");
+  };
+
+  const confirmarCobroManual = async () => {
+    const codigoLimpio = manualPaymentCode.trim();
+    if (!preferenceId || !codigoLimpio) {
+      setManualPaymentError("Ingresá el número de operación que figura en Mercado Pago.");
+      return;
+    }
+
+    setConfirmingManualPayment(true);
+    setManualPaymentError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/mercadopago/confirmar-cobro-manual/`, {
+        method: "POST",
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({
+          preference_id: preferenceId,
+          payment_id: codigoLimpio,
+          motivo: "Pago fidelización forzado por cliente",
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || body.error || "No se pudo forzar el pago.");
+      }
+
+      const body = await response.json();
+      if (pollingIntervalRef.current !== null) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+      setIsWaitingPayment(false);
+      setTurnoId(body.turno_id || null);
+      setSuccess(true);
+    } catch (error: any) {
+      setManualPaymentError(error.message || "No se pudo forzar el pago.");
+    } finally {
+      setConfirmingManualPayment(false);
+    }
   };
 
   const formatearMoneda = (valor?: string) => {
@@ -611,6 +659,33 @@ export default function PagoFidelizacionPage() {
                 <p className="text-gray-600 text-sm">
                   Completá el pago en la pestaña de Mercado Pago. Esta pantalla se actualizará automáticamente.
                 </p>
+                <div className="w-full rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+                  <Label htmlFor="manual-fidelizacion-code" className="text-sm text-amber-950">
+                    Número de operación si MP no confirma
+                  </Label>
+                  <div className="mt-2 flex gap-2">
+                    <Input
+                      id="manual-fidelizacion-code"
+                      value={manualPaymentCode}
+                      onChange={(event) => setManualPaymentCode(event.target.value.replace(/\D/g, ""))}
+                      placeholder="Ej: 1234567890"
+                      disabled={confirmingManualPayment}
+                      className="bg-white"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={confirmarCobroManual}
+                      disabled={!manualPaymentCode.trim() || confirmingManualPayment}
+                    >
+                      {confirmingManualPayment ? "Forzando..." : "Forzar pago"}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-amber-800">
+                    Usalo solo si el pago figura recibido en Mercado Pago.
+                  </p>
+                  {manualPaymentError && <p className="mt-2 text-xs text-red-600">{manualPaymentError}</p>}
+                </div>
                 <Button variant="ghost" size="sm" onClick={handleCancelarPago}>
                   Cancelar y volver
                 </Button>

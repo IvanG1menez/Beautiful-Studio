@@ -10,6 +10,32 @@ from apps.empleados.serializers import EmpleadoListSerializer
 from apps.servicios.serializers import ServicioSerializer
 
 
+def calcular_monto_pendiente_turno(obj: Turno) -> Decimal:
+    """Calcula el saldo real que falta cobrar para completar el turno."""
+
+    precio_base = Decimal(obj.precio_final if obj.precio_final is not None else 0)
+    if precio_base <= 0 and obj.servicio:
+        precio_base = Decimal(obj.servicio.precio or 0)
+
+    senia = Decimal(obj.senia_pagada or 0)
+    descuento = Decimal("0.00")
+
+    try:
+        from .models import LogReasignacion
+
+        log = (
+            LogReasignacion.objects.filter(turno_cancelado=obj, estado_final="aceptada")
+            .order_by("-id")
+            .first()
+        )
+        if log and log.monto_descuento is not None:
+            descuento = Decimal(log.monto_descuento)
+    except Exception:
+        descuento = Decimal("0.00")
+
+    return Turno.calcular_pago_final(precio_base, descuento, senia)
+
+
 class TurnoListSerializer(serializers.ModelSerializer):
     """Serializer para listar turnos (vista resumida)"""
 
@@ -51,6 +77,8 @@ class TurnoListSerializer(serializers.ModelSerializer):
     reprogramaciones_mensuales_usadas = serializers.SerializerMethodField()
     reprogramaciones_mensuales_max = serializers.SerializerMethodField()
     reprogramaciones_mensuales_restantes = serializers.SerializerMethodField()
+    fue_reprogramado = serializers.SerializerMethodField()
+    ultimo_movimiento_reprogramacion = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
@@ -99,6 +127,8 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "reprogramaciones_mensuales_usadas",
             "reprogramaciones_mensuales_max",
             "reprogramaciones_mensuales_restantes",
+            "fue_reprogramado",
+            "ultimo_movimiento_reprogramacion",
             "notas_cliente",
             "notas_empleado",
             "reacomodamiento_exitoso",
@@ -162,6 +192,39 @@ class TurnoListSerializer(serializers.ModelSerializer):
             turno_cancelado=obj, estado_final="aceptada"
         ).exists()
 
+    def get_fue_reprogramado(self, obj):
+        return obj.historial.filter(accion="Reprogramacion de turno").exists()
+
+    def get_ultimo_movimiento_reprogramacion(self, obj):
+        import re
+        from datetime import datetime
+
+        historial = obj.historial.filter(accion="Reprogramacion de turno").order_by("-created_at").first()
+        if not historial:
+            return None
+
+        movimiento = {
+            "created_at": historial.created_at,
+            "observaciones": historial.observaciones or "",
+            "tipo": "reprogramado",
+        }
+
+        match = re.search(
+            r"de (\d{2}/\d{2}/\d{4} \d{2}:\d{2}) a (\d{2}/\d{2}/\d{4} \d{2}:\d{2})",
+            historial.observaciones or "",
+        )
+        if match:
+            try:
+                anterior = datetime.strptime(match.group(1), "%d/%m/%Y %H:%M")
+                nueva = datetime.strptime(match.group(2), "%d/%m/%Y %H:%M")
+                movimiento["tipo"] = "adelantado" if nueva < anterior else "postergado"
+                movimiento["fecha_anterior"] = match.group(1)
+                movimiento["fecha_nueva"] = match.group(2)
+            except Exception:
+                pass
+
+        return movimiento
+
     def get_tiene_pago_mp(self, obj):
         """Indica si el turno tiene un pago de Mercado Pago aprobado asociado."""
         try:
@@ -205,25 +268,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
         - En caso contrario usa el monto original sin bonos.
         """
 
-        precio_servicio = Decimal(obj.servicio.precio if obj.servicio else 0)
-        senia = Decimal(obj.senia_pagada or 0)
-
-        # Descuento por reacomodamiento (bono Proceso 2)
-        descuento_reacomodamiento = self._get_descuento_reacomodamiento(obj)
-        if descuento_reacomodamiento > 0:
-            return Turno.calcular_pago_final(
-                precio_servicio, descuento_reacomodamiento, senia
-            )
-
-        # Si hay precio_final (por ejemplo, fidelización u otros), usarlo
-        if obj.precio_final is not None:
-            try:
-                return Decimal(obj.precio_final)
-            except Exception:
-                pass
-
-        # Fallback: sin bonos ni descuentos especiales
-        return self.get_monto_pendiente_original(obj)
+        return calcular_monto_pendiente_turno(obj)
 
     def get_descuento_aplicado(self, obj: Turno) -> Decimal:
         """Diferencia entre el monto original y el actual (bono aplicado)."""
@@ -537,6 +582,13 @@ class TurnoUpdateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     f'No se puede cambiar de estado "{estado_actual}" a "{value}".'
                 )
+
+            if value == "completado" and value != estado_actual:
+                pendiente = calcular_monto_pendiente_turno(self.instance)
+                if pendiente > Decimal("0.00"):
+                    raise serializers.ValidationError(
+                        f"No se puede finalizar el turno: falta registrar un pago de ${pendiente}."
+                    )
 
             # Restricción operativa de inicio deshabilitada en modo test.
             # En producción deberá volver a activarse para respetar fecha/hora programadas.

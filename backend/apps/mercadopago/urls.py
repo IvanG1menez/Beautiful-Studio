@@ -6,6 +6,7 @@ from .views import (
     ComprobantePagoView,
     ConfirmarCobroManualView,
     ConfirmarPagoStaffView,
+    CrearCobroTurnoStaffView,
     CrearPreferenciaView,
     CrearPreferenciaSinTurnoView,
     CrearPreferenciaReprogramacionView,
@@ -43,6 +44,11 @@ urlpatterns = [
         "confirmar-cobro-manual/",
         ConfirmarCobroManualView.as_view(),
         name="confirmar-cobro-manual",
+    ),
+    path(
+        "cobro-turno-staff/",
+        CrearCobroTurnoStaffView.as_view(),
+        name="crear-cobro-turno-staff",
     ),
     path(
         "preferencia-reprogramacion/",

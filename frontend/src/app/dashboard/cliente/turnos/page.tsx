@@ -5,11 +5,12 @@ import { Badge } from '@/components/ui/badge';
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { formatDate, formatDateTimeReadable, formatTime } from '@/lib/dateUtils';
 import { AlertCircle, Calendar, CalendarDays, CheckCircle, Clock, Filter, Loader2, Plus, Search, User, X, XCircle } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -93,6 +94,15 @@ export default function TurnosClientePage() {
   const [cancelError, setCancelError] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
   const motivoCancelacionValido = motivoCancelacion.trim().length > 0;
+  const [turnoAFinalizar, setTurnoAFinalizar] = useState<Turno | null>(null);
+  const [finalizarConfirmOpen, setFinalizarConfirmOpen] = useState(false);
+  const [pagoFinalOpen, setPagoFinalOpen] = useState(false);
+  const [finalizando, setFinalizando] = useState(false);
+  const [qrPreferenceId, setQrPreferenceId] = useState('');
+  const [qrPaymentLink, setQrPaymentLink] = useState('');
+  const [qrPaymentCode, setQrPaymentCode] = useState('');
+  const [qrPaymentError, setQrPaymentError] = useState('');
+  const [generandoQr, setGenerandoQr] = useState(false);
 
   // Cargar turnos
   const fetchTurnos = async () => {
@@ -532,6 +542,114 @@ export default function TurnosClientePage() {
     };
   };
 
+  const getMontoPendiente = (turno: Turno) => {
+    const precioTotal = parseFloat(turno.precio_final || turno.servicio_precio || '0');
+    const senia = parseFloat(turno.senia_pagada || '0');
+    const pendiente = parseFloat(turno.monto_pendiente || String(Math.max(0, precioTotal - senia)));
+    return Number.isFinite(pendiente) ? Math.max(0, pendiente) : 0;
+  };
+
+  const abrirFinalizar = (turno: Turno) => {
+    setTurnoAFinalizar(turno);
+    setQrPreferenceId('');
+    setQrPaymentLink('');
+    setQrPaymentCode('');
+    setQrPaymentError('');
+
+    if (getMontoPendiente(turno) > 0.01) {
+      setPagoFinalOpen(true);
+      return;
+    }
+
+    setFinalizarConfirmOpen(true);
+  };
+
+  const finalizarTurno = async () => {
+    if (!turnoAFinalizar) return;
+    setFinalizando(true);
+    try {
+      const response = await fetch(`/api/turnos/${turnoAFinalizar.id}/`, {
+        method: 'PATCH',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ estado: 'completado' }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.estado?.[0] || body.error || body.detail || 'No se pudo finalizar el turno');
+      }
+
+      setFinalizarConfirmOpen(false);
+      setPagoFinalOpen(false);
+      setTurnoAFinalizar(null);
+      await fetchTurnos();
+      showNotification('Turno finalizado', 'Tu turno quedó marcado como finalizado correctamente.', 'success');
+    } catch (error: any) {
+      showNotification('No se pudo finalizar', error.message || 'Intentá nuevamente.', 'error');
+    } finally {
+      setFinalizando(false);
+    }
+  };
+
+  const generarQrFinalizacion = async () => {
+    if (!turnoAFinalizar) return;
+    setGenerandoQr(true);
+    setQrPaymentError('');
+    try {
+      const response = await fetch('/api/mercadopago/cobro-turno-staff/', {
+        method: 'POST',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ turno_id: turnoAFinalizar.id }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || body.error || 'No se pudo generar el QR');
+      }
+
+      const pref = await response.json();
+      setQrPreferenceId(pref.preference_id);
+      setQrPaymentLink(pref.qr_data || pref.qr_init_point || pref.init_point || '');
+    } catch (error: any) {
+      setQrPaymentError(error.message || 'No se pudo generar el QR');
+    } finally {
+      setGenerandoQr(false);
+    }
+  };
+
+  const forzarPagoYFinalizar = async () => {
+    if (!turnoAFinalizar || !qrPreferenceId) return;
+    const codigo = qrPaymentCode.trim();
+    if (!codigo) {
+      setQrPaymentError('Ingresá el número de operación para forzar el pago.');
+      return;
+    }
+
+    setFinalizando(true);
+    setQrPaymentError('');
+    try {
+      const response = await fetch('/api/mercadopago/confirmar-cobro-manual/', {
+        method: 'POST',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({
+          preference_id: qrPreferenceId,
+          payment_id: codigo,
+          motivo: 'Pago final de turno forzado por cliente',
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || body.error || 'No se pudo forzar el pago');
+      }
+
+      await finalizarTurno();
+    } catch (error: any) {
+      setQrPaymentError(error.message || 'No se pudo forzar el pago');
+      setFinalizando(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -956,6 +1074,16 @@ export default function TurnosClientePage() {
                         Ver comprobante
                       </Button>
                     )}
+                    {turno.estado === 'en_proceso' && (
+                      <Button
+                        size="sm"
+                        onClick={() => abrirFinalizar(turno)}
+                        className="whitespace-nowrap bg-green-600 hover:bg-green-700"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-1" />
+                        Finalizar
+                      </Button>
+                    )}
                     {filter !== 'pasados' && !isCompletado && !isCancelado && (
                       <Button
                         variant="outline"
@@ -1155,6 +1283,90 @@ export default function TurnosClientePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={finalizarConfirmOpen} onOpenChange={setFinalizarConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Dar por finalizado el turno?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Confirmá solo si el servicio ya terminó. El turno quedará marcado como finalizado.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={finalizando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={finalizarTurno} disabled={finalizando} className="bg-green-600 hover:bg-green-700">
+              {finalizando ? 'Finalizando...' : 'Sí, finalizar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={pagoFinalOpen} onOpenChange={setPagoFinalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Pago pendiente para finalizar</DialogTitle>
+            <DialogDescription>
+              Antes de finalizar el turno tenés que abonar el saldo restante.
+            </DialogDescription>
+          </DialogHeader>
+
+          {turnoAFinalizar && (
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-slate-50 p-4 text-sm">
+                <p className="font-semibold text-slate-900">{turnoAFinalizar.servicio_nombre}</p>
+                <p className="text-slate-600">Profesional: {turnoAFinalizar.empleado_nombre}</p>
+                <div className="mt-3 flex items-center justify-between border-t pt-3">
+                  <span className="text-slate-600">Saldo a pagar</span>
+                  <span className="text-xl font-bold text-amber-700">${getMontoPendiente(turnoAFinalizar).toFixed(0)}</span>
+                </div>
+              </div>
+
+              {!qrPreferenceId ? (
+                <Button onClick={generarQrFinalizacion} disabled={generandoQr} className="w-full">
+                  {generandoQr ? 'Generando QR...' : 'Generar QR de Mercado Pago'}
+                </Button>
+              ) : (
+                <div className="space-y-4">
+                  {qrPaymentLink && (
+                    <div className="flex justify-center rounded-lg border bg-white p-4">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPaymentLink)}`}
+                        alt="QR de pago Mercado Pago"
+                        className="h-60 w-60"
+                      />
+                    </div>
+                  )}
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <Label htmlFor="final-payment-code">Número de operación</Label>
+                    <div className="mt-2 flex gap-2">
+                      <Input
+                        id="final-payment-code"
+                        value={qrPaymentCode}
+                        onChange={(event) => setQrPaymentCode(event.target.value.replace(/\D/g, ''))}
+                        placeholder="Ej: 1234567890"
+                      />
+                      <Button onClick={forzarPagoYFinalizar} disabled={!qrPaymentCode.trim() || finalizando} variant="outline">
+                        {finalizando ? 'Forzando...' : 'Forzar pago'}
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-xs text-amber-800">
+                      Usalo solo si el pago figura recibido en Mercado Pago.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {qrPaymentError && <p className="text-sm text-red-600">{qrPaymentError}</p>}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPagoFinalOpen(false)} disabled={finalizando}>
+              Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal de notificación */}
       <AlertDialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>

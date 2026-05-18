@@ -119,6 +119,10 @@ export interface PreferenciaStaffPayload {
   telefono?: string;
 }
 
+export interface CobroTurnoStaffPayload {
+  turno_id: number;
+}
+
 export const profesionalTurnosApi = {
   buscarClientePorDni: async (dni: string): Promise<BuscarClientePorDniResponse> => {
     try {
@@ -160,6 +164,19 @@ export const profesionalTurnosApi = {
     try {
       const response = await apiClient.post<PreferenciaStaffResponse>(
         '/mercadopago/preferencia-staff/',
+        payload,
+      );
+      return response.data;
+    } catch (error: unknown) {
+      const apiError = handleApiError(error);
+      throw new Error(apiError.message);
+    }
+  },
+
+  crearCobroTurnoStaff: async (payload: CobroTurnoStaffPayload): Promise<PreferenciaStaffResponse & { monto?: string }> => {
+    try {
+      const response = await apiClient.post<PreferenciaStaffResponse & { monto?: string }>(
+        '/mercadopago/cobro-turno-staff/',
         payload,
       );
       return response.data;

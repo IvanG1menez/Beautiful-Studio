@@ -1004,6 +1004,20 @@ export default function NuevoTurnoPage() {
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }));
   };
 
+  const getPeriodoHorario = (horario: string) => {
+    const hora = Number(horario.split(':')[0] || 0);
+    if (hora < 12) return 'Mañana';
+    if (hora < 17) return 'Tarde';
+    return 'Noche';
+  };
+
+  const horariosAgrupados = horariosDisponiblesOrdenados.reduce<Record<string, string[]>>((acc, horario) => {
+    const periodo = getPeriodoHorario(horario);
+    if (!acc[periodo]) acc[periodo] = [];
+    acc[periodo].push(horario);
+    return acc;
+  }, {});
+
   // ── Pantalla de espera mientras se confirma el pago en Mercado Pago ──
   if (isWaitingPayment) {
     const handleCancelPayment = () => {
@@ -1108,7 +1122,7 @@ export default function NuevoTurnoPage() {
                       onClick={confirmarCobroManual}
                       disabled={!manualPaymentCode.trim() || confirmingManualPayment}
                     >
-                      {confirmingManualPayment ? 'Confirmando...' : 'Confirmar'}
+                      {confirmingManualPayment ? 'Forzando...' : 'Forzar pago'}
                     </Button>
                   </div>
                   <p className="mt-2 text-xs text-amber-800">
@@ -1756,43 +1770,71 @@ export default function NuevoTurnoPage() {
                     </div>
                   ) : horariosDisponiblesOrdenados.length > 0 ? (
                     <>
-                      <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3.5">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                          Horario más próximo disponible:
-                        </p>
-                        <p className="text-xl font-bold leading-tight text-emerald-800">
-                          {proximoHorarioDisponible || horariosDisponiblesOrdenados[0]}
-                        </p>
+                      <div className="mb-4 overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50">
+                        <button
+                          type="button"
+                          onClick={() => setHorarioSeleccionado(proximoHorarioDisponible || horariosDisponiblesOrdenados[0])}
+                          className="flex w-full items-center justify-between gap-4 p-4 text-left transition hover:bg-emerald-100/70"
+                        >
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                              Recomendado para reservar rápido
+                            </p>
+                            <p className="mt-1 text-sm text-emerald-800">El primer horario libre del día seleccionado.</p>
+                          </div>
+                          <div className="rounded-2xl bg-white px-4 py-2 text-2xl font-bold text-emerald-800 shadow-sm">
+                            {proximoHorarioDisponible || horariosDisponiblesOrdenados[0]}
+                          </div>
+                        </button>
                       </div>
 
-                      <div className="max-h-64 overflow-y-auto pr-1.5">
-                        <div className="grid grid-cols-3 gap-2.5">
-                          {horariosDisponiblesOrdenados.map((horario) => (
-                            <button
-                              key={horario}
-                              type="button"
-                              onClick={() => setHorarioSeleccionado(horario)}
-                              className={`h-10 rounded-xl border text-sm font-semibold transition-all ${horarioSeleccionado === horario
-                                ? 'border-transparent bg-linear-to-r from-indigo-500 to-violet-500 text-white shadow-md'
-                                : 'border-slate-300 bg-white text-slate-700 hover:border-primary/40 hover:bg-primary/5'
-                                }`}
-                            >
-                              {horario}
-                            </button>
-                          ))}
-                        </div>
+                      <div className="max-h-[22rem] space-y-4 overflow-y-auto pr-1.5">
+                        {['Mañana', 'Tarde', 'Noche'].map((periodo) => {
+                          const horarios = horariosAgrupados[periodo] || [];
+                          if (horarios.length === 0) return null;
+
+                          return (
+                            <div key={periodo} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="mb-3 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-bold text-slate-900">{periodo}</p>
+                                  <p className="text-xs text-slate-500">{horarios.length} horarios disponibles</p>
+                                </div>
+                                <Badge variant="outline" className="bg-white">
+                                  {periodo === 'Mañana' ? 'hasta 12:00' : periodo === 'Tarde' ? '12:00 a 17:00' : 'desde 17:00'}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                {horarios.map((horario) => {
+                                  const seleccionado = horarioSeleccionado === horario;
+                                  return (
+                                    <button
+                                      key={horario}
+                                      type="button"
+                                      onClick={() => setHorarioSeleccionado(horario)}
+                                      className={`rounded-2xl border px-3 py-3 text-left transition-all ${seleccionado
+                                        ? 'border-violet-500 bg-violet-600 text-white shadow-md shadow-violet-200'
+                                        : 'border-slate-200 bg-white text-slate-800 hover:border-violet-300 hover:bg-violet-50'
+                                        }`}
+                                    >
+                                      <span className="block text-lg font-bold leading-none">{horario}</span>
+                                      <span className={`mt-1 block text-xs ${seleccionado ? 'text-violet-100' : 'text-slate-500'}`}>
+                                        {seleccionado ? 'Horario seleccionado' : 'Disponible'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
 
-                      <div className="mt-4 flex items-center gap-4 border-t border-slate-100 pt-3 text-xs text-slate-500">
-                        <div className="flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-full border border-slate-400 bg-white" />
-                          <span>Disponible</span>
+                      {horarioSeleccionado && (
+                        <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
+                          <span className="font-semibold">Seleccionaste:</span> {horarioSeleccionado} hs. Tocá continuar para revisar y pagar la reserva.
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
-                          <span>Seleccionado</span>
-                        </div>
-                      </div>
+                      )}
                     </>
                   ) : (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 py-8 text-center">

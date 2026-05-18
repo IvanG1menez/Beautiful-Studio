@@ -176,7 +176,18 @@ export interface Turno {
   metodo_pago?: 'mercadopago' | 'mercadopago_qr' | 'efectivo' | 'transferencia' | 'mixto' | null;
   tipo_pago?: 'SIN_PAGO' | 'SENIA' | 'PAGO_COMPLETO' | null;
   monto_pendiente?: string;
+  monto_pendiente_original?: string;
   pagado_completo?: boolean;
+  descuento_aplicado?: string;
+  reacomodamiento_exitoso?: boolean;
+  fue_reprogramado?: boolean;
+  ultimo_movimiento_reprogramacion?: {
+    created_at?: string;
+    observaciones?: string;
+    tipo?: 'reprogramado' | 'adelantado' | 'postergado';
+    fecha_anterior?: string;
+    fecha_nueva?: string;
+  } | null;
   puede_reprogramar?: boolean;
   motivo_no_reprogramable?: string;
   reprogramacion_bloqueada_codigo?: string | null;
