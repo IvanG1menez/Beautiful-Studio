@@ -657,7 +657,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     f"No encontre fechas proximas disponibles con {profesional}.\n"
-                    "Para ver otros profesionales o solicitar reprogramacion flexible, entra a tu panel web."
+                    "Para ver otros profesionales o mas opciones, entra a tu panel web."
                 ),
                 reply_markup={
                     "inline_keyboard": [

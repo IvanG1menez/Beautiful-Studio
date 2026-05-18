@@ -3,12 +3,9 @@
 import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
-import { useAuth } from '@/contexts/AuthContext';
-import { turnosService } from '@/services/turnos';
 import {
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   Home,
   Settings,
   Users
@@ -22,11 +19,9 @@ export default function DashboardProfesionalLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user } = useAuth();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  const [solicitudesPendientes, setSolicitudesPendientes] = useState(0);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -41,38 +36,12 @@ export default function DashboardProfesionalLayout({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  useEffect(() => {
-    const loadSolicitudes = async () => {
-      if (user?.role?.toLowerCase() !== 'profesional') {
-        setSolicitudesPendientes(0);
-        return;
-      }
-
-      try {
-        const resumen = await turnosService.getSolicitudesFlexiblesResumen();
-        setSolicitudesPendientes(resumen.pendientes || 0);
-      } catch (error) {
-        console.error('Error cargando resumen de solicitudes:', error);
-      }
-    };
-
-    loadSolicitudes();
-    const interval = setInterval(loadSolicitudes, 30000);
-    return () => clearInterval(interval);
-  }, [user?.role]);
-
   const menuItems = [
     {
       label: 'Inicio',
       icon: Home,
       href: '/dashboard/profesional',
       active: pathname === '/dashboard/profesional',
-    },
-    {
-      label: 'Solicitudes Pendientes',
-      icon: ClipboardList,
-      href: '/dashboard/profesional#solicitudes-pendientes',
-      active: pathname === '/dashboard/profesional' && typeof window !== 'undefined' && window.location.hash === '#solicitudes-pendientes',
     },
     {
       label: 'Mis Clientes',
@@ -132,7 +101,6 @@ export default function DashboardProfesionalLayout({
           <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
             {menuItems.map((item) => {
               const Icon = item.icon;
-              const showBadge = item.label === 'Solicitudes Pendientes' && solicitudesPendientes > 0;
               return (
                 <Link
                   key={item.href}
@@ -153,15 +121,7 @@ export default function DashboardProfesionalLayout({
                   {sidebarOpen && (
                     <span className="flex items-center gap-2 font-medium">
                       {item.label}
-                      {showBadge && (
-                        <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-red-500 px-2 text-xs font-semibold text-white">
-                          {solicitudesPendientes > 9 ? '9+' : solicitudesPendientes}
-                        </span>
-                      )}
                     </span>
-                  )}
-                  {!sidebarOpen && showBadge && (
-                    <span className="absolute right-3 top-2 h-2 w-2 rounded-full bg-red-500" />
                   )}
                 </Link>
               );

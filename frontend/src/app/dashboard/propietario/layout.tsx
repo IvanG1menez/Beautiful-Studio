@@ -3,10 +3,8 @@
 import TopBar from "@/components/layout/TopBar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   CalendarDays,
-  ClipboardList,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -23,7 +21,7 @@ import {
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function DashboardPropietarioLayout({
@@ -31,8 +29,8 @@ export default function DashboardPropietarioLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user } = useAuth();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<string[]>([]);
@@ -59,6 +57,16 @@ export default function DashboardPropietarioLayout({
   const isPruebasActive =
     pathname?.startsWith("/dashboard/propietario/diagnostico") ||
     pathname?.startsWith("/dashboard/propietario/oportunidades");
+
+  const isReportesActive =
+    pathname?.startsWith("/dashboard/propietario/reportes/finanzas") ||
+    pathname?.startsWith("/dashboard/propietario/reportes/servicios") ||
+    pathname?.startsWith("/dashboard/propietario/turnos");
+
+  const isAuditoriaActive =
+    pathname?.startsWith("/dashboard/propietario/historial") ||
+    pathname?.startsWith("/dashboard/propietario/reportes/billetera");
+  const auditoriaSeccion = searchParams?.get("seccion") || "modelos";
 
   const menuItems = [
     {
@@ -95,14 +103,10 @@ export default function DashboardPropietarioLayout({
     {
       label: "Reportes",
       icon: PieChart,
-      active:
-    pathname?.startsWith("/dashboard/propietario/reportes") ||
-    pathname?.startsWith("/dashboard/propietario/historial") ||
-    pathname?.startsWith("/dashboard/propietario/reprogramaciones") ||
-    pathname?.startsWith("/dashboard/propietario/turnos"),
+      active: isReportesActive,
       submenu: [
         {
-          label: "Resumen Financiero",
+          label: "Finanzas",
           icon: TrendingUp,
           href: "/dashboard/propietario/reportes/finanzas",
           active: pathname === "/dashboard/propietario/reportes/finanzas",
@@ -114,28 +118,39 @@ export default function DashboardPropietarioLayout({
           active: pathname?.startsWith("/dashboard/propietario/turnos"),
         },
         {
-          label: "Reprogramaciones",
-          icon: ClipboardList,
-          href: "/dashboard/propietario/reprogramaciones",
-          active: pathname?.startsWith("/dashboard/propietario/reprogramaciones"),
-        },
-        {
-          label: "Rendimiento de Servicios",
+          label: "Servicios",
           icon: FileText,
           href: "/dashboard/propietario/reportes/servicios",
           active: pathname === "/dashboard/propietario/reportes/servicios",
         },
+      ],
+    },
+    {
+      label: "Auditoría",
+      icon: History,
+      active: isAuditoriaActive,
+      submenu: [
         {
-          label: "Auditoría de Billetera",
+          label: "Cambios",
+          icon: History,
+          href: "/dashboard/propietario/historial?seccion=modelos",
+          active:
+            pathname?.startsWith("/dashboard/propietario/historial") &&
+            auditoriaSeccion === "modelos",
+        },
+        {
+          label: "Finanzas",
           icon: Wallet,
           href: "/dashboard/propietario/reportes/billetera",
           active: pathname === "/dashboard/propietario/reportes/billetera",
         },
         {
-          label: "Auditoría",
-          icon: History,
-          href: "/dashboard/propietario/historial",
-          active: pathname?.startsWith("/dashboard/propietario/historial"),
+          label: "Automatizaciones",
+          icon: Settings,
+          href: "/dashboard/propietario/historial?seccion=fidelizacion",
+          active:
+            pathname?.startsWith("/dashboard/propietario/historial") &&
+            auditoriaSeccion !== "modelos",
         },
       ],
     },

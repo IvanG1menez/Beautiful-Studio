@@ -31,10 +31,9 @@ def limpiar_datos():
 
     # Importar modelos dentro de la función para que funcione
     # tanto con runscript como al ejecutar el script directamente
-    from apps.turnos.models import SolicitudReprogramacionFlexible, Turno, HistorialTurno
+    from apps.turnos.models import Turno, HistorialTurno
     from apps.mercadopago.models import PagoMercadoPago
 
-    solicitudes_deleted, _ = SolicitudReprogramacionFlexible.objects.all().delete()
     pagos_deleted, _ = PagoMercadoPago.objects.all().delete()
     historial_deleted, _ = HistorialTurno.objects.all().delete()
     turnos_deleted, _ = Turno.objects.all().delete()
@@ -42,7 +41,6 @@ def limpiar_datos():
     print(f"  - Turnos eliminados: {turnos_deleted}")
     print(f"  - Historial de turnos eliminado: {historial_deleted}")
     print(f"  - Pagos Mercado Pago eliminados: {pagos_deleted}\n")
-    print(f"  - Solicitudes flexibles eliminadas: {solicitudes_deleted}")
 
 
 def crear_usuarios_base():

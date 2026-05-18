@@ -156,6 +156,17 @@ def obtener_orden(merchant_order_id: str, use_qr_credentials: bool = False) -> d
     return response["response"]
 
 
+def obtener_preferencia(preference_id: str) -> dict:
+    """Consulta una preferencia por su ID."""
+    sdk = _get_sdk()
+    response = sdk.preference().get(preference_id)
+    if response["status"] != 200:
+        raise ValueError(
+            f"No se pudo obtener preferencia {preference_id}: {response.get('response', {})}"
+        )
+    return response["response"]
+
+
 def _primer_pago_aprobado(results: list[dict], external_reference: str = "") -> dict | None:
     for pago in results:
         if pago.get("status") == "approved":

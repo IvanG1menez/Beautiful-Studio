@@ -7,6 +7,9 @@ from .views import (
     cliente_me_view,
     mi_billetera_view,
     movimientos_billetera_view,
+    streak_status_view,
+    claim_streak_coupon_view,
+    validate_streak_coupon_view,
 )
 
 router = DefaultRouter()
@@ -21,6 +24,17 @@ urlpatterns = [
         "me/billetera/movimientos/",
         movimientos_billetera_view,
         name="movimientos-billetera",
+    ),
+    path("me/streak/", streak_status_view, name="cliente-streak"),
+    path(
+        "me/streak-coupons/<int:coupon_id>/claim/",
+        claim_streak_coupon_view,
+        name="claim-streak-coupon",
+    ),
+    path(
+        "me/streak-coupons/validate/",
+        validate_streak_coupon_view,
+        name="validate-streak-coupon",
     ),
     # Endpoints del ViewSet
     path("", include(router.urls)),

@@ -33,13 +33,14 @@ from rest_framework.views import APIView
 
 from django.conf import settings
 
-from apps.turnos.models import Turno
+from apps.turnos.models import StreakCoupon, Turno
 from apps.clientes.models import Cliente
 from apps.servicios.models import Servicio
 from apps.empleados.models import Empleado
 from .models import OrdenMercadoPagoPresencial, PagoMercadoPago, PreferenciaMercadoPagoCancelada
 from .serializers import (
     CancelarPagoStaffSerializer,
+    ConfirmarPagoManualSerializer,
     ConfirmarPagoStaffSerializer,
     CrearPreferenciaSerializer,
     CrearPreferenciaSinTurnoSerializer,
@@ -54,6 +55,46 @@ from apps.turnos.services.reprogramacion_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _expire_stale_streak_coupons(cliente):
+    now = timezone.now()
+    StreakCoupon.objects.filter(
+        cliente=cliente,
+        status__in=["pendiente", "reclamado"],
+        expires_at__lt=now,
+    ).update(status="vencido", updated_at=now)
+
+
+def _get_valid_streak_coupon(cliente, code):
+    code = (code or "").strip().upper()
+    if not code:
+        return None, None
+
+    _expire_stale_streak_coupons(cliente)
+    coupon = StreakCoupon.objects.filter(cliente=cliente, code=code).first()
+    if not coupon or coupon.status != "reclamado":
+        return None, "Cupón inválido o no disponible."
+    return coupon, None
+
+
+def _mark_streak_coupon_used(coupon_id, turno):
+    if not coupon_id:
+        return
+    with transaction.atomic():
+        now = timezone.now()
+        coupon = StreakCoupon.objects.select_for_update().filter(pk=coupon_id).first()
+        if not coupon or coupon.status != "reclamado":
+            logger.warning(
+                "Cupón de racha no disponible al marcar uso: coupon_id=%s turno=%s",
+                coupon_id,
+                turno.pk,
+            )
+            return
+        coupon.status = "usado"
+        coupon.used_at = now
+        coupon.used_turno = turno
+        coupon.save(update_fields=["status", "used_at", "used_turno", "updated_at"])
 
 
 def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[Cliente, bool]:
@@ -285,7 +326,8 @@ class CrearPreferenciaSinTurnoView(APIView):
             )
 
         # ── Cálculo de monto ────────────────────────────────────────────────────────
-        precio_total = Decimal(str(servicio.precio or 0))
+        precio_original = Decimal(str(servicio.precio or 0))
+        precio_total = precio_original
         # Aplicar descuento de fidelización si el frontend lo indica (flujo de
         # emails de retorno para clientes sin saldo en billetera).
         if data.get("aplicar_descuento_fidelizacion"):
@@ -314,6 +356,19 @@ class CrearPreferenciaSinTurnoView(APIView):
                     precio_total = (
                         precio_total * (Decimal("100") - global_pct) / Decimal("100")
                     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        streak_coupon = None
+        streak_coupon_discount = Decimal("0")
+        coupon_code = (data.get("coupon_code") or "").strip().upper()
+        if coupon_code:
+            streak_coupon, coupon_error = _get_valid_streak_coupon(cliente, coupon_code)
+            if coupon_error:
+                return Response({"detail": coupon_error}, status=status.HTTP_400_BAD_REQUEST)
+            streak_coupon_discount = min(
+                Decimal(str(streak_coupon.discount_amount or 0)),
+                precio_total,
+            )
+            precio_total = max(Decimal("0"), precio_total - streak_coupon_discount)
 
         tipo_pago = (data.get("tipo_pago") or "").upper()
         if tipo_pago not in {"SENIA", "PAGO_COMPLETO"}:
@@ -368,10 +423,12 @@ class CrearPreferenciaSinTurnoView(APIView):
                 fecha_hora=data["fecha_hora"],
                 notas_cliente=data.get("notas_cliente", "") or "",
                 estado="confirmado",
-                precio_final=servicio.precio,
+                precio_final=precio_total,
                 senia_pagada=max(Decimal("0.00"), monto_base),
                 tipo_pago=tipo_pago,
             )
+            if streak_coupon:
+                _mark_streak_coupon_used(streak_coupon.id, turno)
             logger.info(
                 "Turno gratuito creado (créditos 100%%) pk=%s cliente=%s",
                 turno.pk,
@@ -407,6 +464,11 @@ class CrearPreferenciaSinTurnoView(APIView):
             "tipo_pago": tipo_pago,
             "creditos_aplicados": str(creditos_aplicados),
             "monto_cobrado": str(monto_final),
+            "precio_total_original": str(precio_original),
+            "precio_total_final": str(precio_total),
+            "streak_coupon_id": streak_coupon.id if streak_coupon else None,
+            "streak_coupon_code": streak_coupon.code if streak_coupon else "",
+            "streak_coupon_discount": str(streak_coupon_discount),
         }
         external_reference = json.dumps(turno_payload)
 
@@ -1005,6 +1067,149 @@ class CancelarPagoStaffView(APIView):
         return Response({"status": "cancelled"}, status=status.HTTP_200_OK)
 
 
+class ConfirmarCobroManualView(APIView):
+    """Registra un cobro confirmado manualmente cuando MP no confirma a tiempo."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ConfirmarPagoManualSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        es_staff_user = bool(
+            user.is_staff
+            or getattr(user, "role", None)
+            in ["propietario", "superusuario", "profesional"]
+        )
+
+        preference_id = serializer.validated_data["preference_id"]
+        payment_id = serializer.validated_data["payment_id"]
+        motivo = serializer.validated_data.get("motivo") or "Cobro confirmado manualmente"
+
+        if PreferenciaMercadoPagoCancelada.objects.filter(preference_id=preference_id).exists():
+            return Response(
+                {"detail": "Esta transacción fue cancelada. Generá un nuevo pago para registrar el cobro."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pago_existente = PagoMercadoPago.objects.select_related("turno").filter(
+            payment_id=payment_id,
+            estado="approved",
+        ).first()
+        if pago_existente:
+            if pago_existente.preference_id != preference_id:
+                return Response(
+                    {"detail": "Ese número de operación ya fue registrado en otra reserva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"status": "approved", "turno_id": pago_existente.turno.pk},
+                status=status.HTTP_200_OK,
+            )
+
+        webhook = WebhookMercadoPagoView()
+        manual_payment_id = payment_id
+        try:
+            orden_presencial = OrdenMercadoPagoPresencial.objects.filter(
+                reference_id=preference_id,
+            ).first()
+            if orden_presencial is not None:
+                if not es_staff_user:
+                    return Response(
+                        {"detail": "No tiene permisos para confirmar cobros presenciales."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                orden_payload = dict(orden_presencial.payload or {})
+                orden_payload["metodo_pago"] = "mercadopago_manual"
+                orden_presencial.payload = orden_payload
+                orden_presencial.save(update_fields=["payload", "actualizado_en"])
+                webhook._crear_turno_desde_orden_presencial(
+                    orden_presencial,
+                    manual_payment_id,
+                    monto_cobrado_override=float(orden_presencial.monto or 0),
+                )
+            else:
+                preferencia = services.obtener_preferencia(preference_id)
+                turno_payload = webhook._parse_turno_payload(
+                    preferencia.get("external_reference", "")
+                )
+                if turno_payload is None:
+                    return Response(
+                        {"detail": "No se pudo resolver la reserva asociada a esta preferencia."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if not es_staff_user:
+                    cliente_profile = getattr(user, "cliente_profile", None)
+                    cliente_id = turno_payload.get("cliente_id")
+                    if not cliente_profile or int(cliente_id or 0) != cliente_profile.id:
+                        return Response(
+                            {"detail": "No tiene permisos para confirmar este cobro."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+
+                turno_payload["metodo_pago"] = "mercadopago_manual"
+                monto_cobrado = float(
+                    turno_payload.get("monto_cobrado")
+                    or (preferencia.get("items") or [{}])[0].get("unit_price")
+                    or 0
+                )
+                if turno_payload.get("tipo_movimiento") == "reprogramacion_turno":
+                    webhook._reprogramar_turno_desde_payload(
+                        turno_payload,
+                        manual_payment_id,
+                        preference_id,
+                        monto_cobrado_override=monto_cobrado or None,
+                    )
+                else:
+                    webhook._crear_turno_desde_payload(
+                        turno_payload,
+                        manual_payment_id,
+                        preference_id,
+                        monto_cobrado_override=monto_cobrado or None,
+                    )
+        except ValueError as exc:
+            logger.warning("Confirmar cobro manual: no se pudo resolver preference_id=%s: %s", preference_id, exc)
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.error(
+                "Confirmar cobro manual: error preference_id=%s payment_id=%s motivo=%s: %s",
+                preference_id,
+                payment_id,
+                motivo,
+                exc,
+            )
+            return Response(
+                {"detail": "No se pudo registrar el cobro manual en el sistema."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pago = PagoMercadoPago.objects.select_related("turno").filter(
+            preference_id=preference_id,
+            payment_id=manual_payment_id,
+            estado="approved",
+        ).first()
+        if not pago:
+            return Response(
+                {"detail": "El cobro fue procesado, pero no se encontró el turno creado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        logger.info(
+            "Cobro manual confirmado preference_id=%s turno=%s payment_id=%s usuario=%s motivo=%s",
+            preference_id,
+            pago.turno_id,
+            payment_id,
+            user.pk,
+            motivo,
+        )
+        return Response(
+            {"status": "approved", "turno_id": pago.turno.pk},
+            status=status.HTTP_200_OK,
+        )
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class WebhookMercadoPagoView(APIView):
     """
@@ -1076,6 +1281,9 @@ class WebhookMercadoPagoView(APIView):
             )
         )
         creditos_wh = Decimal(str(turno_payload.get("creditos_aplicados") or 0))
+        precio_total_final_wh = Decimal(
+            str(turno_payload.get("precio_total_final") or servicio_wh.precio or 0)
+        )
 
         # Monto ya abonado por el cliente al momento de crear el turno.
         # Incluye tanto el pago vía MP como los créditos de billetera aplicados.
@@ -1112,7 +1320,7 @@ class WebhookMercadoPagoView(APIView):
                     "servicio": servicio_wh,
                     "notas_cliente": turno_payload.get("notas_cliente", "") or "",
                     "estado": "confirmado",
-                    "precio_final": servicio_wh.precio,
+                    "precio_final": precio_total_final_wh,
                     "senia_pagada": max(Decimal("0"), senia_total),
                     "canal_reserva": canal_reserva,
                     "metodo_pago": metodo_pago,
@@ -1173,6 +1381,8 @@ class WebhookMercadoPagoView(APIView):
                 if not turno_wh.senia_pagada or turno_wh.senia_pagada <= 0:
                     turno_wh.senia_pagada = max(Decimal("0"), senia_total)
                     turno_wh.save(update_fields=["senia_pagada"])
+
+            _mark_streak_coupon_used(turno_payload.get("streak_coupon_id"), turno_wh)
 
             pago_por_preference = PagoMercadoPago.objects.filter(
                 preference_id=mp_preference_id
@@ -1290,7 +1500,7 @@ class WebhookMercadoPagoView(APIView):
             turno = resultado.turno
             turno.senia_pagada = monto_cobrado
             turno.tipo_pago = tipo_pago
-            turno.metodo_pago = "mercadopago"
+            turno.metodo_pago = payload.get("metodo_pago") or "mercadopago"
             turno.fecha_pago_registrado = timezone.now()
             turno.estado = "confirmado"
             turno.save(

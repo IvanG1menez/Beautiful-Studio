@@ -447,87 +447,6 @@ class LogReasignacion(models.Model):
         return f"Reasignación turno #{self.turno_cancelado_id} - {self.cliente_notificado.nombre_completo}"
 
 
-class SolicitudReprogramacionFlexible(models.Model):
-    """Solicitud manual de reprogramación sin confirmación inmediata."""
-
-    ESTADO_CHOICES = [
-        ("pendiente", "Pendiente"),
-        ("en_revision", "En revisión"),
-        ("atendida", "Atendida"),
-        ("rechazada", "Rechazada"),
-        ("cancelada", "Cancelada"),
-    ]
-
-    turno = models.ForeignKey(
-        Turno,
-        on_delete=models.PROTECT,
-        related_name="solicitudes_flexibles",
-        verbose_name="Turno",
-    )
-    cliente = models.ForeignKey(
-        "clientes.Cliente",
-        on_delete=models.CASCADE,
-        related_name="solicitudes_reprogramacion_flexible",
-        verbose_name="Cliente",
-    )
-    motivo = models.TextField(blank=True, null=True, verbose_name="Motivo")
-    preferencia_fecha = models.DateField(
-        blank=True,
-        null=True,
-        verbose_name="Fecha preferida",
-    )
-    preferencia_horario = models.CharField(
-        max_length=20,
-        blank=True,
-        null=True,
-        verbose_name="Horario preferido",
-    )
-    estado = models.CharField(
-        max_length=20,
-        choices=ESTADO_CHOICES,
-        default="pendiente",
-        verbose_name="Estado",
-    )
-    requiere_senia_nueva = models.BooleanField(
-        default=False,
-        verbose_name="Requiere seña nueva",
-    )
-    observaciones = models.TextField(blank=True, null=True, verbose_name="Observaciones")
-    expires_at = models.DateTimeField(
-        blank=True,
-        null=True,
-        verbose_name="Fecha de vencimiento",
-    )
-    explicacion_vencimiento = models.TextField(
-        blank=True,
-        null=True,
-        verbose_name="Explicación por vencimiento",
-    )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de creación")
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="Fecha de actualización")
-
-    @property
-    def esta_vencida(self):
-        return bool(
-            self.estado in ["pendiente", "en_revision"]
-            and self.expires_at
-            and timezone.now() > self.expires_at
-        )
-
-    class Meta:
-        verbose_name = "Solicitud de Reprogramación Flexible"
-        verbose_name_plural = "Solicitudes de Reprogramación Flexible"
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["estado", "-created_at"]),
-            models.Index(fields=["turno", "estado"]),
-        ]
-
-    def __str__(self):
-        fecha = self.created_at.strftime("%d/%m/%Y %H:%M") if self.created_at else "sin fecha"
-        return f"Solicitud flexible turno #{self.turno_id} - {self.cliente.nombre_completo} - {fecha}"
-
-
 class ClienteStreakStats(models.Model):
     """Estado agregado de la racha de consumo por cliente."""
 
@@ -616,6 +535,59 @@ class StreakRewardEvent(models.Model):
 
     def __str__(self):
         return f"PA3 cliente={self.cliente_id} turno={self.turno_id} hito={self.milestone_number}"
+
+
+class StreakCoupon(models.Model):
+    """Cupón de fidelidad generado por hitos de racha."""
+
+    STATUS_CHOICES = [
+        ("pendiente", "Pendiente"),
+        ("reclamado", "Reclamado"),
+        ("usado", "Usado"),
+        ("vencido", "Vencido"),
+        ("cancelado", "Cancelado"),
+    ]
+
+    cliente = models.ForeignKey(
+        "clientes.Cliente",
+        on_delete=models.CASCADE,
+        related_name="streak_coupons",
+    )
+    reward_event = models.OneToOneField(
+        StreakRewardEvent,
+        on_delete=models.CASCADE,
+        related_name="coupon",
+        null=True,
+        blank=True,
+    )
+    code = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    milestone_number = models.PositiveIntegerField(verbose_name="Hito alcanzado")
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pendiente")
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    used_turno = models.ForeignKey(
+        Turno,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="streak_coupons_used",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Cupón de racha"
+        verbose_name_plural = "Cupones de racha"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["cliente", "status"]),
+            models.Index(fields=["code"]),
+        ]
+
+    def __str__(self):
+        return f"Cupón racha cliente={self.cliente_id} hito={self.milestone_number} estado={self.status}"
 
 
 class StreakExpiryAlertLog(models.Model):

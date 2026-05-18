@@ -27,9 +27,9 @@ class ReprogramacionTurnoResult:
 
 
 def _validar_turno_reprogramable(turno: Turno) -> None:
-    if turno.estado not in ["confirmado", "pendiente_manual"]:
+    if turno.estado != "confirmado":
         raise ValueError(
-            "Solo se pueden reprogramar turnos en estado confirmado o pendiente manual."
+            "Solo se pueden reprogramar turnos en estado confirmado."
         )
 
 
@@ -55,16 +55,12 @@ def obtener_estado_limite_reprogramacion_cliente_servicio(turno: Turno, ahora=No
     """Devuelve el estado del limite mensual sin lanzar excepciones."""
     ahora = ahora or timezone.now()
     inicio_mes = ahora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    acciones_reprogramacion = [
-        "Reprogramacion de turno",
-        "Solicitud reprogramacion flexible",
-    ]
     config = ConfiguracionGlobal.get_config()
     limite_mensual = max(1, int(getattr(config, "max_reprogramaciones_mensuales", 1) or 1))
     reprogramaciones_mes = HistorialTurno.objects.filter(
         turno__cliente_id=turno.cliente_id,
         turno__servicio_id=turno.servicio_id,
-        accion__in=acciones_reprogramacion,
+        accion="Reprogramacion de turno",
         created_at__gte=inicio_mes,
     ).exclude(
         turno__notas_cliente__startswith="[TEST_REPROGRAMACION]"

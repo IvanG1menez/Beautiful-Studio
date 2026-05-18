@@ -1,5 +1,7 @@
 """Views para la app de clientes"""
 
+import secrets
+
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -142,6 +144,30 @@ class ClienteViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "message": f'Cliente {"marcado como VIP" if cliente.is_vip else "desmarcado como VIP"}',
+                "data": serializer.data,
+            }
+        )
+
+    @action(detail=True, methods=["post", "patch"])
+    def toggle_active(self, request, pk=None):
+        """Activar o desactivar un cliente sin borrar su historial asociado."""
+        cliente = self.get_object()
+        currently_active = cliente.is_active and (
+            not cliente.user or cliente.user.is_active
+        )
+        cliente.is_active = not currently_active
+        cliente.save(update_fields=["is_active", "updated_at"])
+
+        if cliente.user:
+            cliente.user.is_active = cliente.is_active
+            cliente.user.save(update_fields=["is_active"])
+
+        serializer = self.get_serializer(cliente)
+        return Response(
+            {
+                "message": (
+                    "Cliente reactivado" if cliente.is_active else "Cliente desactivado"
+                ),
                 "data": serializer.data,
             }
         )
@@ -405,3 +431,170 @@ def movimientos_billetera_view(request):
     )
     serializer = MovimientoBilleteraSerializer(movimientos, many=True)
     return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+def _get_cliente_from_request(request):
+    return Cliente.objects.select_related("user").get(user=request.user)
+
+
+def _expire_stale_streak_coupons(cliente):
+    from django.utils import timezone
+    from apps.turnos.models import StreakCoupon
+
+    now = timezone.now()
+    StreakCoupon.objects.filter(
+        cliente=cliente,
+        status__in=["pendiente", "reclamado"],
+        expires_at__lt=now,
+    ).update(status="vencido", updated_at=now)
+
+
+def _serialize_streak_coupon(coupon):
+    if not coupon:
+        return None
+    return {
+        "id": coupon.id,
+        "code": coupon.code,
+        "milestone_number": coupon.milestone_number,
+        "discount_amount": str(coupon.discount_amount),
+        "status": coupon.status,
+        "claimed_at": coupon.claimed_at.isoformat() if coupon.claimed_at else None,
+        "expires_at": coupon.expires_at.isoformat() if coupon.expires_at else None,
+        "used_at": coupon.used_at.isoformat() if coupon.used_at else None,
+        "used_turno": coupon.used_turno_id,
+    }
+
+
+def _generate_streak_coupon_code():
+    from apps.turnos.models import StreakCoupon
+
+    for _ in range(20):
+        code = f"RACHA-{secrets.token_hex(3).upper()}"
+        if not StreakCoupon.objects.filter(code=code).exists():
+            return code
+    return f"RACHA-{secrets.token_hex(5).upper()}"
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def streak_status_view(request):
+    from apps.authentication.models import ConfiguracionGlobal
+    from apps.turnos.models import ClienteStreakStats, StreakCoupon
+
+    try:
+        cliente = _get_cliente_from_request(request)
+    except Cliente.DoesNotExist:
+        return Response(
+            {"error": "No se encontró perfil de cliente"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    _expire_stale_streak_coupons(cliente)
+    config = ConfiguracionGlobal.get_config()
+    goal_count = int(getattr(config, "streak_goal_count", 5) or 5)
+    goal_count = max(1, goal_count)
+    stats = ClienteStreakStats.objects.filter(cliente=cliente).first()
+    streak_count = int(stats.streak_count if stats else 0)
+    progress_count = streak_count % goal_count
+    if progress_count == 0 and streak_count > 0:
+        progress_count = goal_count
+
+    active_coupon = (
+        StreakCoupon.objects.filter(cliente=cliente, status__in=["pendiente", "reclamado"])
+        .order_by("created_at")
+        .first()
+    )
+
+    return Response(
+        {
+            "streak_count": streak_count,
+            "goal_count": goal_count,
+            "progress_count": progress_count,
+            "progress_percent": round((progress_count / goal_count) * 100, 2),
+            "bonus_amount": str(getattr(config, "streak_bonus_amount", 0) or 0),
+            "coupon_expiration_days": int(getattr(config, "streak_coupon_expiration_days", 90) or 90),
+            "next_expiration_at": stats.next_expiration_at.isoformat() if stats and stats.next_expiration_at else None,
+            "active_coupon": _serialize_streak_coupon(active_coupon),
+            "has_active_coupon": active_coupon is not None,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def claim_streak_coupon_view(request, coupon_id):
+    from django.utils import timezone
+    from apps.turnos.models import StreakCoupon
+
+    try:
+        cliente = _get_cliente_from_request(request)
+    except Cliente.DoesNotExist:
+        return Response(
+            {"error": "No se encontró perfil de cliente"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    _expire_stale_streak_coupons(cliente)
+    coupon = StreakCoupon.objects.filter(cliente=cliente, id=coupon_id).first()
+    if not coupon:
+        return Response({"detail": "Cupón no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+    if coupon.status == "vencido":
+        return Response({"detail": "El cupón está vencido."}, status=status.HTTP_400_BAD_REQUEST)
+    if coupon.status not in {"pendiente", "reclamado"}:
+        return Response({"detail": "El cupón no está disponible."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if coupon.status == "pendiente":
+        coupon.status = "reclamado"
+        coupon.claimed_at = timezone.now()
+    if not coupon.code:
+        coupon.code = _generate_streak_coupon_code()
+    coupon.save(update_fields=["status", "claimed_at", "code", "updated_at"])
+
+    return Response(_serialize_streak_coupon(coupon), status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def validate_streak_coupon_view(request):
+    from decimal import Decimal
+    from apps.servicios.models import Servicio
+    from apps.turnos.models import StreakCoupon
+
+    try:
+        cliente = _get_cliente_from_request(request)
+    except Cliente.DoesNotExist:
+        return Response(
+            {"error": "No se encontró perfil de cliente"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    code = (request.data.get("code") or "").strip().upper()
+    servicio_id = request.data.get("servicio_id")
+    if not code:
+        return Response({"detail": "Ingresá un código de cupón."}, status=status.HTTP_400_BAD_REQUEST)
+
+    _expire_stale_streak_coupons(cliente)
+    coupon = StreakCoupon.objects.filter(cliente=cliente, code=code).first()
+    if not coupon or coupon.status != "reclamado":
+        return Response({"detail": "Cupón inválido o no disponible."}, status=status.HTTP_400_BAD_REQUEST)
+
+    precio_total = None
+    discount_amount = coupon.discount_amount
+    if servicio_id:
+        servicio = Servicio.objects.filter(pk=servicio_id, is_active=True).first()
+        if not servicio:
+            return Response({"detail": "Servicio no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        precio_total = Decimal(str(servicio.precio or 0))
+        discount_amount = min(discount_amount, precio_total)
+
+    return Response(
+        {
+            "valid": True,
+            "coupon": _serialize_streak_coupon(coupon),
+            "discount_amount": str(discount_amount),
+            "precio_total": str(precio_total) if precio_total is not None else None,
+            "precio_final": str(max(Decimal("0"), precio_total - discount_amount)) if precio_total is not None else None,
+        },
+        status=status.HTTP_200_OK,
+    )

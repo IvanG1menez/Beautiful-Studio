@@ -45,6 +45,7 @@ interface OfertaDetalles {
     precio_total: string;
     descuento: string;
     monto_final: string;
+    credito_billetera?: string;
   };
   ahorro: {
     dias_adelantados: number;
@@ -407,7 +408,9 @@ export default function ConfirmarReacomodamientoPage() {
 
   const descuentoNumerico = Number(oferta.turno_nuevo.descuento || 0);
   const esClientePagoCompleto = oferta.tipo_pago_cliente_ofertado === 'PAGO_COMPLETO';
+  const creditoBilleteraNumerico = Number(oferta.turno_nuevo.credito_billetera || 0);
   const tienePromo = !esClientePagoCompleto && descuentoNumerico > 0;
+  const tieneCreditoBilletera = esClientePagoCompleto && creditoBilleteraNumerico > 0;
 
   if (resultado) {
     // Pantalla de error
@@ -500,6 +503,9 @@ export default function ConfirmarReacomodamientoPage() {
                   quedó libre para otro cliente.
                   {tienePromo && oferta.ahorro.descuento_aplicado !== '0' && oferta.ahorro.descuento_aplicado !== '0.00' && (
                     <> Además, ahorraste <strong>${oferta.ahorro.descuento_aplicado}</strong>.</>
+                  )}
+                  {tieneCreditoBilletera && (
+                    <> Además, acreditamos <strong>${oferta.turno_nuevo.credito_billetera}</strong> en tu billetera virtual.</>
                   )}
                 </AlertDescription>
               </Alert>
@@ -677,7 +683,9 @@ export default function ConfirmarReacomodamientoPage() {
             <CardDescription>
               {tienePromo
                 ? '¡Con descuento especial!'
-                : 'Reacomodo de turno (sin promo adicional)'}
+                : tieneCreditoBilletera
+                  ? `Recibís $${oferta.turno_nuevo.credito_billetera} en tu billetera virtual si aceptás`
+                  : 'Reacomodo de turno'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -728,9 +736,13 @@ export default function ConfirmarReacomodamientoPage() {
               <span>
                 {tienePromo
                   ? 'Descuento especial por adelanto'
-                  : 'Descuento promocional'}
+                  : tieneCreditoBilletera
+                    ? 'Crédito en billetera al aceptar'
+                    : 'Descuento promocional'}
               </span>
-              <span className="font-medium">-{tienePromo ? oferta.turno_nuevo.descuento : '0.00'}</span>
+              <span className="font-medium">
+                {tieneCreditoBilletera ? '+' : '-'}{tienePromo ? oferta.turno_nuevo.descuento : tieneCreditoBilletera ? oferta.turno_nuevo.credito_billetera : '0.00'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">

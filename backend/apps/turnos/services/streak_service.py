@@ -12,6 +12,7 @@ from apps.authentication.models import ConfiguracionGlobal
 from apps.turnos.models import (
     ClienteStreakStats,
     StreakAuditLog,
+    StreakCoupon,
     StreakRewardEvent,
     Turno,
 )
@@ -93,7 +94,8 @@ def _apply_completion(turno: Turno, actor_user=None) -> None:
         detalle=counter_reason,
     )
 
-    if new_count % 5 != 0:
+    goal_count = int(getattr(config, "streak_goal_count", 5) or 5)
+    if new_count % max(1, goal_count) != 0:
         return
 
     _create_or_apply_milestone_reward(
@@ -157,21 +159,21 @@ def _apply_completion_reversal(turno: Turno, actor_user=None) -> None:
     if not reward:
         return
 
-    old_price = Decimal(str(turno.precio_final or 0))
-    restored_price = old_price + Decimal(str(reward.applied_discount_amount or 0))
-    service_price = Decimal(str(turno.servicio.precio or restored_price))
-    turno.precio_final = min(restored_price, service_price)
-    turno.save(update_fields=["precio_final"])
+    coupon = StreakCoupon.objects.select_for_update().filter(reward_event=reward).first()
+    previous_coupon_status = coupon.status if coupon else None
+    if coupon and coupon.status in {"pendiente", "reclamado"}:
+        coupon.status = "cancelado"
+        coupon.save(update_fields=["status", "updated_at"])
 
     previous_status = reward.status
     reward.status = "revertido"
     reward.valor_anterior = {
         "status": previous_status,
-        "turno_precio_final": str(old_price),
+        "coupon_status": previous_coupon_status,
     }
     reward.valor_posterior = {
         "status": "revertido",
-        "turno_precio_final": str(turno.precio_final),
+        "coupon_status": coupon.status if coupon else None,
     }
     reward.save(update_fields=["status", "valor_anterior", "valor_posterior"])
 
@@ -181,9 +183,9 @@ def _apply_completion_reversal(turno: Turno, actor_user=None) -> None:
         actor=actor_user,
         accion="modificacion",
         event_type="streak_bonus",
-        valor_anterior={"status": previous_status, "precio_final": str(old_price)},
-        valor_posterior={"status": "revertido", "precio_final": str(turno.precio_final)},
-        detalle="Reversa del bono PA3 por cancelación",
+        valor_anterior={"status": previous_status, "coupon_status": previous_coupon_status},
+        valor_posterior={"status": "revertido", "coupon_status": coupon.status if coupon else None},
+        detalle="Reversa del cupón PA3 por cancelación",
     )
 
 
@@ -196,25 +198,22 @@ def _create_or_apply_milestone_reward(
 ) -> None:
     config = ConfiguracionGlobal.get_config()
     bonus_amount = Decimal(str(getattr(config, "streak_bonus_amount", 0) or 0))
+    coupon_expiration_days = int(getattr(config, "streak_coupon_expiration_days", 90) or 90)
 
     if bonus_amount <= 0:
         status = "saltado_prioridad"
         reason = "PA3 bono configurado en 0"
-        applied_discount = Decimal("0")
+        coupon = None
     else:
-        already_has_bonus = _turno_has_existing_bonus(turno)
-        if already_has_bonus:
+        already_has_coupon = _cliente_has_active_streak_coupon(turno.cliente)
+        if already_has_coupon:
             status = "saltado_prioridad"
-            reason = "PA3 omitido por prioridad de bono existente"
-            applied_discount = Decimal("0")
+            reason = "PA3 omitido por cupón activo existente"
+            coupon = None
         else:
             status = "aplicado"
-            reason = "PA3 aplicado por múltiplo de 5"
-            base_price = Decimal(str(turno.precio_final or turno.servicio.precio or 0))
-            new_price = max(Decimal("0"), base_price - bonus_amount)
-            turno.precio_final = new_price
-            turno.save(update_fields=["precio_final"])
-            applied_discount = min(bonus_amount, base_price)
+            reason = "PA3 cupón pendiente por meta de racha"
+            coupon = None
 
     event = StreakRewardEvent.objects.create(
         cliente=turno.cliente,
@@ -223,19 +222,35 @@ def _create_or_apply_milestone_reward(
         streak_before=streak_before,
         streak_after=streak_after,
         bonus_amount=bonus_amount,
-        applied_discount_amount=applied_discount,
+        applied_discount_amount=Decimal("0"),
         status=status,
         reason=reason,
         valor_anterior={
-            "precio_final": str(turno.servicio.precio if turno.servicio else 0),
             "streak_count": streak_before,
         },
         valor_posterior={
-            "precio_final": str(turno.precio_final or 0),
             "streak_count": streak_after,
             "status": status,
         },
     )
+
+    if status == "aplicado":
+        coupon = StreakCoupon.objects.create(
+            cliente=turno.cliente,
+            reward_event=event,
+            milestone_number=streak_after,
+            discount_amount=bonus_amount,
+            status="pendiente",
+            expires_at=timezone.now() + timedelta(days=max(1, coupon_expiration_days)),
+        )
+        event.valor_posterior = {
+            **(event.valor_posterior or {}),
+            "coupon_id": coupon.id,
+            "coupon_status": coupon.status,
+            "discount_amount": str(coupon.discount_amount),
+            "expires_at": coupon.expires_at.isoformat() if coupon.expires_at else None,
+        }
+        event.save(update_fields=["valor_posterior"])
 
     StreakAuditLog.objects.create(
         cliente=turno.cliente,
@@ -249,15 +264,16 @@ def _create_or_apply_milestone_reward(
     )
 
 
-def _turno_has_existing_bonus(turno: Turno) -> bool:
-    service_price = Decimal(str(turno.servicio.precio or 0))
-    final_price = Decimal(str(turno.precio_final if turno.precio_final is not None else service_price))
+def _cliente_has_active_streak_coupon(cliente) -> bool:
+    now = timezone.now()
+    expired = StreakCoupon.objects.filter(
+        cliente=cliente,
+        status__in=["pendiente", "reclamado"],
+        expires_at__lt=now,
+    )
+    expired.update(status="vencido", updated_at=now)
 
-    if service_price > Decimal("0") and final_price < service_price:
-        return True
-
-    # Proceso 2: detectar un descuento ya aplicado por reacomodamiento.
-    return turno.reasignaciones_cancelado.filter(
-        estado_final="aceptada",
-        monto_descuento__gt=0,
+    return StreakCoupon.objects.filter(
+        cliente=cliente,
+        status__in=["pendiente", "reclamado"],
     ).exists()

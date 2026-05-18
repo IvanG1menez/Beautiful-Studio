@@ -149,28 +149,7 @@ export interface Appointment {
 
 export type ReprogramacionViewMode = 'single' | 'all';
 
-export type ReprogramacionStep = 'calendar' | 'time' | 'loading' | 'select-professional' | 'flexible' | 'confirmation' | 'result';
-
-export interface SolicitudReprogramacionFlexible {
-  id: number;
-  turno: Turno;
-  cliente_nombre: string;
-  empleado_nombre: string;
-  servicio_nombre: string;
-  motivo?: string | null;
-  preferencia_fecha?: string | null;
-  preferencia_horario?: string | null;
-  estado: 'pendiente' | 'en_revision' | 'atendida' | 'rechazada' | 'cancelada';
-  estado_display: string;
-  requiere_senia_nueva: boolean;
-  observaciones?: string | null;
-  expires_at?: string | null;
-  esta_vencida?: boolean;
-  horas_restantes?: number | null;
-  explicacion_vencimiento?: string | null;
-  created_at: string;
-  updated_at: string;
-}
+export type ReprogramacionStep = 'calendar' | 'time' | 'loading' | 'select-professional' | 'confirmation' | 'result';
 
 export interface EmpleadoServicio {
   id: number;

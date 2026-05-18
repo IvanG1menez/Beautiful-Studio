@@ -7,8 +7,8 @@ from .models import (
     Turno,
     HistorialTurno,
     LogReasignacion,
-    SolicitudReprogramacionFlexible,
     ClienteStreakStats,
+    StreakCoupon,
     StreakRewardEvent,
     StreakExpiryAlertLog,
     StreakAuditLog,
@@ -220,27 +220,6 @@ class TurnoAdmin(SimpleHistoryAdmin):
     created_at_formateado.admin_order_field = "created_at"
 
 
-@admin.register(SolicitudReprogramacionFlexible)
-class SolicitudReprogramacionFlexibleAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "turno",
-        "cliente",
-        "estado",
-        "requiere_senia_nueva",
-        "created_at",
-    ]
-    list_filter = ["estado", "requiere_senia_nueva", "created_at"]
-    search_fields = [
-        "turno__cliente__user__first_name",
-        "turno__cliente__user__last_name",
-        "turno__empleado__user__first_name",
-        "turno__empleado__user__last_name",
-        "motivo",
-    ]
-    readonly_fields = ["created_at", "updated_at"]
-
-    # Acciones masivas
     def confirmar_turnos(self, request, queryset):
         """Confirmar turnos seleccionados"""
         turnos_pendientes = queryset.filter(estado="pendiente")
@@ -374,6 +353,23 @@ class StreakRewardEventAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "milestone_number", "created_at"]
     search_fields = ["cliente__user__email", "turno__id"]
+
+
+@admin.register(StreakCoupon)
+class StreakCouponAdmin(admin.ModelAdmin):
+    list_display = [
+        "cliente",
+        "milestone_number",
+        "discount_amount",
+        "status",
+        "code",
+        "expires_at",
+        "used_turno",
+        "created_at",
+    ]
+    list_filter = ["status", "milestone_number", "expires_at", "created_at"]
+    search_fields = ["cliente__user__email", "code", "used_turno__id"]
+    readonly_fields = ["created_at", "updated_at"]
 
 
 @admin.register(StreakExpiryAlertLog)

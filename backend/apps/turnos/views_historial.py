@@ -25,6 +25,92 @@ def _serialize_history_user(history_user):
     return {"id": None, "nombre": "Sistema", "email": "system@local"}
 
 
+def _serialize_turno_history(record):
+    return {
+        "cliente_id": record.cliente_id,
+        "empleado_id": record.empleado_id,
+        "servicio_id": record.servicio_id,
+        "fecha_hora": record.fecha_hora.isoformat() if record.fecha_hora else None,
+        "estado": record.estado,
+        "precio_final": (
+            str(record.precio_final) if record.precio_final is not None else None
+        ),
+        "senia_pagada": (
+            str(record.senia_pagada) if record.senia_pagada is not None else None
+        ),
+        "notas_cliente": record.notas_cliente,
+        "notas_empleado": record.notas_empleado,
+    }
+
+
+def _serialize_servicio_history(record):
+    return {
+        "nombre": record.nombre,
+        "descripcion": record.descripcion,
+        "categoria_id": record.categoria_id,
+        "precio": str(record.precio) if record.precio is not None else None,
+        "duracion_minutos": record.duracion_minutos,
+        "descuento_reasignacion": (
+            str(record.descuento_reasignacion)
+            if record.descuento_reasignacion is not None
+            else None
+        ),
+        "is_active": record.is_active,
+    }
+
+
+def _serialize_cliente_history(record):
+    return {
+        "user_id": record.user_id,
+        "fecha_nacimiento": (
+            record.fecha_nacimiento.isoformat() if record.fecha_nacimiento else None
+        ),
+        "direccion": record.direccion,
+        "preferencias": record.preferencias,
+        "is_vip": record.is_vip,
+        "is_active": record.is_active,
+    }
+
+
+def _build_diff(estado_anterior, estado_posterior):
+    campos = sorted(
+        set((estado_anterior or {}).keys()) | set((estado_posterior or {}).keys())
+    )
+    cambios = []
+
+    for campo in campos:
+        valor_anterior = (estado_anterior or {}).get(campo)
+        valor_posterior = (estado_posterior or {}).get(campo)
+        if valor_anterior != valor_posterior:
+            cambios.append(
+                {
+                    "campo": campo,
+                    "anterior": valor_anterior,
+                    "posterior": valor_posterior,
+                }
+            )
+
+    return cambios
+
+
+def _build_history_states(record, serializer):
+    estado_actual = serializer(record)
+    previous_record = record.prev_record
+    estado_previo = serializer(previous_record) if previous_record else None
+
+    if record.history_type == "+":
+        estado_anterior = None
+        estado_posterior = estado_actual
+    elif record.history_type == "-":
+        estado_anterior = estado_actual
+        estado_posterior = None
+    else:
+        estado_anterior = estado_previo
+        estado_posterior = estado_actual
+
+    return estado_anterior, estado_posterior, _build_diff(estado_anterior, estado_posterior)
+
+
 def _build_model_history(modelo_tipo=None, objeto_id=None):
     registros = []
 
@@ -381,55 +467,26 @@ def detalle_historial(request, modelo, history_id):
             record = Turno.history.select_related("history_user").get(
                 history_id=history_id
             )
-            datos = {
-                "cliente_id": record.cliente_id,
-                "empleado_id": record.empleado_id,
-                "servicio_id": record.servicio_id,
-                "fecha_hora": (
-                    record.fecha_hora.isoformat() if record.fecha_hora else None
-                ),
-                "estado": record.estado,
-                "precio_final": (
-                    str(record.precio_final) if record.precio_final else None
-                ),
-                "senia_pagada": (
-                    str(record.senia_pagada) if record.senia_pagada else None
-                ),
-                "notas_cliente": record.notas_cliente,
-                "notas_empleado": record.notas_empleado,
-            }
+            datos = _serialize_turno_history(record)
+            estado_anterior, estado_posterior, cambios = _build_history_states(
+                record, _serialize_turno_history
+            )
         elif modelo == "servicio":
             record = Servicio.history.select_related("history_user").get(
                 history_id=history_id
             )
-            datos = {
-                "nombre": record.nombre,
-                "descripcion": record.descripcion,
-                "categoria_id": record.categoria_id,
-                "precio": str(record.precio),
-                "duracion_minutos": record.duracion_minutos,
-                "descuento_reasignacion": (
-                    str(record.descuento_reasignacion)
-                    if record.descuento_reasignacion
-                    else None
-                ),
-                "is_active": record.is_active,
-            }
+            datos = _serialize_servicio_history(record)
+            estado_anterior, estado_posterior, cambios = _build_history_states(
+                record, _serialize_servicio_history
+            )
         elif modelo == "cliente":
             record = Cliente.history.select_related("history_user").get(
                 history_id=history_id
             )
-            datos = {
-                "user_id": record.user_id,
-                "fecha_nacimiento": (
-                    record.fecha_nacimiento.isoformat()
-                    if record.fecha_nacimiento
-                    else None
-                ),
-                "direccion": record.direccion,
-                "preferencias": record.preferencias,
-                "is_vip": record.is_vip,
-            }
+            datos = _serialize_cliente_history(record)
+            estado_anterior, estado_posterior, cambios = _build_history_states(
+                record, _serialize_cliente_history
+            )
         else:
             return Response(
                 {"error": "Modelo no válido"}, status=status.HTTP_400_BAD_REQUEST
@@ -462,6 +519,9 @@ def detalle_historial(request, modelo, history_id):
                 "fecha": record.history_date.isoformat(),
                 "cambio_razon": record.history_change_reason or "",
                 "datos": datos,
+                "estado_anterior": estado_anterior,
+                "estado_posterior": estado_posterior,
+                "cambios": cambios,
             }
         )
 

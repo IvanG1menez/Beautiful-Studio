@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatCurrency } from '@/lib/utils';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, Trash2, User, Users, Wallet, X } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, User, UserCheck, UserX, Users, Wallet, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -58,6 +58,8 @@ export default function ClientesAdminPage() {
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState({ title: '', description: '' });
+  const [confirmActionLabel, setConfirmActionLabel] = useState('Confirmar');
+  const [confirmActionStyle, setConfirmActionStyle] = useState('bg-red-600 hover:bg-red-700');
   const [expandedClienteId, setExpandedClienteId] = useState<number | null>(null);
 
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
@@ -118,7 +120,7 @@ export default function ClientesAdminPage() {
   // Funciones de filtrado y ordenamiento
   const getFilteredAndSortedClientes = () => {
     // Primero filtrar
-    let filtered = clientes.filter(cliente => {
+    const filtered = clientes.filter(cliente => {
       const matchesSearch =
         cliente.nombre_completo.toLowerCase().includes(searchQuery.toLowerCase()) ||
         cliente.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -185,9 +187,17 @@ export default function ClientesAdminPage() {
   };
 
   // Función para mostrar confirmación modal
-  const showConfirmDialog = (title: string, description: string, action: () => void) => {
+  const showConfirmDialog = (
+    title: string,
+    description: string,
+    action: () => void,
+    actionLabel = 'Confirmar',
+    actionStyle = 'bg-red-600 hover:bg-red-700'
+  ) => {
     setConfirmMessage({ title, description });
     setConfirmAction(() => action);
+    setConfirmActionLabel(actionLabel);
+    setConfirmActionStyle(actionStyle);
     setConfirmDialogOpen(true);
   };
 
@@ -204,29 +214,38 @@ export default function ClientesAdminPage() {
     setNotificationDialogOpen(true);
   };
 
-  // Eliminar cliente
-  const handleDeleteCliente = async (clienteId: number, nombreCliente: string) => {
+  // Activar/desactivar cliente sin eliminar su historial asociado.
+  const handleToggleActiveCliente = async (
+    clienteId: number,
+    nombreCliente: string,
+    isActive: boolean
+  ) => {
+    const nextAction = isActive ? 'desactivar' : 'reactivar';
+
     showConfirmDialog(
-      '¿Eliminar cliente?',
-      `Esta acción no se puede deshacer. Se eliminará el cliente "${nombreCliente}" y su usuario asociado.`,
+      isActive ? '¿Desactivar cliente?' : '¿Reactivar cliente?',
+      isActive
+        ? `El cliente "${nombreCliente}" quedará inactivo y no podrá operar, pero se conservará su historial.`
+        : `El cliente "${nombreCliente}" volverá a estar activo y disponible para operar.`,
       async () => {
         try {
-          const response = await fetch(`/api/clientes/${clienteId}/`, {
-            method: 'DELETE',
+          const response = await fetch(`/api/clientes/${clienteId}/toggle_active/`, {
+            method: 'POST',
             headers: getAuthHeaders()
           });
 
-          if (response.ok || response.status === 204) {
+          if (response.ok) {
             showNotification(
-              'Cliente eliminado',
-              `El cliente "${nombreCliente}" ha sido eliminado correctamente.`,
+              isActive ? 'Cliente desactivado' : 'Cliente reactivado',
+              `El cliente "${nombreCliente}" fue ${isActive ? 'desactivado' : 'reactivado'} correctamente.`,
               'success'
             );
             fetchClientes();
           } else {
             const errorData = await response.json().catch(() => ({}));
-            const errorMessage = errorData.detail || errorData.error || 'No se pudo eliminar el cliente';
-            showNotification('Error al eliminar', errorMessage, 'error');
+            const errorMessage =
+              errorData.detail || errorData.error || `No se pudo ${nextAction} el cliente`;
+            showNotification(`Error al ${nextAction}`, errorMessage, 'error');
           }
         } catch (error) {
           console.error('Error:', error);
@@ -236,7 +255,9 @@ export default function ClientesAdminPage() {
             'error'
           );
         }
-      }
+      },
+      isActive ? 'Desactivar' : 'Reactivar',
+      isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
     );
   };
 
@@ -508,10 +529,19 @@ export default function ClientesAdminPage() {
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDeleteCliente(cliente.id, cliente.nombre_completo);
+                        handleToggleActiveCliente(
+                          cliente.id,
+                          cliente.nombre_completo,
+                          cliente.is_active
+                        );
                       }}
+                      title={cliente.is_active ? 'Desactivar cliente' : 'Reactivar cliente'}
                     >
-                      <Trash2 className="w-4 h-4 text-red-500" />
+                      {cliente.is_active ? (
+                        <UserX className="w-4 h-4 text-red-500" />
+                      ) : (
+                        <UserCheck className="w-4 h-4 text-green-600" />
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -621,8 +651,8 @@ export default function ClientesAdminPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmAction} className="bg-red-600 hover:bg-red-700">
-              Eliminar
+            <AlertDialogAction onClick={handleConfirmAction} className={confirmActionStyle}>
+              {confirmActionLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

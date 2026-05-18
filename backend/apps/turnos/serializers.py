@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from rest_framework import serializers
-from .models import Turno, HistorialTurno, SolicitudReprogramacionFlexible
+from .models import Turno, HistorialTurno
 from apps.clientes.serializers import ClienteListSerializer
 from apps.empleados.serializers import EmpleadoListSerializer
 from apps.servicios.serializers import ServicioSerializer
@@ -552,52 +552,6 @@ class ReprogramarTurnoSerializer(serializers.Serializer):
     nuevo_empleado_id = serializers.IntegerField(required=False, allow_null=True)
     aceptar_penalidad_fuera_rango = serializers.BooleanField(required=False, default=False)
     permitir_sobreturno = serializers.BooleanField(required=False, default=False)
-
-
-class SolicitudReprogramacionFlexibleCreateSerializer(serializers.Serializer):
-    motivo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    preferencia_fecha = serializers.DateField(required=False, allow_null=True)
-    preferencia_horario = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-
-
-class SolicitudReprogramacionFlexibleSerializer(serializers.ModelSerializer):
-    turno = TurnoListSerializer(read_only=True)
-    cliente_nombre = serializers.CharField(source="cliente.nombre_completo", read_only=True)
-    empleado_nombre = serializers.CharField(source="turno.empleado.nombre_completo", read_only=True)
-    servicio_nombre = serializers.CharField(source="turno.servicio.nombre", read_only=True)
-    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
-    esta_vencida = serializers.BooleanField(read_only=True)
-    horas_restantes = serializers.SerializerMethodField()
-
-    def get_horas_restantes(self, obj):
-        if not obj.expires_at or obj.estado not in ["pendiente", "en_revision"]:
-            return None
-        seconds = (obj.expires_at - timezone.now()).total_seconds()
-        return max(0, int(seconds // 3600))
-
-    class Meta:
-        model = SolicitudReprogramacionFlexible
-        fields = [
-            "id",
-            "turno",
-            "cliente_nombre",
-            "empleado_nombre",
-            "servicio_nombre",
-            "motivo",
-            "preferencia_fecha",
-            "preferencia_horario",
-            "estado",
-            "estado_display",
-            "requiere_senia_nueva",
-            "observaciones",
-            "expires_at",
-            "esta_vencida",
-            "horas_restantes",
-            "explicacion_vencimiento",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["created_at", "updated_at", "estado_display"]
 
 
 class HistorialTurnoSerializer(serializers.ModelSerializer):

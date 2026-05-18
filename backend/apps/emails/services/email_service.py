@@ -272,59 +272,6 @@ class EmailService:
             return False
 
     @staticmethod
-    def enviar_email_solicitud_reprogramacion_flexible_cliente(solicitud) -> bool:
-        """Envia al cliente la confirmacion de solicitud flexible en espera."""
-        try:
-            turno = solicitud.turno
-            cliente_user = getattr(turno.cliente, "user", None)
-            if not cliente_user or not cliente_user.email:
-                logger.warning("Solicitud flexible #%s sin email de cliente", solicitud.id)
-                return False
-
-            fecha_original = timezone.localtime(turno.fecha_hora).strftime("%d/%m/%Y %H:%M")
-            vence = timezone.localtime(solicitud.expires_at).strftime("%d/%m/%Y %H:%M") if solicitud.expires_at else "Pendiente"
-            panel_url = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')}/dashboard/cliente"
-            contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 16px;">Tu reprogramación quedó en espera</h2>
-                <p>Hola <strong>{cliente_user.first_name or turno.cliente.nombre_completo}</strong>,</p>
-                <p>Recibimos tu solicitud de <strong>reprogramación flexible</strong>. El turno original queda pausado y pendiente de asignación manual por el estudio.</p>
-
-                <div class="alert alert-info">
-                    <strong>Importante:</strong> esta modalidad cancela el horario próximo que querías reprogramar y lo deja en revisión hasta que el profesional asigne una nueva fecha disponible.
-                </div>
-
-                <div class="info-box">
-                    <div class="info-row"><span class="info-label">Servicio:</span><span class="info-value">{turno.servicio.nombre}</span></div>
-                    <div class="info-row"><span class="info-label">Profesional original:</span><span class="info-value">{turno.empleado.nombre_completo}</span></div>
-                    <div class="info-row"><span class="info-label">Turno original:</span><span class="info-value">{fecha_original}</span></div>
-                    <div class="info-row"><span class="info-label">Estado:</span><span class="info-value">En espera de revisión</span></div>
-                    <div class="info-row"><span class="info-label">Vence revisión:</span><span class="info-value">{vence}</span></div>
-                </div>
-
-                <p>Te avisaremos cuando el nuevo horario quede asignado. También podés consultar el estado desde tu panel.</p>
-                <p style="text-align:center;"><a class="button" href="{panel_url}">Ver mi panel</a></p>
-            """
-
-            html_message = EmailService._get_base_template().format(
-                titulo="Reprogramación en espera",
-                header_titulo="Reprogramación en espera",
-                contenido=contenido,
-            )
-            send_mail(
-                subject="Tu solicitud de reprogramación quedó en espera",
-                message=strip_tags(html_message),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[EmailService._get_email_destinatario(cliente_user.email)],
-                html_message=html_message,
-                fail_silently=False,
-            )
-            logger.info("Email solicitud flexible enviado a cliente=%s", cliente_user.email)
-            return True
-        except Exception as exc:
-            logger.error("Error enviando email solicitud flexible cliente: %s", exc)
-            return False
-
-    @staticmethod
     def enviar_email_nuevo_turno_cliente(turno) -> bool:
         """
         Envía email al cliente cuando reserva un nuevo turno
@@ -1283,6 +1230,7 @@ class EmailService:
         monto_final,
         monto_descuento,
         senia_pagada,
+        monto_credito_billetera=0,
     ) -> bool:
         """
         Envía email al cliente con una oferta de adelanto de turno
@@ -1317,6 +1265,7 @@ class EmailService:
                 or turno_ofrecido.resolver_tipo_pago()
             )
             cliente_pago_completo = tipo_pago_cliente == "PAGO_COMPLETO"
+            monto_credito_billetera = monto_credito_billetera or 0
 
             if cliente_pago_completo:
                 titulo_email = "Reacomodo de turno disponible"
@@ -1326,7 +1275,7 @@ class EmailService:
 
                     <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
                     <p>Se liberó un turno para el mismo servicio y podemos reacomodarte a una fecha más cercana.</p>
-                    <p><strong>Como ya abonaste el 100% del servicio, este reacomodo no incluye descuento promocional adicional.</strong></p>
+                    <p><strong>Como ya abonaste el 100% del servicio, si aceptás te acreditamos ${monto_credito_billetera} en tu billetera virtual.</strong></p>
 
                     <div class="info-box">
                         <div class="info-row">
@@ -1356,6 +1305,10 @@ class EmailService:
                         <div class="info-row" style="border-top: 2px solid #667eea; padding-top: 10px; margin-top: 10px;">
                             <span class="info-label"><strong>Monto final a pagar:</strong></span>
                             <span class="info-value" style="font-size: 1.2em; color: #667eea;"><strong>${monto_final}</strong></span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Crédito en billetera si aceptás:</span>
+                            <span class="info-value" style="color: #48bb78;"><strong>+${monto_credito_billetera}</strong></span>
                         </div>
                     </div>
 

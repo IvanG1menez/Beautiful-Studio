@@ -15,7 +15,6 @@ import {
   obtenerNotificacionesNoLeidas,
   obtenerNotificacionesRecientes,
 } from '@/services/notificacionesService';
-import { turnosService } from '@/services/turnos';
 import { Bell, Check, Settings } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -23,7 +22,6 @@ import { useEffect, useState } from 'react';
 export function NotificationBell() {
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [contador, setContador] = useState(0);
-  const [solicitudesPendientes, setSolicitudesPendientes] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -46,27 +44,9 @@ export function NotificationBell() {
   useEffect(() => {
     loadNotificaciones();
 
-    const loadSolicitudes = async () => {
-      const role = user?.role?.toLowerCase();
-      if (role !== 'profesional') {
-        setSolicitudesPendientes(0);
-        return;
-      }
-
-      try {
-        const resumen = await turnosService.getSolicitudesFlexiblesResumen();
-        setSolicitudesPendientes(resumen.pendientes || 0);
-      } catch (error) {
-        console.error('Error cargando solicitudes pendientes:', error);
-      }
-    };
-
-    loadSolicitudes();
-
     // Actualizar cada 30 segundos
     const interval = setInterval(() => {
       loadNotificaciones();
-      loadSolicitudes();
     }, 30000);
     return () => clearInterval(interval);
   }, [user?.role]);
@@ -137,10 +117,7 @@ export function NotificationBell() {
     return '/configuracion';
   };
 
-  const isProfesional = user?.role?.toLowerCase() === 'profesional';
-  const badgeCount = isProfesional
-    ? (solicitudesPendientes > 0 ? solicitudesPendientes : contador)
-    : contador;
+  const badgeCount = contador;
 
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>

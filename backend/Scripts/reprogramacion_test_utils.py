@@ -53,7 +53,6 @@ def cleanup_previous_reprogramming_tests(reset_monthly_limit: bool = True) -> di
     from apps.turnos.models import (
         HistorialTurno,
         LogReasignacion,
-        SolicitudReprogramacionFlexible,
         Turno,
     )
 
@@ -66,16 +65,9 @@ def cleanup_previous_reprogramming_tests(reset_monthly_limit: bool = True) -> di
         "historial_limite_mensual": 0,
         "logs_reasignacion": 0,
         "pagos_mercadopago": 0,
-        "solicitudes_flexibles": 0,
     }
 
     if turno_ids:
-        solicitudes_qs = SolicitudReprogramacionFlexible.objects.filter(
-            turno_id__in=turno_ids
-        )
-        deleted["solicitudes_flexibles"] = solicitudes_qs.count()
-        solicitudes_qs.delete()
-
         historial_qs = HistorialTurno.objects.filter(turno_id__in=turno_ids)
         deleted["historial"] = historial_qs.count()
         historial_qs.delete()
@@ -94,14 +86,10 @@ def cleanup_previous_reprogramming_tests(reset_monthly_limit: bool = True) -> di
 
     if reset_monthly_limit:
         inicio_mes = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        acciones_reprogramacion = [
-            "Reprogramacion de turno",
-            "Solicitud reprogramacion flexible",
-        ]
         historial_limite_qs = HistorialTurno.objects.filter(
             turno__cliente__user__email=DEMO_CLIENT_EMAIL,
             turno__servicio__nombre=DEMO_SERVICE_NAME,
-            accion__in=acciones_reprogramacion,
+            accion="Reprogramacion de turno",
             created_at__gte=inicio_mes,
         )
         deleted["historial_limite_mensual"] = historial_limite_qs.count()

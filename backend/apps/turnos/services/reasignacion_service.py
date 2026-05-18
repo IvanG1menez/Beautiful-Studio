@@ -11,6 +11,7 @@ from simple_history.utils import update_change_reason
 from apps.turnos.models import Turno, LogReasignacion
 from apps.turnos.utils import get_system_history_user
 from apps.emails.services import EmailService
+from apps.clientes.models import Billetera
 
 logger = logging.getLogger(__name__)
 
@@ -42,38 +43,41 @@ def _cancelacion_en_termino(turno_cancelado: Turno) -> bool:
 def _calcular_descuento_para_candidato(
     turno_cancelado: Turno, turno_candidato: Turno
 ) -> tuple[Decimal, str, str]:
-    """Determina descuento y regla según ventana de cancelación y tipo de pago.
-
-    Reglas:
-    - Cancelación en término (>= mínimo): adelanto SIN descuento adicional.
-        - Cancelación fuera de término: bono SOLO para clientes con seña.
-            * candidato con seña => bono_reacomodamiento_senia
-            * candidato con pago completo => sin descuento promocional
-            * sin pago => sin descuento
-    """
+    """Determina el descuento directo según el tipo de pago del candidato."""
 
     servicio = turno_cancelado.servicio
-
-    if _cancelacion_en_termino(turno_cancelado):
-        return Decimal("0.00"), "CANCELACION_EN_TERMINO_SIN_DESCUENTO", "SIN_DESCUENTO"
-
     tipo_pago_candidato = turno_candidato.resolver_tipo_pago()
+
     if tipo_pago_candidato == "SENIA":
         bono = Decimal(str(getattr(servicio, "bono_reacomodamiento_senia", 0) or 0))
-        return bono, "FUERA_DE_TERMINO_BONO_SENIA", tipo_pago_candidato
+        return bono, "BONO_CANDIDATO_SENIA", tipo_pago_candidato
 
     if tipo_pago_candidato == "PAGO_COMPLETO":
         return (
             Decimal("0.00"),
-            "FUERA_DE_TERMINO_PAGO_COMPLETO_SIN_PROMO",
+            "CREDITO_BILLETERA_CANDIDATO_PAGO_COMPLETO",
             tipo_pago_candidato,
         )
 
     return (
         Decimal("0.00"),
-        "FUERA_DE_TERMINO_SIN_PAGO_SIN_DESCUENTO",
+        "SIN_BONO_CANDIDATO_SIN_PAGO",
         tipo_pago_candidato,
     )
+
+
+def _calcular_credito_billetera_para_candidato(
+    turno_cancelado: Turno,
+    tipo_pago_candidato: str | None,
+) -> Decimal:
+    """Crédito de billetera que se acredita solo si acepta un candidato con pago completo."""
+
+    if tipo_pago_candidato != "PAGO_COMPLETO":
+        return Decimal("0.00")
+
+    servicio = turno_cancelado.servicio
+    credito = Decimal(str(getattr(servicio, "bono_reacomodamiento_pago_completo", 0) or 0))
+    return credito.quantize(Decimal("0.01"))
 
 
 def _save_turno_with_history(turno: Turno, reason: str, update_fields=None) -> None:
@@ -161,6 +165,9 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
     descuento, regla_descuento, tipo_pago_candidato = (
         _calcular_descuento_para_candidato(turno_cancelado, candidato)
     )
+    credito_billetera = _calcular_credito_billetera_para_candidato(
+        turno_cancelado, tipo_pago_candidato
+    )
 
     senia_pagada = Decimal(candidato.senia_pagada or 0)
     monto_final = _calcular_monto_final(precio_total, descuento, senia_pagada)
@@ -192,6 +199,7 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
         monto_final=monto_final,
         monto_descuento=descuento,
         senia_pagada=senia_pagada,
+        monto_credito_billetera=credito_billetera,
     )
 
     if not enviado:
@@ -357,14 +365,48 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         senia_pagada = Decimal(turno_ofrecido.senia_pagada or 0)
         precio_total = Decimal(turno_cancelado.servicio.precio)
         monto_final = _calcular_monto_final(precio_total, descuento, senia_pagada)
+        tipo_pago_candidato = log_reasignacion.tipo_pago_cliente_ofertado
+        credito_billetera = _calcular_credito_billetera_para_candidato(
+            turno_cancelado, tipo_pago_candidato
+        )
 
         turno_cancelado.cliente_id = turno_ofrecido.cliente_id
         turno_cancelado.estado = "confirmado"
+        turno_cancelado.senia_pagada = turno_ofrecido.senia_pagada
+        turno_cancelado.tipo_pago = turno_ofrecido.tipo_pago
+        turno_cancelado.metodo_pago = turno_ofrecido.metodo_pago
+        turno_cancelado.precio_final = turno_ofrecido.precio_final or turno_cancelado.servicio.precio
+        turno_cancelado.canal_reserva = turno_ofrecido.canal_reserva
         _save_turno_with_history(
             turno_cancelado,
             "Oferta de reasignacion aceptada",
-            update_fields=["cliente_id", "estado"],
+            update_fields=[
+                "cliente_id",
+                "estado",
+                "senia_pagada",
+                "tipo_pago",
+                "metodo_pago",
+                "precio_final",
+                "canal_reserva",
+            ],
         )
+
+        if credito_billetera > 0:
+            billetera, _ = Billetera.objects.get_or_create(
+                cliente=turno_ofrecido.cliente,
+                defaults={"saldo": Decimal("0.00")},
+            )
+            billetera.agregar_saldo(
+                monto=credito_billetera,
+                motivo=(
+                    f"Crédito por aceptar reacomodamiento del turno #{turno_cancelado.id} - "
+                    f"{turno_cancelado.servicio.nombre}"
+                ),
+            )
+            movimiento = billetera.movimientos.first()
+            if movimiento:
+                movimiento.turno = turno_cancelado
+                movimiento.save(update_fields=["turno"])
 
         turno_ofrecido.estado = "cancelado"
         _save_turno_with_history(
@@ -414,6 +456,10 @@ def obtener_detalles_oferta_reasignacion(token: str) -> dict:
     senia_pagada = Decimal(turno_ofrecido.senia_pagada or 0)
     precio_total = Decimal(turno_cancelado.servicio.precio)
     monto_final = _calcular_monto_final(precio_total, descuento, senia_pagada)
+    credito_billetera = _calcular_credito_billetera_para_candidato(
+        turno_cancelado,
+        log_reasignacion.tipo_pago_cliente_ofertado,
+    )
 
     return {
         "status": "activa",
@@ -441,6 +487,7 @@ def obtener_detalles_oferta_reasignacion(token: str) -> dict:
             "precio_total": str(precio_total),
             "descuento": str(descuento),
             "monto_final": str(monto_final),
+            "credito_billetera": str(credito_billetera),
         },
         "ahorro": {
             "dias_adelantados": (

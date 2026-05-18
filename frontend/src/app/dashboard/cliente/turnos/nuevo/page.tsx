@@ -2,7 +2,7 @@
 
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
-import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronsUpDown, Clock, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronsUpDown, Clock, Gift, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
@@ -81,6 +81,13 @@ interface HorarioDisponible {
   mensaje?: string;
 }
 
+interface AppliedCoupon {
+  code: string;
+  discount_amount: string;
+  precio_total?: string | null;
+  precio_final?: string | null;
+}
+
 export default function NuevoTurnoPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -118,11 +125,18 @@ export default function NuevoTurnoPage() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [usarSaldoEnSena, setUsarSaldoEnSena] = useState(false);
   const [pagarServicioCompleto, setPagarServicioCompleto] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState('');
 
   // Estados para el flujo de pago con Mercado Pago
   const [isWaitingPayment, setIsWaitingPayment] = useState(false);
   const [preferenceId, setPreferenceId] = useState<string>('');
   const [mpTabClosed, setMpTabClosed] = useState(false);
+  const [manualPaymentCode, setManualPaymentCode] = useState('');
+  const [manualPaymentError, setManualPaymentError] = useState('');
+  const [confirmingManualPayment, setConfirmingManualPayment] = useState(false);
   // Ref para el intervalo de polling: persiste entre re-renders y evita duplicación
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Ref a la ventana de Mercado Pago para detectar si fue cerrada
@@ -327,16 +341,61 @@ export default function NuevoTurnoPage() {
   // Calcular monto de seña
   const calcularMontoSena = () => {
     if (!servicioSeleccionado) return 0;
-    const precioServicio = getPrecioServicioConFidelizacion();
+    const precioServicio = getPrecioServicioConCupon();
     return precioServicio * 0.5;
+  };
+
+  const getDescuentoCupon = () => {
+    if (!appliedCoupon) return 0;
+    return parseFloat(appliedCoupon.discount_amount || '0');
+  };
+
+  const getPrecioServicioConCupon = () => {
+    const precioServicio = getPrecioServicioConFidelizacion();
+    if (!appliedCoupon) return precioServicio;
+    return Math.max(0, precioServicio - getDescuentoCupon());
   };
 
   // Monto base a pagar ahora: seña o servicio completo
   const calcularMontoBasePago = () => {
     if (!servicioSeleccionado) return 0;
-    const precioServicio = getPrecioServicioConFidelizacion();
+    const precioServicio = getPrecioServicioConCupon();
     const montoSena = calcularMontoSena();
     return pagarServicioCompleto ? precioServicio : montoSena;
+  };
+
+  const validateCoupon = async () => {
+    if (!servicioSeleccionado) return;
+    const normalizedCode = couponCode.trim().toUpperCase();
+    if (!normalizedCode) {
+      setCouponError('Ingresá el código del cupón.');
+      return;
+    }
+
+    setValidatingCoupon(true);
+    setCouponError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/clientes/me/streak-coupons/validate/`, {
+        method: 'POST',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ code: normalizedCode, servicio_id: servicioSeleccionado.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.detail || 'No se pudo validar el cupón.');
+      }
+      setAppliedCoupon({
+        code: normalizedCode,
+        discount_amount: data.discount_amount,
+        precio_total: data.precio_total,
+        precio_final: data.precio_final,
+      });
+    } catch (error) {
+      setAppliedCoupon(null);
+      setCouponError(error instanceof Error ? error.message : 'No se pudo validar el cupón.');
+    } finally {
+      setValidatingCoupon(false);
+    }
   };
 
   // Calcular monto final a pagar ahora con descuento de billetera
@@ -384,6 +443,8 @@ export default function NuevoTurnoPage() {
       }
       setEmpleadoSeleccionado(null);
       setHorarioSeleccionado('');
+      setAppliedCoupon(null);
+      setCouponError('');
       fetchEmpleados();
     }
   }, [servicioSeleccionado, isFromFidelizacion]);
@@ -644,6 +705,7 @@ export default function NuevoTurnoPage() {
           usar_sena: !pagarServicioCompleto,
           tipo_pago: pagarServicioCompleto ? 'PAGO_COMPLETO' : 'SENIA',
           creditos_a_aplicar: creditosAplicar,
+          coupon_code: appliedCoupon?.code || '',
           // Indicar al backend que aplique el descuento de fidelización
           aplicar_descuento_fidelizacion: isFromFidelizacion && beneficioFromQuery === 'descuento',
         }),
@@ -685,7 +747,7 @@ export default function NuevoTurnoPage() {
         }
       } else {
         const responseText = await response.text();
-        let errorData: any;
+        let errorData: { detail?: string; error?: string };
         try {
           errorData = JSON.parse(responseText);
         } catch {
@@ -698,10 +760,10 @@ export default function NuevoTurnoPage() {
           'Error al iniciar el pago. Por favor intenta nuevamente.'
         );
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error iniciando pago MP:', error);
       setShowConfirmDialog(false);
-      setError(error.message || 'Error al iniciar el pago. Por favor intenta nuevamente.');
+      setError(error instanceof Error ? error.message : 'Error al iniciar el pago. Por favor intenta nuevamente.');
     } finally {
       setLoading(false);
     }
@@ -898,6 +960,40 @@ export default function NuevoTurnoPage() {
     categoria.nombre.toLowerCase().includes(searchCategoria.toLowerCase())
   );
 
+  const confirmarCobroManual = async () => {
+    const codigoLimpio = manualPaymentCode.trim();
+    if (!preferenceId || !codigoLimpio) {
+      setManualPaymentError('Ingresá el número de operación que figura en Mercado Pago.');
+      return;
+    }
+
+    setConfirmingManualPayment(true);
+    setManualPaymentError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/mercadopago/confirmar-cobro-manual/`, {
+        method: 'POST',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({
+          preference_id: preferenceId,
+          payment_id: codigoLimpio,
+          motivo: 'Cobro de reserva cliente confirmado manualmente',
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || 'No se pudo confirmar el cobro manual.');
+      }
+      setIsWaitingPayment(false);
+      setPreferenceId('');
+      setManualPaymentCode('');
+      setSuccess(true);
+    } catch (error) {
+      setManualPaymentError(error instanceof Error ? error.message : 'No se pudo confirmar el cobro manual.');
+    } finally {
+      setConfirmingManualPayment(false);
+    }
+  };
+
   const categoriaSeleccionadaNombre = categorias.find(
     (categoria) => categoria.id === categoriaSeleccionada
   )?.nombre;
@@ -923,6 +1019,8 @@ export default function NuevoTurnoPage() {
       setIsWaitingPayment(false);
       setMpTabClosed(false);
       setPreferenceId('');
+      setManualPaymentCode('');
+      setManualPaymentError('');
     };
 
     return (
@@ -990,6 +1088,34 @@ export default function NuevoTurnoPage() {
                 <p className="text-xs text-gray-400">
                   Verificando cada 3 segundos · No cerrés esta pestaña
                 </p>
+
+                <div className="w-full rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+                  <Label htmlFor="manual-payment-code" className="text-sm text-amber-950">
+                    Número de operación si MP no confirma
+                  </Label>
+                  <div className="mt-2 flex gap-2">
+                    <Input
+                      id="manual-payment-code"
+                      value={manualPaymentCode}
+                      onChange={(event) => setManualPaymentCode(event.target.value.replace(/\D/g, ''))}
+                      placeholder="Ej: 1234567890"
+                      disabled={confirmingManualPayment}
+                      className="bg-white"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={confirmarCobroManual}
+                      disabled={!manualPaymentCode.trim() || confirmingManualPayment}
+                    >
+                      {confirmingManualPayment ? 'Confirmando...' : 'Confirmar'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-amber-800">
+                    Usalo solo si el pago figura recibido en Mercado Pago. El número queda registrado en el turno.
+                  </p>
+                  {manualPaymentError && <p className="mt-2 text-xs text-red-600">{manualPaymentError}</p>}
+                </div>
 
                 <Button
                   variant="ghost"
@@ -1412,7 +1538,7 @@ export default function NuevoTurnoPage() {
                     No hay profesionales disponibles
                   </h3>
                   <p className="text-gray-600 mb-4 max-w-md mx-auto">
-                    En este momento no hay profesionales disponibles para el servicio "{servicioSeleccionado.nombre}".
+                    En este momento no hay profesionales disponibles para el servicio {servicioSeleccionado.nombre}.
                   </p>
                   <p className="text-sm text-gray-500 mb-4">
                     Podés intentar:
@@ -1854,8 +1980,57 @@ export default function NuevoTurnoPage() {
                 <p className="text-sm text-gray-600">{servicioSeleccionado?.nombre}</p>
                 <div className="flex justify-between items-center mt-2">
                   <span className="text-sm text-gray-600">Precio total:</span>
-                  <span className="text-lg font-bold text-gray-900">{formatCurrency(getPrecioServicioConFidelizacion())}</span>
+                  <span className="text-lg font-bold text-gray-900">{formatCurrency(getPrecioServicioConCupon())}</span>
                 </div>
+                {appliedCoupon && (
+                  <div className="mt-2 space-y-1 border-t border-gray-200 pt-2 text-sm">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Precio original:</span>
+                      <span>{formatCurrency(getPrecioServicioConFidelizacion())}</span>
+                    </div>
+                    <div className="flex justify-between text-violet-700">
+                      <span>Cupón {appliedCoupon.code}:</span>
+                      <span>-{formatCurrency(getDescuentoCupon())}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <Gift className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-violet-950 mb-1">Cupón de fidelidad</h4>
+                    <p className="text-sm text-violet-700">Si reclamaste un cupón de racha, aplicá el código antes de pagar.</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={couponCode}
+                    onChange={(event) => {
+                      setCouponCode(event.target.value.toUpperCase());
+                      setCouponError('');
+                      if (appliedCoupon) setAppliedCoupon(null);
+                    }}
+                    placeholder="RACHA-ABC123"
+                    className="bg-white"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={validateCoupon}
+                    disabled={validatingCoupon || !couponCode.trim()}
+                    className="border-violet-300 text-violet-800 hover:bg-violet-100"
+                  >
+                    {validatingCoupon ? 'Validando...' : 'Aplicar'}
+                  </Button>
+                </div>
+                {couponError && <p className="text-sm text-red-600">{couponError}</p>}
+                {appliedCoupon && (
+                  <p className="text-sm font-medium text-violet-800">
+                    Cupón aplicado: -{formatCurrency(getDescuentoCupon())}. La seña se recalcula sobre el total con descuento.
+                  </p>
+                )}
               </div>
 
               {/* Cálculo de monto a pagar ahora (seña o servicio completo) */}

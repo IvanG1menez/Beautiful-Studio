@@ -35,6 +35,7 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
     aplicar_descuento_fidelizacion = serializers.BooleanField(
         required=False, default=False
     )
+    coupon_code = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class CrearPreferenciaReprogramacionSerializer(serializers.Serializer):
@@ -119,6 +120,26 @@ class CancelarPagoStaffSerializer(serializers.Serializer):
         if not preference_id:
             raise serializers.ValidationError("La preferencia es requerida.")
         return preference_id
+
+
+class ConfirmarPagoManualSerializer(serializers.Serializer):
+    """Valida el cierre manual de un pago cuando Mercado Pago no confirma a tiempo."""
+
+    preference_id = serializers.CharField()
+    payment_id = serializers.CharField()
+    motivo = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_preference_id(self, value):
+        preference_id = (value or "").strip()
+        if not preference_id:
+            raise serializers.ValidationError("La preferencia u orden es requerida.")
+        return preference_id
+
+    def validate_payment_id(self, value):
+        payment_id = (value or "").strip()
+        if not payment_id:
+            raise serializers.ValidationError("El número de operación es obligatorio.")
+        return payment_id
 
 
 class PagoMercadoPagoSerializer(serializers.ModelSerializer):

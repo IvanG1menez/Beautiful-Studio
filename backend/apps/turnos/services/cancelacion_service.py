@@ -49,7 +49,7 @@ def cancelar_turno_para_cliente(turno, usuario, motivo):
         senia_pagada = Decimal(turno.senia_pagada or 0)
         pago_completo = turno.resolver_tipo_pago() == "PAGO_COMPLETO"
 
-        monto_credito = precio_base if pago_completo else senia_pagada
+        monto_credito = precio_base / Decimal("2") if pago_completo else senia_pagada
         monto_credito = monto_credito.quantize(Decimal("0.01"))
 
         if monto_credito > 0:

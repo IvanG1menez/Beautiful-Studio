@@ -8,11 +8,10 @@ from rest_framework.test import APIClient
 
 from apps.authentication.models import AuditoriaAcciones, ConfiguracionGlobal
 from apps.clientes.models import Billetera, Cliente
-from apps.emails.models import Notificacion
 from apps.empleados.models import Empleado, EmpleadoServicio
 from apps.servicios.models import Servicio
 from apps.servicios.models import CategoriaServicio, Sala
-from apps.turnos.models import LogReasignacion, SolicitudReprogramacionFlexible, Turno
+from apps.turnos.models import LogReasignacion, Turno
 from apps.turnos.services.cancelacion_service import cancelar_turno_para_cliente
 from apps.turnos.services.reasignacion_service import _calcular_descuento_para_candidato
 from apps.users.models import User
@@ -22,8 +21,7 @@ class ReasignacionReglasPagoTest(TestCase):
     def setUp(self):
         config = ConfiguracionGlobal.get_config()
         config.min_horas_cancelacion_credito = 24
-        config.horas_vencimiento_solicitud_reprogramacion = 48
-        config.save(update_fields=["min_horas_cancelacion_credito", "horas_vencimiento_solicitud_reprogramacion"])
+        config.save(update_fields=["min_horas_cancelacion_credito"])
 
         self.servicio = Servicio(
             bono_reacomodamiento_senia=Decimal("1000.00"),
@@ -31,7 +29,7 @@ class ReasignacionReglasPagoTest(TestCase):
             horas_minimas_credito_cancelacion=24,
         )
 
-    def test_fuera_de_termino_cliente_con_senia_recibe_bono(self):
+    def test_cliente_con_senia_recibe_bono_configurado(self):
         turno_cancelado = Turno(
             servicio=self.servicio,
             fecha_hora=timezone.now() + timedelta(hours=2),
@@ -43,10 +41,10 @@ class ReasignacionReglasPagoTest(TestCase):
         )
 
         self.assertEqual(descuento, Decimal("1000.00"))
-        self.assertEqual(regla, "FUERA_DE_TERMINO_BONO_SENIA")
+        self.assertEqual(regla, "BONO_CANDIDATO_SENIA")
         self.assertEqual(tipo_pago, "SENIA")
 
-    def test_fuera_de_termino_cliente_con_pago_completo_no_recibe_promo(self):
+    def test_cliente_con_pago_completo_no_recibe_descuento_directo(self):
         turno_cancelado = Turno(
             servicio=self.servicio,
             fecha_hora=timezone.now() + timedelta(hours=2),
@@ -58,23 +56,23 @@ class ReasignacionReglasPagoTest(TestCase):
         )
 
         self.assertEqual(descuento, Decimal("0.00"))
-        self.assertEqual(regla, "FUERA_DE_TERMINO_PAGO_COMPLETO_SIN_PROMO")
+        self.assertEqual(regla, "CREDITO_BILLETERA_CANDIDATO_PAGO_COMPLETO")
         self.assertEqual(tipo_pago, "PAGO_COMPLETO")
 
-    def test_en_termino_no_aplica_descuento_sin_importar_tipo_pago(self):
+    def test_cliente_sin_pago_no_recibe_bono(self):
         turno_cancelado = Turno(
             servicio=self.servicio,
             fecha_hora=timezone.now() + timedelta(hours=30),
         )
-        turno_candidato = Turno(tipo_pago="SENIA")
+        turno_candidato = Turno(tipo_pago="SIN_PAGO")
 
         descuento, regla, tipo_pago = _calcular_descuento_para_candidato(
             turno_cancelado, turno_candidato
         )
 
         self.assertEqual(descuento, Decimal("0.00"))
-        self.assertEqual(regla, "CANCELACION_EN_TERMINO_SIN_DESCUENTO")
-        self.assertEqual(tipo_pago, "SIN_DESCUENTO")
+        self.assertEqual(regla, "SIN_BONO_CANDIDATO_SIN_PAGO")
+        self.assertEqual(tipo_pago, "SIN_PAGO")
 
 
 class CancelacionCreditoServiceTest(TestCase):
@@ -152,6 +150,30 @@ class CancelacionCreditoServiceTest(TestCase):
         self.assertEqual(billetera.saldo, Decimal("5000.00"))
         self.assertIsNotNone(movimiento)
         self.assertEqual(movimiento.turno_id, turno.id)
+
+    def test_cancelacion_en_termino_pago_completo_acredita_mitad(self):
+        turno = Turno.objects.create(
+            cliente=self.cliente,
+            empleado=self.empleado,
+            servicio=self.servicio,
+            fecha_hora=timezone.now() + timedelta(hours=30),
+            estado="pendiente",
+            tipo_pago="PAGO_COMPLETO",
+            senia_pagada=Decimal("20000.00"),
+            precio_final=Decimal("20000.00"),
+        )
+
+        result = cancelar_turno_para_cliente(
+            turno=turno,
+            usuario=self.user_cliente,
+            motivo="Cambio de agenda",
+        )
+
+        billetera = Billetera.objects.get(cliente=self.cliente)
+
+        self.assertTrue(result.credito_aplicado)
+        self.assertEqual(result.monto_credito, 10000.0)
+        self.assertEqual(billetera.saldo, Decimal("10000.00"))
 
     def test_cancelacion_fuera_de_rango_no_aplica_credito(self):
         turno = Turno.objects.create(
@@ -385,151 +407,6 @@ class ReprogramacionTurnoAPITest(TestCase):
         self.assertIsNotNone(auditoria)
         self.assertTrue(auditoria.detalles["penalidad_aplicada"])
 
-    def test_profesional_asigna_solicitud_flexible_fuera_de_24h_sin_bloqueo(self):
-        self.client_api.force_authenticate(self.user_profesional)
-
-        self.turno.fecha_hora = timezone.now() + timedelta(hours=8)
-        self.turno.save(update_fields=["fecha_hora"])
-        solicitud = SolicitudReprogramacionFlexible.objects.create(
-            turno=self.turno,
-            cliente=self.cliente,
-            motivo="Necesito reprogramar",
-        )
-
-        nueva_fecha = timezone.now() + timedelta(hours=30)
-        while nueva_fecha.weekday() == 6:
-            nueva_fecha += timedelta(days=1)
-
-        response = self.client_api.post(
-            f"/api/turnos/solicitudes-flexibles/{solicitud.id}/asignar/",
-            {
-                "fecha_hora": nueva_fecha.isoformat(),
-                "observaciones": "Acomodado segun agenda profesional",
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertTrue(response.data["penalidad_aplicada"])
-
-        self.turno.refresh_from_db()
-        solicitud.refresh_from_db()
-        self.assertEqual(self.turno.estado, "pendiente")
-        self.assertEqual(self.turno.senia_pagada, Decimal("0.00"))
-        self.assertEqual(solicitud.estado, "atendida")
-        self.assertTrue(solicitud.requiere_senia_nueva)
-
-        self.assertTrue(
-            AuditoriaAcciones.objects.filter(
-                modelo_afectado="Turno",
-                objeto_id=self.turno.id,
-                detalles__tipo_movimiento="solicitud_reprogramacion_flexible_atendida",
-            ).exists()
-        )
-
-    def test_solicitud_flexible_deja_turno_pendiente_manual(self):
-        self.client_api.force_authenticate(self.user_cliente)
-
-        antes = timezone.now()
-        response = self.client_api.post(
-            f"/api/turnos/{self.turno.id}/solicitar-reprogramacion-flexible/",
-            {"motivo": "No encuentro horario disponible"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201, response.data)
-        self.turno.refresh_from_db()
-        self.assertEqual(self.turno.estado, "pendiente_manual")
-        solicitud = SolicitudReprogramacionFlexible.objects.get(turno=self.turno)
-        self.assertIsNotNone(solicitud.expires_at)
-        self.assertGreaterEqual(solicitud.expires_at, antes + timedelta(hours=47, minutes=59))
-
-    def test_solicitud_flexible_usa_vencimiento_configurable(self):
-        config = ConfiguracionGlobal.get_config()
-        config.horas_vencimiento_solicitud_reprogramacion = 72
-        config.save(update_fields=["horas_vencimiento_solicitud_reprogramacion"])
-        self.client_api.force_authenticate(self.user_cliente)
-
-        antes = timezone.now()
-        response = self.client_api.post(
-            f"/api/turnos/{self.turno.id}/solicitar-reprogramacion-flexible/",
-            {"motivo": "Prefiero otro horario"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201, response.data)
-        solicitud = SolicitudReprogramacionFlexible.objects.get(turno=self.turno)
-        self.assertGreaterEqual(solicitud.expires_at, antes + timedelta(hours=71, minutes=59))
-        self.assertFalse(response.data["solicitud"]["esta_vencida"])
-
-    def test_profesional_no_puede_rechazar_solicitud_flexible(self):
-        self.client_api.force_authenticate(self.user_profesional)
-        solicitud = SolicitudReprogramacionFlexible.objects.create(
-            turno=self.turno,
-            cliente=self.cliente,
-            motivo="Revisar manualmente",
-            expires_at=timezone.now() + timedelta(hours=48),
-        )
-
-        response = self.client_api.post(
-            f"/api/turnos/solicitudes-flexibles/{solicitud.id}/rechazar/",
-            {"observaciones": "No puedo"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        solicitud.refresh_from_db()
-        self.assertEqual(solicitud.estado, "pendiente")
-
-    def test_solicitud_flexible_fuera_de_termino_marca_senia_perdida(self):
-        self.client_api.force_authenticate(self.user_cliente)
-        self.turno.fecha_hora = timezone.now() + timedelta(hours=8)
-        self.turno.save(update_fields=["fecha_hora"])
-
-        response = self.client_api.post(
-            f"/api/turnos/{self.turno.id}/solicitar-reprogramacion-flexible/",
-            {"motivo": "No puedo asistir"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201, response.data)
-        self.turno.refresh_from_db()
-        solicitud = SolicitudReprogramacionFlexible.objects.get(turno=self.turno)
-        self.assertTrue(solicitud.requiere_senia_nueva)
-        self.assertEqual(self.turno.estado, "pendiente_manual")
-        self.assertEqual(self.turno.senia_pagada, Decimal("0.00"))
-        self.assertEqual(self.turno.tipo_pago, "SIN_PAGO")
-
-    def test_cliente_no_puede_reprogramar_mismo_servicio_dos_veces_en_mes(self):
-        self.client_api.force_authenticate(self.user_cliente)
-
-        response_1 = self.client_api.post(
-            f"/api/turnos/{self.turno.id}/solicitar-reprogramacion-flexible/",
-            {"motivo": "Primer cambio"},
-            format="json",
-        )
-        self.assertEqual(response_1.status_code, 201, response_1.data)
-
-        otro_turno = Turno.objects.create(
-            cliente=self.cliente,
-            empleado=self.profesional,
-            servicio=self.servicio,
-            fecha_hora=timezone.now() + timedelta(days=6),
-            estado="confirmado",
-            senia_pagada=Decimal("3000.00"),
-            tipo_pago="SENIA",
-            precio_final=Decimal("12000.00"),
-        )
-
-        response_2 = self.client_api.post(
-            f"/api/turnos/{otro_turno.id}/solicitar-reprogramacion-flexible/",
-            {"motivo": "Segundo cambio mismo servicio"},
-            format="json",
-        )
-
-        self.assertEqual(response_2.status_code, 400)
-        self.assertIn("una vez este mes", response_2.data.get("error", ""))
-
     def test_disponibilidad_acepta_profesional_null_y_devuelve_slots_globales(self):
         self.client_api.force_authenticate(self.user_cliente)
         fecha = (timezone.now() + timedelta(days=2)).date()
@@ -549,53 +426,6 @@ class ReprogramacionTurnoAPITest(TestCase):
         self.assertIn("slots", response.data)
         self.assertTrue(response.data["disponible"])
         self.assertGreater(len(response.data["slots"]), 0)
-
-    def test_profesional_recibe_conflicto_y_puede_sobreturnar(self):
-        self.client_api.force_authenticate(self.user_profesional)
-        fecha_conflicto = timezone.now() + timedelta(days=4)
-        while fecha_conflicto.weekday() == 6:
-            fecha_conflicto += timedelta(days=1)
-        fecha_conflicto = fecha_conflicto.replace(hour=11, minute=0, second=0, microsecond=0)
-
-        Turno.objects.create(
-            cliente=self.otro_cliente,
-            empleado=self.profesional,
-            servicio=self.servicio,
-            fecha_hora=fecha_conflicto,
-            estado="confirmado",
-            precio_final=Decimal("12000.00"),
-        )
-        solicitud = SolicitudReprogramacionFlexible.objects.create(
-            turno=self.turno,
-            cliente=self.cliente,
-            motivo="Revisar manualmente",
-        )
-
-        response_conflicto = self.client_api.post(
-            f"/api/turnos/solicitudes-flexibles/{solicitud.id}/asignar/",
-            {"fecha_hora": fecha_conflicto.isoformat()},
-            format="json",
-        )
-
-        self.assertEqual(response_conflicto.status_code, 409)
-        self.assertTrue(response_conflicto.data["requiere_confirmacion_sobreturno"])
-
-        response_ok = self.client_api.post(
-            f"/api/turnos/solicitudes-flexibles/{solicitud.id}/asignar/",
-            {
-                "fecha_hora": fecha_conflicto.isoformat(),
-                "permitir_sobreturno": True,
-            },
-            format="json",
-        )
-
-        self.assertEqual(response_ok.status_code, 200, response_ok.data)
-        self.assertTrue(
-            Notificacion.objects.filter(
-                usuario=self.user_cliente,
-                titulo="Tu profesional ya te asignó un nuevo horario",
-            ).exists()
-        )
 
     def test_no_permite_reprogramar_con_oferta_reasignacion_activa(self):
         self.client_api.force_authenticate(self.user_cliente)

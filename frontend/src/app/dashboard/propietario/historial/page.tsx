@@ -18,6 +18,13 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -41,6 +48,8 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock,
+  Eye,
+  Loader2,
   Mail,
   Pencil,
   RefreshCw,
@@ -68,6 +77,18 @@ interface HistorialRecord {
   fecha: string;
   cambio_razon: string;
   datos: Record<string, unknown>;
+}
+
+interface HistorialCambio {
+  campo: string;
+  anterior: unknown;
+  posterior: unknown;
+}
+
+interface HistorialDetalle extends HistorialRecord {
+  estado_anterior: Record<string, unknown> | null;
+  estado_posterior: Record<string, unknown> | null;
+  cambios: HistorialCambio[];
 }
 
 interface FidelizacionRecord {
@@ -194,9 +215,18 @@ export default function HistorialPage() {
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
+  const getInitialSeccion = () => {
+    if (typeof window === 'undefined') {
+      return 'todas';
+    }
+
+    const seccion = new URLSearchParams(window.location.search).get('seccion');
+    return seccion || 'todas';
+  };
+
   const [loading, setLoading] = useState(true);
   const [historial, setHistorial] = useState<HistorialResponse>(INITIAL_RESPONSE);
-  const [filtroSeccion, setFiltroSeccion] = useState('todas');
+  const [filtroSeccion, setFiltroSeccion] = useState(getInitialSeccion);
   const [filtroModelo, setFiltroModelo] = useState('todos');
   const [filtroObjetoId, setFiltroObjetoId] = useState('');
   const [filtroDiasFidelizacion, setFiltroDiasFidelizacion] = useState('todos');
@@ -206,6 +236,10 @@ export default function HistorialPage() {
     title: '',
     description: '',
   });
+  const [detalleOpen, setDetalleOpen] = useState(false);
+  const [detalleLoading, setDetalleLoading] = useState(false);
+  const [detalleSeleccionado, setDetalleSeleccionado] =
+    useState<HistorialDetalle | null>(null);
 
   const modelos = historial.modelos.results;
   const fidelizacion = historial.automatizaciones.fidelizacion.results;
@@ -220,6 +254,29 @@ export default function HistorialPage() {
   const showNotification = (title: string, description: string) => {
     setNotificationMessage({ title, description });
     setNotificationDialogOpen(true);
+  };
+
+  const normalizarModelo = (modelo: string) => modelo.trim().toLowerCase();
+
+  const formatearCampo = (campo: string) =>
+    campo
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+  const formatearValorAuditoria = (value: unknown) => {
+    if (value === null || value === undefined || value === '') {
+      return '-';
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? 'Sí' : 'No';
+    }
+
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+
+    return String(value);
   };
 
   const getErrorMessage = (error: unknown) => {
@@ -257,6 +314,25 @@ export default function HistorialPage() {
     }
 
     return 'No se pudo cargar la auditoría';
+  };
+
+  const cargarDetalle = async (record: HistorialRecord) => {
+    setDetalleOpen(true);
+    setDetalleLoading(true);
+    setDetalleSeleccionado(null);
+
+    try {
+      const response = await apiClient.get<HistorialDetalle>(
+        `/turnos/historial/${normalizarModelo(record.modelo)}/${record.id}/`
+      );
+      setDetalleSeleccionado(response.data);
+    } catch (error) {
+      console.error('Error cargando detalle de auditoría:', error);
+      setDetalleOpen(false);
+      showNotification('Error', getErrorMessage(error));
+    } finally {
+      setDetalleLoading(false);
+    }
   };
 
   const cargarHistorial = async () => {
@@ -417,8 +493,8 @@ export default function HistorialPage() {
             Auditoría de Cambios
           </CardTitle>
           <CardDescription>
-            Vista consolidada de cambios manuales y procesos automáticos del sistema. Total de
-            registros: {historial.resumen.total}
+            Trazabilidad de operaciones con detalle antes/después para cambios de datos, más
+            eventos automáticos separados. Total de registros: {historial.resumen.total}
           </CardDescription>
         </CardHeader>
 
@@ -542,7 +618,7 @@ export default function HistorialPage() {
             <div className="mb-8">
               <div className="mb-3 flex items-center gap-2">
                 <Settings2 className="h-5 w-5" />
-                <h3 className="text-lg font-semibold">Cambios de datos</h3>
+                <h3 className="text-lg font-semibold">Cambios de datos auditables</h3>
               </div>
 
               <div className="rounded-lg border">
@@ -555,12 +631,13 @@ export default function HistorialPage() {
                       <TableHead>Acción</TableHead>
                       <TableHead>Usuario</TableHead>
                       <TableHead>Razón del cambio</TableHead>
+                      <TableHead className="text-right">Detalle</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {modelos.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center">
+                        <TableCell colSpan={7} className="py-8 text-center">
                           <AlertCircle className="mx-auto mb-2 h-12 w-12 text-gray-400" />
                           <p className="text-gray-500">No se encontraron cambios manuales</p>
                         </TableCell>
@@ -589,8 +666,21 @@ export default function HistorialPage() {
                             {record.cambio_razon ? (
                               <span className="text-sm">{record.cambio_razon}</span>
                             ) : (
-                              <span className="text-sm italic text-gray-400">Sin descripción</span>
+                              <span className="text-sm italic text-gray-400">
+                                Sin motivo registrado
+                              </span>
                             )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void cargarDetalle(record)}
+                            >
+                              <Eye className="mr-2 h-4 w-4" />
+                              Ver detalle
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))
@@ -633,7 +723,7 @@ export default function HistorialPage() {
             <div className="mb-8">
               <div className="mb-3 flex items-center gap-2">
                 <Mail className="h-5 w-5" />
-                <h3 className="text-lg font-semibold">Proceso automático de fidelización</h3>
+                <h3 className="text-lg font-semibold">Automatización: fidelización</h3>
               </div>
 
               <div className="rounded-lg border">
@@ -706,7 +796,7 @@ export default function HistorialPage() {
             <div>
               <div className="mb-3 flex items-center gap-2">
                 <CalendarDays className="h-5 w-5" />
-                <h3 className="text-lg font-semibold">Proceso automático de reacomodamiento</h3>
+                <h3 className="text-lg font-semibold">Automatización: reacomodamiento</h3>
               </div>
 
               <div className="rounded-lg border">
@@ -781,6 +871,96 @@ export default function HistorialPage() {
             </div>
           )}
         </CardContent>
+
+        <Dialog open={detalleOpen} onOpenChange={setDetalleOpen}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Detalle de operación auditada</DialogTitle>
+              <DialogDescription>
+                Comparación del estado anterior y posterior guardado en el historial.
+              </DialogDescription>
+            </DialogHeader>
+
+            {detalleLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-700" />
+              </div>
+            ) : detalleSeleccionado ? (
+              <div className="space-y-6">
+                <div className="grid gap-3 rounded-lg border bg-slate-50 p-4 text-sm md:grid-cols-2">
+                  <div>
+                    <p className="text-xs uppercase text-muted-foreground">Entidad</p>
+                    <p className="font-medium">
+                      {detalleSeleccionado.modelo} #{detalleSeleccionado.objeto_id}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-muted-foreground">Fecha</p>
+                    <p className="font-medium">{formatearFecha(detalleSeleccionado.fecha)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-muted-foreground">Acción</p>
+                    <div className="mt-1">{getAccionBadge(detalleSeleccionado.history_type)}</div>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-muted-foreground">Actor</p>
+                    <p className="font-medium">{detalleSeleccionado.usuario.nombre}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {detalleSeleccionado.usuario.email}
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-xs uppercase text-muted-foreground">Motivo</p>
+                    <p className="font-medium">
+                      {detalleSeleccionado.cambio_razon || 'Sin motivo registrado'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-3 text-base font-semibold">Campos modificados</h4>
+                  <div className="overflow-x-auto rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Campo</TableHead>
+                          <TableHead>Estado anterior</TableHead>
+                          <TableHead>Estado posterior</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detalleSeleccionado.cambios.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="py-8 text-center text-muted-foreground"
+                            >
+                              No hay diferencias registradas para esta operación.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          detalleSeleccionado.cambios.map((cambio) => (
+                            <TableRow key={cambio.campo}>
+                              <TableCell className="font-medium">
+                                {formatearCampo(cambio.campo)}
+                              </TableCell>
+                              <TableCell className="max-w-[280px] break-words text-red-700">
+                                {formatearValorAuditoria(cambio.anterior)}
+                              </TableCell>
+                              <TableCell className="max-w-[280px] break-words text-emerald-700">
+                                {formatearValorAuditoria(cambio.posterior)}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
 
         <AlertDialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
           <AlertDialogContent>

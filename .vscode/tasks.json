@@ -227,11 +227,35 @@
             "problemMatcher": []
         },
         {
+            "label": "ngrok: Start",
+            "type": "shell",
+            "command": "ngrok",
+            "args": [
+                "http",
+                "8000"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "isBackground": true,
+            "problemMatcher": []
+        },
+        {
             "label": "Full Stack: Start Both Servers",
             "dependsOrder": "parallel",
             "dependsOn": [
                 "Django: Run Server",
-                "Next.js: Dev Server"
+                "Next.js: Dev Server",
+                "ngrok: Start"
             ],
             "group": "build",
             "presentation": {

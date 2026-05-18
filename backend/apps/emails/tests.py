@@ -51,7 +51,7 @@ class EmailOfertaReasignacionTipoPagoTest(TestCase):
         return turno_cancelado, turno_ofrecido, log_reasignacion
 
     @patch("apps.emails.services.email_service.send_mail")
-    def test_mail_cliente_pago_completo_sin_promo(self, mock_send_mail):
+    def test_mail_cliente_pago_completo_muestra_credito_billetera(self, mock_send_mail):
         turno_cancelado, turno_ofrecido, log_reasignacion = self._build_payload(
             "PAGO_COMPLETO"
         )
@@ -63,6 +63,7 @@ class EmailOfertaReasignacionTipoPagoTest(TestCase):
             monto_final=Decimal("0.00"),
             monto_descuento=Decimal("0.00"),
             senia_pagada=Decimal("1000.00"),
+            monto_credito_billetera=Decimal("2000.00"),
         )
 
         self.assertTrue(ok)
@@ -70,9 +71,10 @@ class EmailOfertaReasignacionTipoPagoTest(TestCase):
         kwargs = mock_send_mail.call_args.kwargs
         self.assertEqual(kwargs["subject"], "Reacomodo de turno disponible")
         self.assertIn(
-            "no incluye descuento promocional adicional",
+            "te acreditamos $2000.00 en tu billetera virtual",
             kwargs["html_message"],
         )
+        self.assertIn("Crédito en billetera si aceptás:", kwargs["html_message"])
         self.assertIn(
             "Ver detalles y confirmar reacomodo",
             kwargs["html_message"],

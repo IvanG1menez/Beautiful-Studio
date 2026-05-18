@@ -23,8 +23,8 @@ import {
   ChevronRight,
   CircleHelp,
   Clock,
+  Gift,
   Loader2,
-  Sparkles,
   Sun,
   Sunrise,
   TrendingUp,
@@ -111,6 +111,25 @@ interface ProfesionalOpcion {
   nombre: string;
 }
 
+interface StreakCoupon {
+  id: number;
+  code?: string | null;
+  milestone_number: number;
+  discount_amount: string;
+  status: 'pendiente' | 'reclamado' | 'usado' | 'vencido' | 'cancelado';
+  expires_at?: string | null;
+}
+
+interface StreakStatus {
+  streak_count: number;
+  goal_count: number;
+  progress_count: number;
+  progress_percent: number;
+  bonus_amount: string;
+  active_coupon?: StreakCoupon | null;
+  has_active_coupon: boolean;
+}
+
 interface EmpleadoApiItem {
   id: number | string;
   first_name?: string;
@@ -126,7 +145,7 @@ interface SlotAgrupado {
   available: boolean;
 }
 
-type PasoReprogramacion = 'calendar' | 'time' | 'loading' | 'select-professional' | 'flexible' | 'confirmation' | 'result';
+type PasoReprogramacion = 'calendar' | 'time' | 'loading' | 'select-professional' | 'confirmation' | 'result';
 type ReprogramacionViewMode = 'single' | 'all';
 
 // Funciones auxiliares
@@ -171,10 +190,12 @@ export default function DashboardClientePage() {
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [perfilCliente, setPerfilCliente] = useState<Cliente | null>(null);
   const [billetera, setBilletera] = useState<Billetera | null>(null);
+  const [streakStatus, setStreakStatus] = useState<StreakStatus | null>(null);
   const [movimientosBilletera, setMovimientosBilletera] = useState<MovimientoBilletera[]>([]);
   const [loadingTurnos, setLoadingTurnos] = useState(true);
   const [loadingPerfil, setLoadingPerfil] = useState(true);
   const [loadingBilletera, setLoadingBilletera] = useState(true);
+  const [claimingCoupon, setClaimingCoupon] = useState(false);
   const [historialPage, setHistorialPage] = useState(1);
   const [reprogramDialogOpen, setReprogramDialogOpen] = useState(false);
   const [turnoParaReprogramar, setTurnoParaReprogramar] = useState<Turno | null>(null);
@@ -201,6 +222,8 @@ export default function DashboardClientePage() {
   const [creandoPagoReprogramacion, setCreandoPagoReprogramacion] = useState(false);
   const [esperandoPagoReprogramacion, setEsperandoPagoReprogramacion] = useState(false);
   const [preferenceReprogramacionId, setPreferenceReprogramacionId] = useState('');
+  const [manualReprogramacionCode, setManualReprogramacionCode] = useState('');
+  const [confirmandoManualReprogramacion, setConfirmandoManualReprogramacion] = useState(false);
   const [avisoPoliticaOpen, setAvisoPoliticaOpen] = useState(false);
   const [turnoPendienteAviso, setTurnoPendienteAviso] = useState<Turno | null>(null);
   const [avisoCooldown, setAvisoCooldown] = useState(5);
@@ -212,9 +235,6 @@ export default function DashboardClientePage() {
   } | null>(null);
   const [mensajeResultadoReprogramacion, setMensajeResultadoReprogramacion] = useState('');
   const [resultadoReprogramacionDialogOpen, setResultadoReprogramacionDialogOpen] = useState(false);
-  const [solicitudFlexibleCreada, setSolicitudFlexibleCreada] = useState(false);
-  const [solicitudFlexibleMensaje, setSolicitudFlexibleMensaje] = useState('');
-  const [solicitandoFlexible, setSolicitandoFlexible] = useState(false);
   const mpReprogramacionWindowRef = useRef<Window | null>(null);
   const reprogramacionPollingRef = useRef<number | null>(null);
   const reprogramacionTabCheckRef = useRef<number | null>(null);
@@ -228,6 +248,7 @@ export default function DashboardClientePage() {
       loadPerfilData();
       loadTurnosData();
       loadBilleteraData();
+      loadStreakData();
     }
   }, [router]);
 
@@ -402,6 +423,42 @@ export default function DashboardClientePage() {
   const getPeriodKey = (time: string): 'morning' | 'afternoon' => {
     const hour = Number(time.split(':')[0]);
     return hour < 13 ? 'morning' : 'afternoon';
+  };
+
+  const loadStreakData = async () => {
+    try {
+      const response = await fetch('/api/clientes/me/streak/', {
+        headers: getAuthHeaders()
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setStreakStatus(data);
+      }
+    } catch (error) {
+      console.error('Error loading streak data:', error);
+    }
+  };
+
+  const claimStreakCoupon = async () => {
+    if (!streakStatus?.active_coupon || claimingCoupon) return;
+    setClaimingCoupon(true);
+    try {
+      const response = await fetch(`/api/clientes/me/streak-coupons/${streakStatus.active_coupon.id}/claim/`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || 'No se pudo reclamar el cupón.');
+      }
+      const coupon = await response.json();
+      setStreakStatus({ ...streakStatus, active_coupon: coupon, has_active_coupon: true });
+      toast.success('Cupón de racha reclamado');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo reclamar el cupón.');
+    } finally {
+      setClaimingCoupon(false);
+    }
   };
 
   const getEstadoLabel = (turno: Turno) => {
@@ -588,9 +645,6 @@ export default function DashboardClientePage() {
     setMostrarAdvertenciaFueraRango(false);
     setPenalidadDialogOpen(false);
     setResultadoReprogramacion(null);
-    setSolicitudFlexibleCreada(false);
-    setSolicitudFlexibleMensaje('');
-    setSolicitandoFlexible(false);
     setViewMode('single');
     setReprogramDialogOpen(true);
     cargarDisponibilidad(turno, turno.empleado, 'single');
@@ -621,9 +675,6 @@ export default function DashboardClientePage() {
       setErrorReprogramacion('');
       setPasoReprogramacion('calendar');
       setResultadoReprogramacion(null);
-      setSolicitudFlexibleCreada(false);
-      setSolicitudFlexibleMensaje('');
-      setSolicitandoFlexible(false);
       setPenalidadDialogOpen(false);
     }
   };
@@ -967,8 +1018,8 @@ export default function DashboardClientePage() {
         toast.success('Turno reprogramado correctamente.');
       }
       await loadTurnosData();
-    } catch (error: any) {
-      const message = error?.message || 'No se pudo reprogramar el turno.';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo reprogramar el turno.';
       const requiereConfirmarPenalidad =
         /perder[aá]s la seña|deber[aá]s pagar nuevamente|confirma para continuar|politicas de la empresa|abonar nuevamente/i.test(message);
 
@@ -1091,12 +1142,58 @@ export default function DashboardClientePage() {
           void verificarPagoFinalConReintentos();
         }
       }, 1000);
-    } catch (error: any) {
-      const message = error?.message || 'No se pudo iniciar el pago de reprogramación.';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo iniciar el pago de reprogramación.';
       setErrorReprogramacion(message);
       toast.error(message);
     } finally {
       setCreandoPagoReprogramacion(false);
+    }
+  };
+
+  const confirmarCobroManualReprogramacion = async () => {
+    const codigoLimpio = manualReprogramacionCode.trim();
+    if (!preferenceReprogramacionId || !codigoLimpio) {
+      setErrorReprogramacion('Ingresá el número de operación que figura en Mercado Pago.');
+      return;
+    }
+
+    try {
+      setConfirmandoManualReprogramacion(true);
+      setErrorReprogramacion('');
+      const response = await fetch('/api/mercadopago/confirmar-cobro-manual/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          preference_id: preferenceReprogramacionId,
+          payment_id: codigoLimpio,
+          motivo: 'Cobro de reprogramación confirmado manualmente',
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || 'No se pudo confirmar el cobro manual.');
+      }
+
+      detenerEsperaPagoReprogramacion();
+      setEsperandoPagoReprogramacion(false);
+      setPenalidadDialogOpen(false);
+      setReprogramDialogOpen(false);
+      setPreferenceReprogramacionId('');
+      setManualReprogramacionCode('');
+      await loadTurnosData();
+      setMensajeResultadoReprogramacion('Cobro confirmado y turno reprogramado correctamente. Revisá el nuevo detalle en tus turnos próximos.');
+      setResultadoReprogramacionDialogOpen(true);
+      toast.success('Cobro confirmado y turno reprogramado correctamente.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo confirmar el cobro manual.';
+      setErrorReprogramacion(message);
+      toast.error(message);
+    } finally {
+      setConfirmandoManualReprogramacion(false);
     }
   };
 
@@ -1111,39 +1208,6 @@ export default function DashboardClientePage() {
     }
 
     await ejecutarReprogramacion(false);
-  };
-
-  const solicitarReprogramacionFlexible = async () => {
-    if (!turnoParaReprogramar) return;
-
-    const aceptaPerderTurno = window.confirm(
-      'Si aceptás la reprogramación flexible, el turno que tenías asignado se libera como un hueco vacío, como si lo hubieras cancelado. La ventaja es que podés esperar confirmación del profesional que querés para un nuevo horario. ¿Querés continuar?'
-    );
-    if (!aceptaPerderTurno) return;
-
-    try {
-      setSolicitandoFlexible(true);
-      setErrorReprogramacion('');
-
-      const response = await turnosService.solicitarReprogramacionFlexible(turnoParaReprogramar.id, {
-        motivo: motivoReprogramacion?.trim() || undefined,
-      });
-
-      setSolicitudFlexibleCreada(true);
-      setSolicitudFlexibleMensaje(
-        `${response.message}. Tu solicitud quedó en revisión. El profesional asignará manualmente un nuevo horario disponible y te avisaremos cuando quede confirmado.`
-      );
-      setMensajeResultadoReprogramacion('Tu solicitud flexible quedó en espera. El turno próximo queda pausado y el profesional asignará manualmente un nuevo horario disponible.');
-      setResultadoReprogramacionDialogOpen(true);
-      toast.success(response.message);
-      await loadTurnosData();
-    } catch (error: any) {
-      const message = error?.message || 'No se pudo crear la solicitud flexible.';
-      setErrorReprogramacion(message);
-      toast.error(message);
-    } finally {
-      setSolicitandoFlexible(false);
-    }
   };
 
   const saldoBilletera = billetera
@@ -1248,6 +1312,74 @@ export default function DashboardClientePage() {
                       </div>
                     </div>
                   </div>
+
+                  {streakStatus && (
+                    <div className="rounded-2xl border border-violet-300 bg-violet-50 p-3.5">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex gap-3">
+                          <div className="rounded-xl bg-violet-500 p-3 text-white">
+                            <Gift className="h-6 w-6" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-base font-semibold text-violet-950">Racha de turnos</p>
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <button type="button" className="text-violet-700 hover:text-violet-900">
+                                    <CircleHelp className="h-4 w-4" />
+                                  </button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-lg">
+                                  <DialogHeader>
+                                    <DialogTitle>¿Cómo funciona la racha?</DialogTitle>
+                                    <DialogDescription>
+                                      Cada turno completado suma a tu racha. Al llegar a la meta configurada por el estudio, se genera un cupón para una próxima reserva.
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <div className="space-y-3 text-sm text-slate-700">
+                                    <p>1. Completá {streakStatus.goal_count} turnos para desbloquear un cupón.</p>
+                                    <p>2. Reclamalo para revelar tu código único.</p>
+                                    <p>3. Usalo en el último paso de una nueva reserva. Solo podés tener un cupón activo a la vez.</p>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </div>
+                            <p className="mt-1 text-sm text-violet-800">
+                              {streakStatus.progress_count}/{streakStatus.goal_count} turnos completados
+                            </p>
+                            <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-violet-200">
+                              <div
+                                className="h-full rounded-full bg-violet-600 transition-all"
+                                style={{ width: `${Math.min(100, Math.max(0, streakStatus.progress_percent))}%` }}
+                              />
+                            </div>
+                            {streakStatus.active_coupon && (
+                              <div className="mt-3 rounded-xl border border-violet-200 bg-white p-3 text-sm text-violet-950">
+                                <p className="font-semibold">
+                                  Cupón disponible por {formatCurrency(parseFloat(streakStatus.active_coupon.discount_amount || '0'))}
+                                </p>
+                                {streakStatus.active_coupon.status === 'reclamado' && streakStatus.active_coupon.code ? (
+                                  <p className="mt-1 font-mono text-base">{streakStatus.active_coupon.code}</p>
+                                ) : (
+                                  <p className="mt-1 text-violet-700">Reclamalo para ver tu código.</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {streakStatus.active_coupon && streakStatus.active_coupon.status === 'pendiente' && (
+                          <Button
+                            type="button"
+                            onClick={claimStreakCoupon}
+                            disabled={claimingCoupon}
+                            className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
+                          >
+                            {claimingCoupon ? 'Reclamando...' : 'Reclamar cupón'}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex justify-end">
                     <Dialog onOpenChange={(open) => { if (open) setHistorialPage(1); }}>
@@ -1603,7 +1735,7 @@ export default function DashboardClientePage() {
         <Dialog open={reprogramDialogOpen} onOpenChange={cerrarDialogoReprogramacion}>
           <DialogContent className="max-w-[1120px] border-0 bg-transparent p-0 shadow-none sm:max-w-[1120px]">
             <div className="flex h-[86vh] max-h-[86vh] min-h-[640px] flex-col overflow-hidden rounded-none bg-[#fbf3fb] shadow-[0_24px_70px_rgba(28,24,40,0.18)] sm:rounded-[18px]">
-              {pasoReprogramacion !== 'time' && pasoReprogramacion !== 'confirmation' && pasoReprogramacion !== 'flexible' && !resultadoReprogramacion && (
+              {pasoReprogramacion !== 'time' && pasoReprogramacion !== 'confirmation' && !resultadoReprogramacion && (
                 <div className="border-b border-slate-200 bg-white">
                   <DialogHeader className="space-y-0 px-6 py-6 text-left sm:px-9">
                     <div className="flex items-center gap-4">
@@ -1802,17 +1934,6 @@ export default function DashboardClientePage() {
                               </div>
                             )}
 
-                            <div className="mt-5 border-t border-slate-200 pt-5">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                className="h-11 w-full rounded-xl border-slate-200 bg-slate-100 font-semibold text-slate-700 hover:bg-slate-200"
-                                onClick={() => setPasoReprogramacion('flexible')}
-                              >
-                                Reprogramación flexible
-                              </Button>
-                              <p className="mt-2 text-center text-xs text-slate-500">Si no encontrás un horario que te sirva</p>
-                            </div>
                           </div>
 
                           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1827,7 +1948,7 @@ export default function DashboardClientePage() {
                               </div>
                             ) : slotsDelDia.length === 0 ? (
                               <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-                                No hay horarios disponibles para esta fecha. Podés elegir otra fecha o solicitar reprogramación flexible.
+                                No hay horarios disponibles para esta fecha. Podés elegir otra fecha.
                               </div>
                             ) : (
                               <div>
@@ -1989,13 +2110,6 @@ export default function DashboardClientePage() {
                           })}
                           </div>
 
-                        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                          <p className="text-lg font-semibold text-slate-900">¿No encontrás un horario que te sirva?</p>
-                          <p className="mt-1 text-sm text-slate-700">Podés dejar una solicitud flexible para revisión manual sin seña inmediata.</p>
-                          <Button type="button" className="mt-4 h-12 w-full rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={() => setPasoReprogramacion('flexible')}>
-                            Solicitar Reprogramación Flexible
-                          </Button>
-                        </div>
                         </div>
                       </div>
                     )}
@@ -2058,59 +2172,6 @@ export default function DashboardClientePage() {
                           </Button>
                           <Button variant="outline" className="h-14 rounded-2xl border-slate-200 bg-[#f2f3f7] text-lg font-semibold text-slate-800 hover:bg-slate-100" onClick={() => void toggleViewMode('all')}>
                             Ver otros profesionales disponibles
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-
-                    {pasoReprogramacion === 'flexible' && (
-                      <div className="mx-auto max-w-2xl rounded-[30px] bg-white p-6 text-center shadow-[0_18px_60px_rgba(18,24,40,0.08)] sm:p-8">
-                        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-100 text-amber-600">
-                          <Sparkles className="h-10 w-10" />
-                        </div>
-
-                        <h3 className="mt-6 text-3xl font-semibold text-slate-900">Reprogramación Flexible</h3>
-                        <p className="mt-3 text-lg text-slate-600">
-                          No encontraste un horario ideal. Podemos dejar una solicitud para revisión manual sin exigir seña inmediata.
-                        </p>
-
-                        <div className="mt-8 rounded-3xl bg-[#fbf7ff] p-5 text-left text-sm text-slate-700">
-                          <p className="font-semibold text-slate-900">Cómo funciona</p>
-                          <ul className="mt-3 space-y-2">
-                            <li>• Se cancela el horario próximo que querías reprogramar y queda en espera de asignación.</li>
-                            <li>• El profesional revisará tu solicitud y asignará un nuevo horario disponible.</li>
-                            <li>• No se solicita seña en este paso.</li>
-                            <li>• Te notificaremos cuando el nuevo turno quede asignado.</li>
-                          </ul>
-                        </div>
-
-                        {errorReprogramacion && (
-                          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-left text-sm text-red-700">
-                            {errorReprogramacion}
-                          </div>
-                        )}
-
-                        {solicitudFlexibleCreada && (
-                          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm text-emerald-900">
-                            {solicitudFlexibleMensaje || 'Solicitud flexible creada correctamente.'}
-                          </div>
-                        )}
-
-                        <div className="mt-8 flex flex-col gap-3">
-                          <Button
-                            className="h-14 rounded-2xl bg-[#8b22ff] text-lg font-semibold hover:bg-[#7720db]"
-                            onClick={solicitarReprogramacionFlexible}
-                            disabled={solicitandoFlexible || solicitudFlexibleCreada}
-                          >
-                            {solicitandoFlexible ? 'Enviando...' : 'Solicitar Reprogramación Flexible'}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="h-14 rounded-2xl border-slate-200 bg-[#f2f3f7] text-lg font-semibold text-slate-800 hover:bg-slate-100"
-                            onClick={() => setPasoReprogramacion('calendar')}
-                            disabled={solicitandoFlexible}
-                          >
-                            Volver a horarios
                           </Button>
                         </div>
                       </div>
@@ -2232,14 +2293,39 @@ export default function DashboardClientePage() {
               </p>
             </div>
             {esperandoPagoReprogramacion && (
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-                <div className="flex items-center gap-2 font-semibold">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Esperando confirmación de Mercado Pago
+              <div className="space-y-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                <div>
+                  <div className="flex items-center gap-2 font-semibold">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Esperando confirmación de Mercado Pago
+                  </div>
+                  <p className="mt-2">
+                    Completá el pago en la pestaña que se abrió. Esta ventana se actualizará cuando el pago sea aprobado.
+                  </p>
                 </div>
-                <p className="mt-2">
-                  Completá el pago en la pestaña que se abrió. Esta ventana se actualizará cuando el pago sea aprobado.
-                </p>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-950">
+                  <label className="text-sm font-medium">Número de operación si MP no confirma</label>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={manualReprogramacionCode}
+                      onChange={(event) => setManualReprogramacionCode(event.target.value.replace(/\D/g, ''))}
+                      placeholder="Ej: 1234567890"
+                      disabled={confirmandoManualReprogramacion}
+                      className="min-w-0 flex-1 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm focus:border-amber-400 focus:outline-none"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={confirmarCobroManualReprogramacion}
+                      disabled={!manualReprogramacionCode.trim() || confirmandoManualReprogramacion}
+                    >
+                      {confirmandoManualReprogramacion ? 'Confirmando...' : 'Confirmar'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-amber-800">
+                    Usalo solo si el pago figura recibido en Mercado Pago. El número queda registrado en el turno.
+                  </p>
+                </div>
               </div>
             )}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

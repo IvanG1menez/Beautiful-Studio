@@ -626,6 +626,7 @@ export default function ReservarTurnoProfesionalPage() {
       const result = await profesionalTurnosApi.confirmarPagoStaff({
         preference_id: preferenceId,
         payment_id: codigoLimpio,
+        motivo: 'Cobro presencial confirmado manualmente por profesional',
       });
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
@@ -633,10 +634,10 @@ export default function ReservarTurnoProfesionalPage() {
       }
       setIsWaitingPayment(false);
       setQrDialogOpen(false);
-      setSuccessMessage(`Pago aprobado y turno creado #${result.turno_id}`);
+      setSuccessMessage(`Cobro confirmado y turno creado #${result.turno_id}`);
       router.push('/dashboard/profesional/agenda');
     } catch (e: unknown) {
-      setPaymentCodeError(getErrorMessage(e, 'No se pudo validar el codigo de pago.'));
+      setPaymentCodeError(getErrorMessage(e, 'No se pudo confirmar el cobro manual.'));
     } finally {
       setIsConfirmingPaymentCode(false);
     }
@@ -1150,7 +1151,7 @@ export default function ReservarTurnoProfesionalPage() {
               </Alert>
 
               <div className="space-y-2 rounded-lg border p-3">
-                <Label htmlFor="payment-code">ID de operacion (opcional)</Label>
+                <Label htmlFor="payment-code">Numero de operacion (obligatorio)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="payment-code"
@@ -1165,11 +1166,11 @@ export default function ReservarTurnoProfesionalPage() {
                     onClick={confirmarPagoPorCodigo}
                     disabled={!paymentCode.trim() || isConfirmingPaymentCode}
                   >
-                    {isConfirmingPaymentCode ? 'Validando...' : 'Validar'}
+                    {isConfirmingPaymentCode ? 'Confirmando...' : 'Confirmar cobro'}
                   </Button>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Usalo solo si el cliente ya pago y la pantalla todavia no se actualizo. El sistema valida el ID contra Mercado Pago antes de crear el turno.
+                  Usalo solo si verificaste en tu cuenta que el dinero fue recibido. Se registra el numero de operacion y se crea el turno.
                 </p>
                 {paymentCodeError && <p className="text-xs text-red-600">{paymentCodeError}</p>}
               </div>

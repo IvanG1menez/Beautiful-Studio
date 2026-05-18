@@ -153,7 +153,6 @@ class ConfiguracionGlobalAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "min_horas_cancelacion_credito",
-        "horas_vencimiento_solicitud_reprogramacion",
         "max_reprogramaciones_mensuales",
         "margen_fidelizacion_dias",
         "descuento_fidelizacion_pct",
@@ -175,11 +174,8 @@ class ConfiguracionGlobalAdmin(admin.ModelAdmin):
         (
             "Reprogramación de Turnos",
             {
-                "fields": (
-                    "horas_vencimiento_solicitud_reprogramacion",
-                    "max_reprogramaciones_mensuales",
-                ),
-                "description": "Tiempo disponible para atender solicitudes flexibles antes de que requieran explicación",
+                "fields": ("max_reprogramaciones_mensuales",),
+                "description": "Límite mensual de reprogramaciones permitidas por cliente y servicio",
             },
         ),
         (

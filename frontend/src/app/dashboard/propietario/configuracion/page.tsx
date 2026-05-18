@@ -9,7 +9,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { obtenerConfigNotificaciones } from '@/services/notificacionesService';
-import { Bell, Loader2, Save, Settings, Shield } from 'lucide-react';
+import {
+  ArrowRight,
+  Bell,
+  Building2,
+  CalendarClock,
+  Gift,
+  Loader2,
+  Mail,
+  Save,
+  Settings,
+  Shield,
+  SlidersHorizontal,
+  WalletCards,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -25,6 +38,9 @@ interface ConfiguracionGlobal {
   dias_vencimiento_credito: number;
   horas_vencimiento_solicitud_reprogramacion: number;
   max_reprogramaciones_mensuales: number;
+  streak_goal_count: number;
+  streak_bonus_amount: string | number;
+  streak_coupon_expiration_days: number;
 }
 
 export default function ConfiguracionGlobalPage() {
@@ -70,6 +86,9 @@ export default function ConfiguracionGlobalPage() {
             Number(data.horas_vencimiento_solicitud_reprogramacion ?? 48)
           ),
           max_reprogramaciones_mensuales: Math.min(5, Math.max(1, Number(data.max_reprogramaciones_mensuales ?? 1))),
+          streak_goal_count: Math.max(1, Number(data.streak_goal_count ?? 5)),
+          streak_bonus_amount: data.streak_bonus_amount ?? '0.00',
+          streak_coupon_expiration_days: Math.max(1, Number(data.streak_coupon_expiration_days ?? 90)),
         });
       } catch (err) {
         console.error('Error al cargar configuración global:', err);
@@ -198,6 +217,18 @@ export default function ConfiguracionGlobalPage() {
       return;
     }
 
+    if ((config.streak_goal_count ?? 5) < 1) {
+      setError('La meta de racha debe ser de al menos 1 turno.');
+      toast.error('La meta de racha debe ser de al menos 1 turno');
+      return;
+    }
+
+    if ((config.streak_coupon_expiration_days ?? 90) < 1) {
+      setError('El vencimiento del cupón de racha debe ser de al menos 1 día.');
+      toast.error('El vencimiento del cupón de racha debe ser de al menos 1 día');
+      return;
+    }
+
     const confirmed = window.confirm(
       'Vas a modificar el número de reprogramaciones mensuales. Este cambio aplica a todos los servicios cargados. ¿Querés continuar?'
     );
@@ -256,50 +287,84 @@ export default function ConfiguracionGlobalPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <Settings className="h-8 w-8 text-purple-600" />
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Configuración Global</h1>
-          <p className="text-gray-600">
-            Administra la configuración general de tu negocio. Estos valores se usan como referencia en todo el sistema.
-          </p>
+    <div className="min-h-screen bg-gradient-to-b from-purple-50/70 via-white to-white">
+      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+        <div className="overflow-hidden rounded-3xl border border-purple-100 bg-white shadow-sm">
+          <div className="grid gap-6 bg-[radial-gradient(circle_at_top_left,_rgba(147,51,234,0.16),_transparent_36%),linear-gradient(135deg,_#ffffff_0%,_#faf5ff_100%)] p-6 sm:p-8 lg:grid-cols-[1fr_320px]">
+            <div className="space-y-4">
+              <div className="inline-flex items-center gap-2 rounded-full border border-purple-100 bg-white/80 px-3 py-1 text-xs font-medium text-purple-700 shadow-sm">
+                <Settings className="h-3.5 w-3.5" />
+                Panel del propietario
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-3xl font-bold tracking-tight text-gray-950 sm:text-4xl">
+                  Configuración del sistema
+                </h1>
+                <p className="max-w-2xl text-sm leading-6 text-gray-600 sm:text-base">
+                  Ajustá la identidad del negocio, las reglas operativas y los accesos avanzados desde un solo lugar.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/70 bg-white/85 p-5 shadow-sm backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-purple-500">
+                Negocio activo
+              </p>
+              <div className="mt-3 space-y-1">
+                <p className="text-xl font-semibold text-gray-950">
+                  {config.nombre_negocio || 'Beautiful Studio'}
+                </p>
+                <p className="text-sm text-gray-500">
+                  Estos cambios se aplican como referencia global en turnos, clientes, créditos y comunicaciones.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Datos del Negocio</CardTitle>
-          <CardDescription>Información básica utilizada en comunicaciones y reportes</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="nombre_negocio">Nombre del Negocio</Label>
-            <Input
-              id="nombre_negocio"
-              value={config.nombre_negocio || ''}
-              onChange={(e) => handleInputChange('nombre_negocio', e.target.value)}
-              placeholder="Ej: Beautiful Studio"
-            />
-          </div>
+        <Card className="overflow-hidden border-purple-100 shadow-sm">
+          <CardHeader className="border-b bg-white/80">
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-purple-100 p-3 text-purple-700">
+                <Building2 className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <CardTitle className="text-xl">Identidad del negocio</CardTitle>
+                <CardDescription>
+                  Datos visibles en comunicaciones, reportes y referencias internas del sistema.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="nombre_negocio">Nombre del negocio</Label>
+              <Input
+                id="nombre_negocio"
+                value={config.nombre_negocio || ''}
+                onChange={(e) => handleInputChange('nombre_negocio', e.target.value)}
+                placeholder="Ej: Beautiful Studio"
+                className="h-11"
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="direccion">Dirección</Label>
-            <Input
-              id="direccion"
-              value={config.direccion || ''}
-              onChange={(e) => handleInputChange('direccion', e.target.value)}
-              placeholder="Calle, número, ciudad"
-            />
-          </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="direccion">Dirección</Label>
+              <Input
+                id="direccion"
+                value={config.direccion || ''}
+                onChange={(e) => handleInputChange('direccion', e.target.value)}
+                placeholder="Calle, número, ciudad"
+                className="h-11"
+              />
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="telefono_contacto">Teléfono de contacto</Label>
               <Input
@@ -307,6 +372,7 @@ export default function ConfiguracionGlobalPage() {
                 value={config.telefono_contacto || ''}
                 onChange={(e) => handleInputChange('telefono_contacto', e.target.value)}
                 placeholder="Ej: +54 9 11 1234-5678"
+                className="h-11"
               />
             </div>
 
@@ -318,208 +384,305 @@ export default function ConfiguracionGlobalPage() {
                 value={config.email_contacto || ''}
                 onChange={(e) => handleInputChange('email_contacto', e.target.value)}
                 placeholder="contacto@tu-negocio.com"
+                className="h-11"
               />
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recordatorios de Turnos</CardTitle>
-          <CardDescription>Configura cómo se recordarán los turnos a tus clientes</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="recordatorios_email" className="text-base font-medium">
-                Recordatorios por email
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                Enviar recordatorios de turnos a la casilla de correo del cliente.
-              </p>
-            </div>
-            <Switch
-              id="recordatorios_email"
-              checked={config.habilitar_recordatorios_email}
-              onCheckedChange={() => handleToggle('habilitar_recordatorios_email')}
-            />
+        <section className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">
+            <SlidersHorizontal className="h-4 w-4" />
+            Reglas operativas
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="dias_recordatorio_antes_turno">Días de anticipación del recordatorio</Label>
-            <Input
-              id="dias_recordatorio_antes_turno"
-              type="number"
-              min={0}
-              value={config.dias_recordatorio_antes_turno ?? 0}
-              onChange={(e) => handleNumberChange('dias_recordatorio_antes_turno', e.target.value)}
-            />
-            <p className="text-sm text-muted-foreground">
-              Cantidad de días antes del turno en los que se enviará el recordatorio.
-            </p>
+          <div className="grid gap-4 lg:grid-cols-4">
+            <Card className="border-purple-100 shadow-sm">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="rounded-2xl bg-purple-100 p-3 text-purple-700">
+                    <Mail className="h-5 w-5" />
+                  </div>
+                  <Switch
+                    id="recordatorios_email"
+                    checked={config.habilitar_recordatorios_email}
+                    onCheckedChange={() => handleToggle('habilitar_recordatorios_email')}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle>Recordatorios</CardTitle>
+                  <CardDescription>Comunicación previa al turno.</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Estado</p>
+                  <p className="mt-1 text-lg font-semibold text-gray-950">
+                    {config.habilitar_recordatorios_email ? 'Email activo' : 'Email desactivado'}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dias_recordatorio_antes_turno">Enviar días antes</Label>
+                  <Input
+                    id="dias_recordatorio_antes_turno"
+                    type="number"
+                    min={0}
+                    value={config.dias_recordatorio_antes_turno ?? 0}
+                    onChange={(e) => handleNumberChange('dias_recordatorio_antes_turno', e.target.value)}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Define con cuánta anticipación recibe el aviso el cliente.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-emerald-100 shadow-sm">
+              <CardHeader>
+                <div className="w-fit rounded-2xl bg-emerald-100 p-3 text-emerald-700">
+                  <WalletCards className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle>Billetera y créditos</CardTitle>
+                  <CardDescription>Vigencia del crédito por cancelaciones.</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-2xl bg-emerald-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Valor actual</p>
+                  <p className="mt-1 text-3xl font-bold text-emerald-950">
+                    {config.dias_vencimiento_credito ?? 90} días
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dias_vencimiento_credito">Vencimiento del crédito</Label>
+                  <Input
+                    id="dias_vencimiento_credito"
+                    type="number"
+                    min={30}
+                    step={1}
+                    value={config.dias_vencimiento_credito ?? 90}
+                    onChange={(e) => handleNumberChange('dias_vencimiento_credito', e.target.value)}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Mínimo permitido: 30 días.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-amber-100 shadow-sm">
+              <CardHeader>
+                <div className="w-fit rounded-2xl bg-amber-100 p-3 text-amber-700">
+                  <CalendarClock className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle>Reprogramaciones</CardTitle>
+                  <CardDescription>Límites y vencimientos para solicitudes flexibles.</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-2xl bg-amber-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Permitidas</p>
+                  <p className="mt-1 text-3xl font-bold text-amber-950">
+                    {config.max_reprogramaciones_mensuales ?? 1} por mes
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="horas_vencimiento_solicitud_reprogramacion">
+                    Vencimiento de solicitudes flexibles
+                  </Label>
+                  <Input
+                    id="horas_vencimiento_solicitud_reprogramacion"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={config.horas_vencimiento_solicitud_reprogramacion ?? 48}
+                    onChange={(e) => handleNumberChange('horas_vencimiento_solicitud_reprogramacion', e.target.value)}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Horas disponibles para resolver una solicitud. Recomendado: 48.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="max_reprogramaciones_mensuales">
+                    Reprogramaciones mensuales
+                  </Label>
+                  <Select
+                    value={String(config.max_reprogramaciones_mensuales ?? 1)}
+                    onValueChange={(value) => handleNumberChange('max_reprogramaciones_mensuales', value)}
+                  >
+                    <SelectTrigger id="max_reprogramaciones_mensuales" className="h-11">
+                      <SelectValue placeholder="Seleccioná un número" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <SelectItem key={value} value={String(value)}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Este cambio aplica a todos los servicios cargados.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-violet-100 shadow-sm">
+              <CardHeader>
+                <div className="w-fit rounded-2xl bg-violet-100 p-3 text-violet-700">
+                  <Gift className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <CardTitle>Rachas</CardTitle>
+                  <CardDescription>Meta, descuento y vencimiento de cupones.</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-2xl bg-violet-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-violet-700">Cupón actual</p>
+                  <p className="mt-1 text-2xl font-bold text-violet-950">
+                    ${Number(config.streak_bonus_amount || 0).toLocaleString('es-AR')}
+                  </p>
+                  <p className="text-xs text-violet-700">
+                    cada {config.streak_goal_count ?? 5} turnos
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="streak_goal_count">Meta de turnos</Label>
+                  <Input
+                    id="streak_goal_count"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={config.streak_goal_count ?? 5}
+                    onChange={(e) => handleNumberChange('streak_goal_count', e.target.value)}
+                    className="h-11"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="streak_bonus_amount">Descuento del cupón</Label>
+                  <Input
+                    id="streak_bonus_amount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={config.streak_bonus_amount ?? '0'}
+                    onChange={(e) => handleInputChange('streak_bonus_amount', e.target.value)}
+                    className="h-11"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="streak_coupon_expiration_days">Vencimiento del cupón</Label>
+                  <Input
+                    id="streak_coupon_expiration_days"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={config.streak_coupon_expiration_days ?? 90}
+                    onChange={(e) => handleNumberChange('streak_coupon_expiration_days', e.target.value)}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Solo puede haber un cupón activo por cliente.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Billetera y Créditos</CardTitle>
-          <CardDescription>
-            Define la vigencia del crédito en billetera generado por cancelaciones.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Label htmlFor="dias_vencimiento_credito">Vencimiento del crédito (días)</Label>
-          <Input
-            id="dias_vencimiento_credito"
-            type="number"
-            min={30}
-            step={1}
-            value={config.dias_vencimiento_credito ?? 90}
-            onChange={(e) => handleNumberChange('dias_vencimiento_credito', e.target.value)}
-          />
-          <p className="text-sm text-muted-foreground">
-            Mínimo permitido: 30 días. Este valor impacta en la fecha de vencimiento de los
-            créditos de clientes.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Reprogramación de Turnos</CardTitle>
-          <CardDescription>
-            Define cuánto tiempo tiene el profesional para resolver una solicitud flexible.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Label htmlFor="horas_vencimiento_solicitud_reprogramacion">
-            Vencimiento de solicitudes flexibles (horas)
-          </Label>
-          <Input
-            id="horas_vencimiento_solicitud_reprogramacion"
-            type="number"
-            min={1}
-            step={1}
-            value={config.horas_vencimiento_solicitud_reprogramacion ?? 48}
-            onChange={(e) => handleNumberChange('horas_vencimiento_solicitud_reprogramacion', e.target.value)}
-          />
-          <p className="text-sm text-muted-foreground">
-            Valor actual recomendado: 48 horas. Si una solicitud vence, seguirá pendiente pero quedará marcada para revisión del propietario.
-          </p>
-
-          <div className="mt-6 rounded-xl border border-purple-100 bg-purple-50 p-4 space-y-2">
-            <Label htmlFor="max_reprogramaciones_mensuales">
-              Numero de reprogramaciones mensuales
-            </Label>
-            <Select
-              value={String(config.max_reprogramaciones_mensuales ?? 1)}
-              onValueChange={(value) => handleNumberChange('max_reprogramaciones_mensuales', value)}
-            >
-              <SelectTrigger id="max_reprogramaciones_mensuales">
-                <SelectValue placeholder="Seleccioná un número" />
-              </SelectTrigger>
-              <SelectContent>
-                {[1, 2, 3, 4, 5].map((value) => (
-                  <SelectItem key={value} value={String(value)}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              *Aclaración* Este cambio aplica a todos los servicios cargados.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Otras configuraciones del sistema</CardTitle>
-          <CardDescription>
-            Accesos directos a todas las configuraciones avanzadas que ya conocés del sistema.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <Bell className="h-4 w-4 text-purple-600" />
-                <span className="text-sm font-medium">Estado de notificaciones</span>
+        <Card className="border-gray-200 shadow-sm">
+          <CardHeader className="border-b bg-gray-50/80">
+            <CardTitle>Otras configuraciones del sistema</CardTitle>
+            <CardDescription>
+              Accesos rápidos a opciones avanzadas que viven en pantallas dedicadas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
+            <div className="rounded-2xl border border-purple-100 bg-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-purple-100 p-3 text-purple-700">
+                  <Bell className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <h3 className="font-semibold text-gray-950">Notificaciones del sistema</h3>
+                  {notificacionesResumen.loading ? (
+                    <p className="text-sm text-muted-foreground">Cargando estado...</p>
+                  ) : notificacionesResumen.error ? (
+                    <p className="text-sm text-red-500">{notificacionesResumen.error}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Plataforma: {notificacionesResumen.plataformaActivas}/
+                      {notificacionesResumen.plataformaTotales} tipos activos · Email:{' '}
+                      {notificacionesResumen.emailActivas}/
+                      {notificacionesResumen.emailTotales} activos
+                    </p>
+                  )}
+                </div>
               </div>
-              {notificacionesResumen.loading ? (
-                <p className="text-xs text-muted-foreground">Cargando estado de notificaciones...</p>
-              ) : notificacionesResumen.error ? (
-                <p className="text-xs text-red-500">{notificacionesResumen.error}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Plataforma: {notificacionesResumen.plataformaActivas}/
-                  {notificacionesResumen.plataformaTotales} tipos activos · Email:{' '}
-                  {notificacionesResumen.emailActivas}/
-                  {notificacionesResumen.emailTotales} activos
-                </p>
-              )}
+              <Button asChild variant="outline" className="mt-5 w-full justify-between">
+                <Link href="/dashboard/propietario/notificaciones">
+                  Configurar notificaciones
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-medium">Estado de SSO (Google)</span>
+            <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-blue-100 p-3 text-blue-700">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <h3 className="font-semibold text-gray-950">SSO con Google</h3>
+                  {ssoResumen.loading ? (
+                    <p className="text-sm text-muted-foreground">Cargando estado...</p>
+                  ) : ssoResumen.error ? (
+                    <p className="text-sm text-red-500">{ssoResumen.error}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Google SSO: {ssoResumen.googleActivo ? 'Activo' : 'Inactivo'} · Autocreación de
+                      clientes: {ssoResumen.autoCliente ? 'Activada' : 'Desactivada'} · Credenciales:{' '}
+                      {ssoResumen.tieneCredenciales ? 'configuradas' : 'pendientes'}
+                    </p>
+                  )}
+                </div>
               </div>
-              {ssoResumen.loading ? (
-                <p className="text-xs text-muted-foreground">Cargando estado de SSO...</p>
-              ) : ssoResumen.error ? (
-                <p className="text-xs text-red-500">{ssoResumen.error}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Google SSO: {ssoResumen.googleActivo ? 'Activo' : 'Inactivo'} · Autocreación de
-                  clientes: {ssoResumen.autoCliente ? 'Activada' : 'Desactivada'} · Credenciales:{' '}
-                  {ssoResumen.tieneCredenciales ? 'configuradas' : 'pendientes'}
-                </p>
-              )}
+              <Button asChild variant="outline" className="mt-5 w-full justify-between">
+                <Link href="/dashboard/propietario/configuracion-sso">
+                  Configurar SSO
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <Button asChild variant="outline" className="justify-start">
-              <Link href="/dashboard/propietario/notificaciones">
-                <Bell className="mr-2 h-4 w-4" />
-                Notificaciones del sistema
-              </Link>
-            </Button>
-
-            <Button asChild variant="outline" className="justify-start">
-              <Link href="/dashboard/propietario/configuracion-sso">
-                <Shield className="mr-2 h-4 w-4" />
-                Configuración de SSO (Google)
-              </Link>
-            </Button>
-
-            {/* Enlace a configuración de encuestas eliminado al desactivar el módulo de encuestas */}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="bg-purple-600 hover:bg-purple-700"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Guardando...
-            </>
-          ) : (
-            <>
-              <Save className="mr-2 h-4 w-4" />
-              Guardar cambios
-            </>
-          )}
-        </Button>
+        <div className="flex justify-end pb-4">
+          <Button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="h-11 rounded-full bg-purple-600 px-6 shadow-sm hover:bg-purple-700"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Guardando...
+              </>
+            ) : (
+              <>
+                <Save className="mr-2 h-4 w-4" />
+                Guardar cambios
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

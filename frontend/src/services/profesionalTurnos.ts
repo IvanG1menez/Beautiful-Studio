@@ -41,6 +41,7 @@ export interface PreferenciaStaffResponse {
 export interface ConfirmarPagoStaffPayload {
   preference_id: string;
   payment_id: string;
+  motivo?: string;
 }
 
 export interface ConfirmarPagoStaffResponse {
@@ -182,7 +183,7 @@ export const profesionalTurnosApi = {
   confirmarPagoStaff: async (payload: ConfirmarPagoStaffPayload): Promise<ConfirmarPagoStaffResponse> => {
     try {
       const response = await apiClient.post<ConfirmarPagoStaffResponse>(
-        '/mercadopago/confirmar-pago-staff/',
+        '/mercadopago/confirmar-cobro-manual/',
         payload,
       );
       return response.data;
