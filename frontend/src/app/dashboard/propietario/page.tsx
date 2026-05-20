@@ -388,8 +388,8 @@ export default function DashboardAdminPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Mostrar error si existe */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-700/60 rounded-lg">
-            <p className="text-red-700 dark:text-red-100">{error}</p>
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700">{error}</p>
             <Button
               variant="outline"
               size="sm"
@@ -416,7 +416,7 @@ export default function DashboardAdminPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/40 dark:border-orange-700/60">
+            <Card className="border-orange-200 bg-orange-50">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-orange-900">Comisión Pendiente</CardTitle>
                 <DollarSign className="h-4 w-4 text-orange-600" />
@@ -429,7 +429,7 @@ export default function DashboardAdminPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/40 dark:border-blue-700/60">
+            <Card className="border-blue-200 bg-blue-50">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-blue-900">Dinero Recuperado</CardTitle>
                 <Sparkles className="h-4 w-4 text-blue-600" />

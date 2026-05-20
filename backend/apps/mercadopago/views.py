@@ -145,8 +145,12 @@ def _get_valid_streak_coupon(cliente, code):
 
     _expire_stale_streak_coupons(cliente)
     coupon = StreakCoupon.objects.filter(cliente=cliente, code=code).first()
-    if not coupon or coupon.status != "reclamado":
-        return None, "Cupón inválido o no disponible."
+    if not coupon:
+        return None, "Cupón inválido."
+    if coupon.status == "usado":
+        return None, "Ya usaste tu código de descuento."
+    if coupon.status != "reclamado":
+        return None, "Cupón inválido."
     return coupon, None
 
 
@@ -167,6 +171,15 @@ def _mark_streak_coupon_used(coupon_id, turno):
         coupon.used_at = now
         coupon.used_turno = turno
         coupon.save(update_fields=["status", "used_at", "used_turno", "updated_at"])
+        from apps.turnos.models import ClienteStreakStats
+
+        ClienteStreakStats.objects.filter(cliente=coupon.cliente).update(
+            streak_count=0,
+            last_completed_turno=None,
+            last_completed_at=None,
+            next_expiration_at=None,
+            updated_at=now,
+        )
 
 
 def _resolver_o_crear_cliente_staff_desde_payload(turno_payload: dict) -> tuple[Cliente, bool]:
@@ -479,6 +492,11 @@ class CrearPreferenciaSinTurnoView(APIView):
             streak_coupon, coupon_error = _get_valid_streak_coupon(cliente, coupon_code)
             if coupon_error:
                 return Response({"detail": coupon_error}, status=status.HTTP_400_BAD_REQUEST)
+            if Decimal(str(streak_coupon.discount_amount or 0)) >= precio_total:
+                return Response(
+                    {"detail": "El cupón no puede cubrir todo el valor del servicio."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             streak_coupon_discount = min(
                 Decimal(str(streak_coupon.discount_amount or 0)),
                 precio_total,
@@ -516,6 +534,10 @@ class CrearPreferenciaSinTurnoView(APIView):
 
         monto_final = round(float(monto_base - creditos_aplicados), 2)
         descripcion = f"Turno — {servicio.nombre}"
+        es_oferta_fidelizacion = bool(data.get("aplicar_descuento_fidelizacion"))
+        notas_cliente = data.get("notas_cliente", "") or ""
+        if es_oferta_fidelizacion and "Oferta de cliente olvidado" not in notas_cliente:
+            notas_cliente = (notas_cliente + "\n" if notas_cliente else "") + "Oferta de cliente olvidado aplicada."
 
         # ── Caso gratuito: saldo cubre el 100% ─────────────────────────────
         if monto_final <= 0:
@@ -536,11 +558,13 @@ class CrearPreferenciaSinTurnoView(APIView):
                 servicio=servicio,
                 empleado=empleado_obj,
                 fecha_hora=data["fecha_hora"],
-                notas_cliente=data.get("notas_cliente", "") or "",
+                notas_cliente=notas_cliente,
                 estado="confirmado",
                 precio_final=precio_total,
                 senia_pagada=max(Decimal("0.00"), monto_base),
                 tipo_pago=tipo_pago,
+                canal_reserva="fidelizacion" if es_oferta_fidelizacion else "web_cliente",
+                metodo_pago="mercadopago_qr" if data.get("usar_qr") else "mercadopago",
             )
             if streak_coupon:
                 _mark_streak_coupon_used(streak_coupon.id, turno)
@@ -584,10 +608,75 @@ class CrearPreferenciaSinTurnoView(APIView):
             "streak_coupon_id": streak_coupon.id if streak_coupon else None,
             "streak_coupon_code": streak_coupon.code if streak_coupon else "",
             "streak_coupon_discount": str(streak_coupon_discount),
+            "canal_reserva": "fidelizacion" if es_oferta_fidelizacion else "web_cliente",
+            "metodo_pago": "mercadopago_qr" if data.get("usar_qr") else "mercadopago",
+            "aplicar_descuento_fidelizacion": es_oferta_fidelizacion,
         }
         external_reference = json.dumps(turno_payload)
 
         notification_url = getattr(settings, "MERCADO_PAGO_WEBHOOK_URL", "")
+
+        if data.get("usar_qr"):
+            qr_access_token = (getattr(settings, "MP_QR_ACCESS_TOKEN", "") or "").strip()
+            qr_collector_id = str(
+                getattr(settings, "MP_QR_COLLECTOR_ID", "")
+                or getattr(settings, "MP_QR_SELLER_COLLECTOR_ID", "")
+            ).strip()
+            qr_pos_external_id = str(getattr(settings, "MP_QR_POS_EXTERNAL_ID", "")).strip()
+            if not qr_access_token or not qr_collector_id or not qr_pos_external_id:
+                return Response(
+                    {
+                        "detail": (
+                            "Configuración QR incompleta: revisá MP_QR_ACCESS_TOKEN, "
+                            "MP_QR_COLLECTOR_ID y MP_QR_POS_EXTERNAL_ID."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            reference_id = f"cliente-qr-{uuid.uuid4().hex}"
+            try:
+                orden_mp = services.crear_orden_qr_dinamico(
+                    collector_id=qr_collector_id,
+                    external_pos_id=qr_pos_external_id,
+                    reference_id=reference_id,
+                    titulo=servicio.nombre,
+                    descripcion=descripcion,
+                    monto=monto_final,
+                    notification_url=notification_url,
+                )
+            except Exception as exc:
+                logger.error("Error creando QR para reserva cliente: %s", exc)
+                return Response(
+                    {"detail": f"Mercado Pago rechazó el QR: {exc}"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            qr_data = orden_mp.get("qr_data") or orden_mp.get("qr") or ""
+            if not qr_data:
+                return Response(
+                    {"detail": "Mercado Pago creó la orden QR, pero no devolvió datos de QR."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            OrdenMercadoPagoPresencial.objects.create(
+                reference_id=reference_id,
+                payload=turno_payload,
+                qr_data=qr_data,
+                monto=Decimal(str(monto_final)),
+            )
+            qr_public_key = getattr(settings, "MP_QR_PUBLIC_KEY", "") or getattr(settings, "MP_PUBLIC_KEY", "")
+            return Response(
+                {
+                    "status": "pending",
+                    "preference_id": reference_id,
+                    "qr_data": qr_data,
+                    "qr_init_point": qr_data,
+                    "qr_native": True,
+                    "public_key": qr_public_key,
+                    "qr_public_key": qr_public_key,
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         try:
             resultado = services.crear_preferencia(
@@ -1369,6 +1458,103 @@ class ConfirmarCobroManualView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _payload_reserva_manual(self, user, reserva_data: dict, preferencia: dict | None = None) -> tuple[dict | None, Response | None]:
+        """Reconstruye el payload del turno si MP no devuelve external_reference."""
+        if not reserva_data:
+            return None, None
+
+        serializer = CrearPreferenciaSinTurnoSerializer(data=reserva_data)
+        if not serializer.is_valid():
+            return None, Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        try:
+            cliente = Cliente.objects.select_related("user").get(user=user)
+        except Cliente.DoesNotExist:
+            return None, Response(
+                {"detail": "No se encontró perfil de cliente para este usuario."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            servicio = Servicio.objects.get(pk=data["servicio_id"])
+            Empleado.objects.get(pk=data["empleado_id"])
+        except (Servicio.DoesNotExist, Empleado.DoesNotExist):
+            return None, Response(
+                {"detail": "No se encontró el servicio o profesional de la reserva."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        precio_original = Decimal(str(servicio.precio or 0))
+        precio_total = precio_original
+
+        if data.get("aplicar_descuento_fidelizacion"):
+            from apps.authentication.models import ConfiguracionGlobal
+
+            config = ConfiguracionGlobal.get_config()
+            global_pct = Decimal(str(getattr(config, "porcentaje_descuento", 0) or 0))
+            if global_pct > 0:
+                precio_total = (
+                    precio_total * (Decimal("100") - global_pct) / Decimal("100")
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        streak_coupon = None
+        streak_coupon_discount = Decimal("0")
+        coupon_code = (data.get("coupon_code") or "").strip().upper()
+        if coupon_code:
+            streak_coupon, coupon_error = _get_valid_streak_coupon(cliente, coupon_code)
+            if coupon_error:
+                return None, Response({"detail": coupon_error}, status=status.HTTP_400_BAD_REQUEST)
+            streak_coupon_discount = min(
+                Decimal(str(streak_coupon.discount_amount or 0)),
+                precio_total,
+            )
+            precio_total = max(Decimal("0"), precio_total - streak_coupon_discount)
+
+        tipo_pago = (data.get("tipo_pago") or "").upper()
+        if tipo_pago not in {"SENIA", "PAGO_COMPLETO"}:
+            tipo_pago = "SENIA" if data.get("usar_sena", True) else "PAGO_COMPLETO"
+
+        monto_sena_fijo = Decimal(str(getattr(servicio, "monto_sena_fijo", 0) or 0))
+        if monto_sena_fijo <= 0 and precio_total > 0:
+            monto_sena_fijo = (precio_total / Decimal("2")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        monto_base = monto_sena_fijo if tipo_pago == "SENIA" else precio_total
+
+        creditos_solicitados = Decimal(str(data.get("creditos_a_aplicar") or 0))
+        creditos_aplicados = Decimal("0")
+        try:
+            creditos_aplicados = min(creditos_solicitados, cliente.billetera.saldo, monto_base)
+            creditos_aplicados = max(creditos_aplicados, Decimal("0"))
+        except Exception:
+            creditos_aplicados = Decimal("0")
+
+        monto_preferencia = Decimal("0")
+        try:
+            monto_preferencia = Decimal(str((preferencia.get("items") or [{}])[0].get("unit_price") or 0)) if preferencia else Decimal("0")
+        except Exception:
+            monto_preferencia = Decimal("0")
+
+        monto_cobrado = monto_preferencia or (monto_base - creditos_aplicados)
+
+        return {
+            "cliente_id": cliente.pk,
+            "servicio_id": servicio.pk,
+            "empleado_id": data["empleado_id"],
+            "fecha_hora": data["fecha_hora"].isoformat(),
+            "notas_cliente": notas_cliente,
+            "usar_sena": tipo_pago == "SENIA",
+            "tipo_pago": tipo_pago,
+            "creditos_aplicados": str(creditos_aplicados),
+            "monto_cobrado": str(max(Decimal("0"), monto_cobrado)),
+            "precio_total_original": str(precio_original),
+            "precio_total_final": str(precio_total),
+            "streak_coupon_id": streak_coupon.id if streak_coupon else None,
+            "streak_coupon_code": streak_coupon.code if streak_coupon else "",
+            "streak_coupon_discount": str(streak_coupon_discount),
+        }, None
+
     def post(self, request, *args, **kwargs):
         serializer = ConfirmarPagoManualSerializer(data=request.data)
         if not serializer.is_valid():
@@ -1384,6 +1570,7 @@ class ConfirmarCobroManualView(APIView):
         preference_id = serializer.validated_data["preference_id"]
         payment_id = serializer.validated_data["payment_id"]
         motivo = serializer.validated_data.get("motivo") or "Cobro confirmado manualmente"
+        reserva_manual = serializer.validated_data.get("reserva") or {}
 
         if PreferenciaMercadoPagoCancelada.objects.filter(preference_id=preference_id).exists():
             return Response(
@@ -1435,15 +1622,34 @@ class ConfirmarCobroManualView(APIView):
                     monto_cobrado_override=float(orden_presencial.monto or 0),
                 )
             else:
-                preferencia = services.obtener_preferencia(preference_id)
+                try:
+                    preferencia = services.obtener_preferencia(preference_id)
+                except ValueError as exc:
+                    if not reserva_manual:
+                        raise
+                    logger.warning(
+                        "Confirmar cobro manual: MP no devolvió preferencia %s, usando reserva local: %s",
+                        preference_id,
+                        exc,
+                    )
+                    preferencia = {}
+
                 turno_payload = webhook._parse_turno_payload(
                     preferencia.get("external_reference", "")
                 )
                 if turno_payload is None:
-                    return Response(
-                        {"detail": "No se pudo resolver la reserva asociada a esta preferencia."},
-                        status=status.HTTP_400_BAD_REQUEST,
+                    turno_payload, error_response = self._payload_reserva_manual(
+                        user,
+                        reserva_manual,
+                        preferencia,
                     )
+                    if error_response is not None:
+                        return error_response
+                    if turno_payload is None:
+                        return Response(
+                            {"detail": "No se pudo resolver la reserva asociada a esta preferencia."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
                 if not es_staff_user:
                     cliente_profile = getattr(user, "cliente_profile", None)
                     cliente_id = turno_payload.get("cliente_id")

@@ -179,6 +179,11 @@ export interface Turno {
   monto_pendiente_original?: string;
   pagado_completo?: boolean;
   descuento_aplicado?: string;
+  cupon_racha_aplicado?: boolean;
+  cupon_racha_codigo?: string;
+  cupon_racha_descuento?: string;
+  oferta_fidelizacion_aplicada?: boolean;
+  oferta_fidelizacion_descuento?: string;
   reacomodamiento_exitoso?: boolean;
   fue_reprogramado?: boolean;
   ultimo_movimiento_reprogramacion?: {

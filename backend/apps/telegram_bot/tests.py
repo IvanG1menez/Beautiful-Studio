@@ -1,13 +1,15 @@
 from unittest.mock import patch
+from datetime import timedelta
 
 from django.conf import settings
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.clientes.models import Cliente
 from apps.users.models import User
 
-from .models import TelegramLink, TelegramUpdateLog
+from .models import TelegramConversationState, TelegramLink, TelegramLinkToken, TelegramUpdateLog
 from .services import TelegramBotService, normalize_phone, phone_variants
 
 
@@ -67,6 +69,92 @@ class NormalizePhoneTests(TestCase):
 
 
 class TelegramContactFlowTests(TestCase):
+    def test_link_token_endpoint_returns_telegram_url_for_client(self):
+        user = User.objects.create_user(
+            email="token.endpoint@test.com",
+            password="password1.2.3",
+            username="token_endpoint",
+            role="cliente",
+        )
+        cliente = Cliente.objects.create(user=user)
+        api_client = APIClient()
+        api_client.force_authenticate(user=user)
+
+        response = api_client.post("/api/telegram/link-token/", {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIn("https://t.me/beauti0598_bot?start=link_", response.data["telegram_url"])
+        token = TelegramLinkToken.objects.get(cliente=cliente)
+        self.assertIn(token.token, response.data["telegram_url"])
+
+    def test_start_with_link_token_links_telegram_to_client(self):
+        user = User.objects.create_user(
+            email="token.flow@test.com",
+            password="password1.2.3",
+            username="token_flow",
+            first_name="Token",
+            role="cliente",
+            phone="+54 9 11 2233-4455",
+        )
+        cliente = Cliente.objects.create(user=user)
+        token = TelegramLinkToken.objects.create(
+            token="abc123",
+            cliente=cliente,
+            expires_at=timezone.now() + timedelta(minutes=15),
+        )
+
+        service = TelegramBotService()
+        with patch.object(service, "send_message") as mocked_send_message, patch.object(
+            service, "send_main_menu"
+        ) as mocked_main_menu:
+            service._handle_message(
+                {
+                    "chat": {"id": 555123},
+                    "from": {"id": 999123},
+                    "text": "/start link_abc123",
+                }
+            )
+
+        link = TelegramLink.objects.get(telegram_user_id=999123)
+        token.refresh_from_db()
+        self.assertEqual(link.chat_id, 555123)
+        self.assertEqual(link.cliente_id, cliente.id)
+        self.assertTrue(link.is_verified)
+        self.assertIsNotNone(token.used_at)
+        mocked_send_message.assert_called_once_with(
+            555123,
+            "✅ ¡Cuenta vinculada con exito!\nYa podes gestionar tus turnos desde este chat.",
+            reply_markup={"remove_keyboard": True},
+        )
+        mocked_main_menu.assert_called_once_with(555123)
+
+    def test_expired_link_token_falls_back_to_phone_link(self):
+        user = User.objects.create_user(
+            email="expired.flow@test.com",
+            password="password1.2.3",
+            username="expired_flow",
+            role="cliente",
+        )
+        cliente = Cliente.objects.create(user=user)
+        TelegramLinkToken.objects.create(
+            token="expired123",
+            cliente=cliente,
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        service = TelegramBotService()
+        with patch.object(service, "send_message") as mocked_send_message:
+            service._handle_message(
+                {
+                    "chat": {"id": 555124},
+                    "from": {"id": 999124},
+                    "text": "/start link_expired123",
+                }
+            )
+
+        self.assertEqual(mocked_send_message.call_count, 2)
+        self.assertIn("no es valido o vencio", mocked_send_message.call_args_list[0].args[1])
+
     def test_phone_instructions_send_contact_keyboard(self):
         service = TelegramBotService()
 
@@ -246,9 +334,44 @@ class TelegramGreetingAndFarewellTests(TestCase):
 
         mocked_send.assert_called_once_with(
             555001,
-            "¡Hola de nuevo! ✨\nQue lindo tenerte por aca. ¿Que queres hacer hoy?",
+            "Hola Juan ✨\n¿En que te ayudo hoy?",
         )
         mocked_menu.assert_called_once_with(555001)
+
+    def test_unknown_text_does_not_open_main_menu(self):
+        user = User.objects.create_user(
+            email="perro@test.com",
+            password="password1.2.3",
+            username="perro",
+            first_name="Ana",
+            last_name="Cliente",
+            phone="+54 9 11 8888-1112",
+        )
+        cliente = Cliente.objects.create(user=user)
+        TelegramLink.objects.create(
+            telegram_user_id=777003,
+            chat_id=555003,
+            cliente=cliente,
+            is_verified=True,
+        )
+
+        service = TelegramBotService()
+        with patch.object(service, "send_message") as mocked_send, patch.object(
+            service, "send_main_menu"
+        ) as mocked_menu:
+            service._handle_message(
+                {
+                    "chat": {"id": 555003},
+                    "from": {"id": 777003},
+                    "text": "Perro",
+                }
+            )
+
+        mocked_send.assert_called_once_with(
+            555003,
+            "No entendi ese mensaje. Para ver opciones escribi \"hola\" o /menu.",
+        )
+        mocked_menu.assert_not_called()
 
     def test_farewell_text_thanks_and_removes_keyboard(self):
         user = User.objects.create_user(
@@ -279,6 +402,45 @@ class TelegramGreetingAndFarewellTests(TestCase):
 
         mocked_send.assert_called_once_with(
             555002,
-            "Gracias por escribirnos 💇‍♀️✨\nCuando quieras volver, mandame un \"hola\" o /start y seguimos.",
+            "Gracias por escribirnos 💇‍♀️✨\nCuando quieras volver, mandame un \"hola\" y seguimos.",
             reply_markup={"remove_keyboard": True},
         )
+
+    def test_finished_chat_waits_for_new_greeting(self):
+        user = User.objects.create_user(
+            email="finalizado@test.com",
+            password="password1.2.3",
+            username="finalizado",
+            first_name="Ana",
+            last_name="Cliente",
+            phone="+54 9 11 8888-1113",
+        )
+        cliente = Cliente.objects.create(user=user)
+        link = TelegramLink.objects.create(
+            telegram_user_id=777004,
+            chat_id=555004,
+            cliente=cliente,
+            is_verified=True,
+        )
+        TelegramConversationState.objects.create(
+            link=link,
+            state=TelegramConversationState.STATE_ENDED,
+        )
+
+        service = TelegramBotService()
+        with patch.object(service, "send_message") as mocked_send, patch.object(
+            service, "send_main_menu"
+        ) as mocked_menu:
+            service._handle_message(
+                {
+                    "chat": {"id": 555004},
+                    "from": {"id": 777004},
+                    "text": "turnos",
+                }
+            )
+
+        mocked_send.assert_called_once_with(
+            555004,
+            "El chat esta finalizado. Mandame \"hola\" cuando quieras volver a empezar.",
+        )
+        mocked_menu.assert_not_called()

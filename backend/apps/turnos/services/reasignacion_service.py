@@ -94,6 +94,15 @@ def _save_turno_with_history(turno: Turno, reason: str, update_fields=None) -> N
         turno.save()
 
 
+def _set_log_audit(log: LogReasignacion, anterior: dict, posterior: dict) -> None:
+    log.estado_anterior = anterior
+    log.estado_posterior = posterior
+
+
+def _hueco_generado_por_reasignacion(turno: Turno) -> bool:
+    return LogReasignacion.objects.filter(turno_ofrecido=turno, estado_final="aceptada").exists()
+
+
 def _slot_libre(turno_cancelado: Turno) -> bool:
     """Valida que el hueco siga libre antes de enviar o aceptar una oferta."""
     return not Turno.objects.filter(
@@ -184,6 +193,16 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
         regla_descuento_aplicada=regla_descuento,
         expires_at=timezone.now() + timedelta(minutes=tiempo_espera_min),
     )
+    _set_log_audit(
+        log_reasignacion,
+        {"estado_final": None, "turno_ofrecido_estado": candidato.estado},
+        {
+            "estado_final": None,
+            "turno_ofrecido_estado": "oferta_enviada",
+            "expires_at": log_reasignacion.expires_at.isoformat(),
+        },
+    )
+    log_reasignacion.save(update_fields=["estado_anterior", "estado_posterior"])
 
     candidato.estado = "oferta_enviada"
     _save_turno_with_history(
@@ -213,7 +232,12 @@ def iniciar_reasignacion_turno(turno_cancelado_id: int) -> dict:
             update_fields=["estado"],
         )
         log_reasignacion.estado_final = "rechazada"
-        log_reasignacion.save(update_fields=["estado_final"])
+        _set_log_audit(
+            log_reasignacion,
+            {"estado_final": None, "turno_ofrecido_estado": "oferta_enviada"},
+            {"estado_final": "rechazada", "turno_ofrecido_estado": "confirmado", "motivo": "email_fallido"},
+        )
+        log_reasignacion.save(update_fields=["estado_final", "estado_anterior", "estado_posterior"])
         return {"status": "email_fallido"}
 
     # Encolar tarea de expiración automática (si Celery está disponible)
@@ -249,8 +273,12 @@ def expirar_oferta_reasignacion(log_id: int) -> dict:
     if log_reasignacion.expires_at > timezone.now():
         return {"status": "aun_vigente"}
 
+    cerrar_ciclo = _hueco_generado_por_reasignacion(log_reasignacion.turno_cancelado)
+    anterior_log = {
+        "estado_final": None,
+        "turno_ofrecido_estado": getattr(log_reasignacion.turno_ofrecido, "estado", None),
+    }
     log_reasignacion.estado_final = "expirada"
-    log_reasignacion.save(update_fields=["estado_final"])
 
     if (
         log_reasignacion.turno_ofrecido
@@ -264,9 +292,21 @@ def expirar_oferta_reasignacion(log_id: int) -> dict:
             update_fields=["estado"],
         )
 
-    # Continuar con siguiente candidato
-    iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
-    return {"status": "expirada"}
+    _set_log_audit(
+        log_reasignacion,
+        anterior_log,
+        {
+            "estado_final": "expirada",
+            "turno_ofrecido_estado": getattr(log_reasignacion.turno_ofrecido, "estado", None),
+            "ciclo_cerrado": cerrar_ciclo,
+        },
+    )
+    log_reasignacion.save(update_fields=["estado_final", "estado_anterior", "estado_posterior"])
+
+    # Continuar con siguiente candidato salvo cuando el hueco ya fue generado por una reasignación previa.
+    if not cerrar_ciclo:
+        iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
+    return {"status": "expirada", "ciclo_cerrado": cerrar_ciclo}
 
 
 def responder_oferta_reasignacion(token: str, accion: str) -> dict:
@@ -289,8 +329,12 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         }
 
     if log_reasignacion.expires_at <= timezone.now():
+        cerrar_ciclo = _hueco_generado_por_reasignacion(log_reasignacion.turno_cancelado)
+        anterior_log = {
+            "estado_final": None,
+            "turno_ofrecido_estado": getattr(log_reasignacion.turno_ofrecido, "estado", None),
+        }
         log_reasignacion.estado_final = "expirada"
-        log_reasignacion.save(update_fields=["estado_final"])
 
         # Si la oferta seguia marcada como enviada, se revierte a confirmado
         # y se intenta continuar con el siguiente candidato.
@@ -306,19 +350,36 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
                 update_fields=["estado"],
             )
 
+        _set_log_audit(
+            log_reasignacion,
+            anterior_log,
+            {
+                "estado_final": "expirada",
+                "turno_ofrecido_estado": getattr(log_reasignacion.turno_ofrecido, "estado", None),
+                "ciclo_cerrado": cerrar_ciclo,
+            },
+        )
+        log_reasignacion.save(update_fields=["estado_final", "estado_anterior", "estado_posterior"])
+
         # Fallback cuando no corrio Celery de expiracion: continuar cadena ahora.
-        iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
+        if not cerrar_ciclo:
+            iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
         return {
             "status": "expirada",
             "mensaje": "Lo sentimos, tu tiempo se acabo para responder esta oferta.",
+            "ciclo_cerrado": cerrar_ciclo,
         }
 
     turno_cancelado = log_reasignacion.turno_cancelado
     turno_ofrecido = log_reasignacion.turno_ofrecido
 
     if accion == "rechazar":
+        cerrar_ciclo = _hueco_generado_por_reasignacion(log_reasignacion.turno_cancelado)
+        anterior_log = {
+            "estado_final": None,
+            "turno_ofrecido_estado": getattr(log_reasignacion.turno_ofrecido, "estado", None),
+        }
         log_reasignacion.estado_final = "rechazada"
-        log_reasignacion.save(update_fields=["estado_final"])
 
         if (
             log_reasignacion.turno_ofrecido
@@ -332,8 +393,20 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
                 update_fields=["estado"],
             )
 
-        iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
-        return {"status": "rechazada"}
+        _set_log_audit(
+            log_reasignacion,
+            anterior_log,
+            {
+                "estado_final": "rechazada",
+                "turno_ofrecido_estado": getattr(log_reasignacion.turno_ofrecido, "estado", None),
+                "ciclo_cerrado": cerrar_ciclo,
+            },
+        )
+        log_reasignacion.save(update_fields=["estado_final", "estado_anterior", "estado_posterior"])
+
+        if not cerrar_ciclo:
+            iniciar_reasignacion_turno(log_reasignacion.turno_cancelado_id)
+        return {"status": "rechazada", "ciclo_cerrado": cerrar_ciclo}
 
     if accion != "aceptar":
         return {"status": "accion_invalida"}
@@ -416,7 +489,17 @@ def responder_oferta_reasignacion(token: str, accion: str) -> dict:
         )
 
         log_reasignacion.estado_final = "aceptada"
-        log_reasignacion.save(update_fields=["estado_final"])
+        _set_log_audit(
+            log_reasignacion,
+            {"estado_final": None, "turno_cancelado_estado": "cancelado", "turno_ofrecido_estado": "oferta_enviada"},
+            {
+                "estado_final": "aceptada",
+                "turno_cancelado_estado": turno_cancelado.estado,
+                "turno_ofrecido_estado": turno_ofrecido.estado,
+                "cliente_asignado_turno_cancelado_id": turno_cancelado.cliente_id,
+            },
+        )
+        log_reasignacion.save(update_fields=["estado_final", "estado_anterior", "estado_posterior"])
 
     return {"status": "aceptada", "turno_id": turno_cancelado.pk}
 

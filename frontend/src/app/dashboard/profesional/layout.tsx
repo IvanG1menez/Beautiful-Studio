@@ -2,7 +2,6 @@
 
 import TopBar from '@/components/layout/TopBar';
 import { Button } from '@/components/ui/button';
-import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import {
   ChevronLeft,
   ChevronRight,
@@ -129,8 +128,7 @@ export default function DashboardProfesionalLayout({
           </nav>
 
           {sidebarOpen && (
-            <div className="p-4 border-t border-blue-700 flex flex-col gap-3">
-              <ThemeToggle />
+            <div className="p-4 border-t border-blue-700">
               <div className="text-xs text-blue-200">
                 <p>Beautiful Studio</p>
                 <p className="mt-1">Profesionales de la belleza</p>
@@ -145,7 +143,7 @@ export default function DashboardProfesionalLayout({
 
         {isMobile && sidebarOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-30"
+            className="fixed inset-0 bg-black/55 z-30"
             onClick={() => setSidebarOpen(false)}
           />
         )}

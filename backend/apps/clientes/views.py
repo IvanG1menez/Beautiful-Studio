@@ -551,6 +551,13 @@ def claim_streak_coupon_view(request, coupon_id):
         coupon.code = _generate_streak_coupon_code()
     coupon.save(update_fields=["status", "claimed_at", "code", "updated_at"])
 
+    try:
+        from apps.emails.services import EmailService
+
+        EmailService.enviar_email_cupon_racha(coupon)
+    except Exception:
+        pass
+
     return Response(_serialize_streak_coupon(coupon), status=status.HTTP_200_OK)
 
 
@@ -576,8 +583,12 @@ def validate_streak_coupon_view(request):
 
     _expire_stale_streak_coupons(cliente)
     coupon = StreakCoupon.objects.filter(cliente=cliente, code=code).first()
-    if not coupon or coupon.status != "reclamado":
-        return Response({"detail": "Cupón inválido o no disponible."}, status=status.HTTP_400_BAD_REQUEST)
+    if not coupon:
+        return Response({"detail": "Cupón inválido."}, status=status.HTTP_400_BAD_REQUEST)
+    if coupon.status == "usado":
+        return Response({"detail": "Ya usaste tu código de descuento."}, status=status.HTTP_400_BAD_REQUEST)
+    if coupon.status != "reclamado":
+        return Response({"detail": "Cupón inválido."}, status=status.HTTP_400_BAD_REQUEST)
 
     precio_total = None
     discount_amount = coupon.discount_amount
@@ -586,6 +597,11 @@ def validate_streak_coupon_view(request):
         if not servicio:
             return Response({"detail": "Servicio no encontrado."}, status=status.HTTP_404_NOT_FOUND)
         precio_total = Decimal(str(servicio.precio or 0))
+        if coupon.discount_amount >= precio_total:
+            return Response(
+                {"detail": "El cupón no puede cubrir todo el valor del servicio."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         discount_amount = min(discount_amount, precio_total)
 
     return Response(
@@ -595,6 +611,38 @@ def validate_streak_coupon_view(request):
             "discount_amount": str(discount_amount),
             "precio_total": str(precio_total) if precio_total is not None else None,
             "precio_final": str(max(Decimal("0"), precio_total - discount_amount)) if precio_total is not None else None,
+            "usage_warning": "Este código es de uso único. Al confirmar el pago, tu contador de racha se reseteará.",
         },
         status=status.HTTP_200_OK,
     )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def active_reasignacion_offer_view(request):
+    from django.utils import timezone
+    from apps.turnos.models import LogReasignacion
+    from apps.turnos.services.reasignacion_service import obtener_detalles_oferta_reasignacion
+
+    try:
+        cliente = _get_cliente_from_request(request)
+    except Cliente.DoesNotExist:
+        return Response(
+            {"error": "No se encontró perfil de cliente"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    oferta = (
+        LogReasignacion.objects.filter(
+            cliente_notificado=cliente,
+            estado_final__isnull=True,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("expires_at")
+        .first()
+    )
+    if not oferta:
+        return Response({"status": "sin_oferta"}, status=status.HTTP_200_OK)
+
+    detalles = obtener_detalles_oferta_reasignacion(str(oferta.token))
+    return Response(detalles, status=status.HTTP_200_OK)

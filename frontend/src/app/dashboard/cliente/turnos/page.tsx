@@ -14,7 +14,7 @@ import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { formatDate, formatDateTimeReadable, formatTime } from '@/lib/dateUtils';
 import { AlertCircle, Calendar, CalendarDays, CheckCircle, Clock, Filter, Loader2, Plus, Search, User, X, XCircle } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Turno {
   id: number;
@@ -55,6 +55,41 @@ interface Turno {
   updated_at: string;
 }
 
+interface ComprobanteData {
+  empresa?: {
+    nombre_empresa?: string;
+    razon_social?: string;
+    cuit?: string;
+    fecha_fundacion?: string;
+  };
+  turno?: {
+    cliente_nombre?: string;
+    cliente_email?: string;
+    profesional_nombre?: string;
+    servicio_nombre?: string;
+    fecha_hora?: string;
+    senia_pagada?: string;
+    precio_final?: string;
+  };
+  pago?: {
+    monto?: string | number;
+    moneda?: string;
+    payment_id?: string;
+  };
+}
+
+const getErrorMessage = (error: unknown, fallback: string) => {
+  return error instanceof Error ? error.message : fallback;
+};
+
+const isFilterFecha = (value: string): value is 'hoy' | 'semana' | 'mes' | 'all' => {
+  return ['hoy', 'semana', 'mes', 'all'].includes(value);
+};
+
+const isSortBy = (value: string): value is 'fecha' | 'precio' | 'servicio' => {
+  return ['fecha', 'precio', 'servicio'].includes(value);
+};
+
 export default function TurnosClientePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -86,7 +121,7 @@ export default function TurnosClientePage() {
 
   // Estado para comprobante de pago
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
-  const [comprobanteData, setComprobanteData] = useState<any | null>(null);
+  const [comprobanteData, setComprobanteData] = useState<ComprobanteData | null>(null);
 
   // Estado para cancelación con motivo
   const [turnoACancelar, setTurnoACancelar] = useState<Turno | null>(null);
@@ -102,7 +137,16 @@ export default function TurnosClientePage() {
   const [qrPaymentLink, setQrPaymentLink] = useState('');
   const [qrPaymentCode, setQrPaymentCode] = useState('');
   const [qrPaymentError, setQrPaymentError] = useState('');
+  const [qrStatusMessage, setQrStatusMessage] = useState('');
   const [generandoQr, setGenerandoQr] = useState(false);
+  const qrPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const detenerPollingQrFinal = () => {
+    if (qrPollingRef.current) {
+      clearInterval(qrPollingRef.current);
+      qrPollingRef.current = null;
+    }
+  };
 
   // Cargar turnos
   const fetchTurnos = async () => {
@@ -136,6 +180,10 @@ export default function TurnosClientePage() {
 
   useEffect(() => {
     fetchTurnos();
+  }, []);
+
+  useEffect(() => {
+    return () => detenerPollingQrFinal();
   }, []);
 
   useEffect(() => {
@@ -550,11 +598,13 @@ export default function TurnosClientePage() {
   };
 
   const abrirFinalizar = (turno: Turno) => {
+    detenerPollingQrFinal();
     setTurnoAFinalizar(turno);
     setQrPreferenceId('');
     setQrPaymentLink('');
     setQrPaymentCode('');
     setQrPaymentError('');
+    setQrStatusMessage('');
 
     if (getMontoPendiente(turno) > 0.01) {
       setPagoFinalOpen(true);
@@ -562,6 +612,14 @@ export default function TurnosClientePage() {
     }
 
     setFinalizarConfirmOpen(true);
+  };
+
+  const cerrarPagoFinalizacion = (open: boolean) => {
+    setPagoFinalOpen(open);
+    if (!open) {
+      detenerPollingQrFinal();
+      setQrStatusMessage('');
+    }
   };
 
   const finalizarTurno = async () => {
@@ -584,8 +642,8 @@ export default function TurnosClientePage() {
       setTurnoAFinalizar(null);
       await fetchTurnos();
       showNotification('Turno finalizado', 'Tu turno quedó marcado como finalizado correctamente.', 'success');
-    } catch (error: any) {
-      showNotification('No se pudo finalizar', error.message || 'Intentá nuevamente.', 'error');
+    } catch (error: unknown) {
+      showNotification('No se pudo finalizar', getErrorMessage(error, 'Intentá nuevamente.'), 'error');
     } finally {
       setFinalizando(false);
     }
@@ -610,8 +668,40 @@ export default function TurnosClientePage() {
       const pref = await response.json();
       setQrPreferenceId(pref.preference_id);
       setQrPaymentLink(pref.qr_data || pref.qr_init_point || pref.init_point || '');
-    } catch (error: any) {
-      setQrPaymentError(error.message || 'No se pudo generar el QR');
+      setQrStatusMessage('Escaneá el QR y completá el pago desde Mercado Pago. Se confirmará automáticamente cuando impacte.');
+
+      detenerPollingQrFinal();
+      let attempts = 0;
+      qrPollingRef.current = setInterval(async () => {
+        try {
+          attempts += 1;
+          if (attempts > 100) {
+            detenerPollingQrFinal();
+            setQrStatusMessage('No se confirmó automáticamente. Si el pago figura recibido, ingresá el número de operación y usá Forzar pago.');
+            return;
+          }
+
+          const statusResponse = await fetch(`/api/mercadopago/verificar-pago/${pref.preference_id}/`, {
+            headers: getAuthHeaders(),
+          });
+          if (!statusResponse.ok) return;
+
+          const body = await statusResponse.json();
+          if (body.status === 'approved') {
+            detenerPollingQrFinal();
+            setQrPaymentCode(String(body.payment_id || ''));
+            setQrStatusMessage('Pago confirmado por Mercado Pago. Finalizando turno...');
+            await finalizarTurno();
+          } else if (body.status === 'cancelled') {
+            detenerPollingQrFinal();
+            setQrStatusMessage('La transacción fue cancelada. Generá un nuevo QR para continuar.');
+          }
+        } catch (error) {
+          console.error('Error verificando pago final:', error);
+        }
+      }, 3000);
+    } catch (error: unknown) {
+      setQrPaymentError(getErrorMessage(error, 'No se pudo generar el QR'));
     } finally {
       setGenerandoQr(false);
     }
@@ -628,6 +718,7 @@ export default function TurnosClientePage() {
     setFinalizando(true);
     setQrPaymentError('');
     try {
+      detenerPollingQrFinal();
       const response = await fetch('/api/mercadopago/confirmar-cobro-manual/', {
         method: 'POST',
         headers: getJsonAuthHeaders(),
@@ -644,8 +735,8 @@ export default function TurnosClientePage() {
       }
 
       await finalizarTurno();
-    } catch (error: any) {
-      setQrPaymentError(error.message || 'No se pudo forzar el pago');
+    } catch (error: unknown) {
+      setQrPaymentError(getErrorMessage(error, 'No se pudo forzar el pago'));
       setFinalizando(false);
     }
   };
@@ -767,7 +858,9 @@ export default function TurnosClientePage() {
               </Select>
 
               {/* Filtro por rango de fecha */}
-              <Select value={filterFecha} onValueChange={(v) => setFilterFecha(v as any)}>
+              <Select value={filterFecha} onValueChange={(value) => {
+                if (isFilterFecha(value)) setFilterFecha(value);
+              }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Rango de fecha" />
                 </SelectTrigger>
@@ -813,7 +906,9 @@ export default function TurnosClientePage() {
               )}
 
               {/* Ordenamiento */}
-              <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
+              <Select value={sortBy} onValueChange={(value) => {
+                if (isSortBy(value)) setSortBy(value);
+              }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Ordenar por" />
                 </SelectTrigger>
@@ -1301,7 +1396,7 @@ export default function TurnosClientePage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={pagoFinalOpen} onOpenChange={setPagoFinalOpen}>
+      <Dialog open={pagoFinalOpen} onOpenChange={cerrarPagoFinalizacion}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Pago pendiente para finalizar</DialogTitle>
@@ -1337,6 +1432,11 @@ export default function TurnosClientePage() {
                       />
                     </div>
                   )}
+                  {qrStatusMessage && (
+                    <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                      {qrStatusMessage}
+                    </p>
+                  )}
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                     <Label htmlFor="final-payment-code">Número de operación</Label>
                     <div className="mt-2 flex gap-2">
@@ -1361,7 +1461,7 @@ export default function TurnosClientePage() {
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPagoFinalOpen(false)} disabled={finalizando}>
+            <Button variant="outline" onClick={() => cerrarPagoFinalizacion(false)} disabled={finalizando}>
               Cancelar
             </Button>
           </DialogFooter>

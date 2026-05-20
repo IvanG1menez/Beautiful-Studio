@@ -34,7 +34,7 @@ def enviar_recordatorios_turnos():
             fecha_hora__gte=ahora,
             fecha_hora__lte=manana,
             estado__in=["pendiente", "confirmado"],
-        ).select_related("empleado__user", "cliente", "servicio")
+        ).select_related("empleado__user", "cliente__user", "servicio")
 
         emails_enviados = 0
         emails_fallidos = 0
@@ -54,6 +54,22 @@ def enviar_recordatorios_turnos():
                 except Exception as e:
                     logger.error(
                         f"Error enviando recordatorio para turno {turno.id}: {str(e)}"
+                    )
+                    emails_fallidos += 1
+
+            config_cliente, _ = NotificacionConfig.objects.get_or_create(
+                user=turno.cliente.user, defaults={"email_recordatorio_turno": True}
+            )
+
+            if config_cliente.email_recordatorio_turno:
+                try:
+                    if EmailService.enviar_email_recordatorio_turno_cliente(turno):
+                        emails_enviados += 1
+                    else:
+                        emails_fallidos += 1
+                except Exception as e:
+                    logger.error(
+                        f"Error enviando recordatorio al cliente para turno {turno.id}: {str(e)}"
                     )
                     emails_fallidos += 1
 

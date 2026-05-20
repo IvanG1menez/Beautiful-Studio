@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, CheckCircle2, Info, Loader2, Play, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Database, Info, Loader2, Play, Trash2, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
 interface LogEntry {
@@ -102,6 +102,13 @@ interface ResultadoRacha {
     applied_discount_amount: number;
     reason: string;
   } | null;
+  coupon: {
+    id: number;
+    status: string;
+    discount_amount: number;
+    code: string | null;
+    expires_at: string | null;
+  } | null;
   audit_logs: Array<{
     event_type: string;
     accion: string;
@@ -109,11 +116,48 @@ interface ResultadoRacha {
   }>;
 }
 
+interface ResultadoPreparacion {
+  mensaje: string;
+  optimizacion?: {
+    turno_cancelar_id: number;
+    cliente_cancelar?: string;
+    candidato_lejano_id: number;
+    candidato_lejano?: string;
+    candidato_medio_id: number;
+    candidato_medio?: string;
+    candidato_lejano_fecha: string;
+    candidato_medio_fecha: string;
+  };
+  fidelizacion?: {
+    dias_inactividad_sugeridos: number;
+    cliente_con_saldo: string;
+    cliente_sin_saldo: string;
+    turno_con_saldo_id: number;
+    turno_sin_saldo_id: number;
+  };
+  racha?: {
+    turno_completar_id: number;
+    cliente: string;
+    streak_inicial: number;
+    streak_goal_count: number;
+  };
+}
+
+interface ResultadoLimpieza {
+  mensaje: string;
+  clientes_afectados: number;
+}
+
 export default function DiagnosticoPage() {
   const [loadingOptimizacion, setLoadingOptimizacion] = useState(false);
   const [loadingFidelizacion, setLoadingFidelizacion] = useState(false);
   const [loadingSimulacion, setLoadingSimulacion] = useState(false);
   const [loadingRacha, setLoadingRacha] = useState(false);
+  const [loadingPreparacionProceso, setLoadingPreparacionProceso] = useState<string | null>(null);
+  const [loadingLimpieza, setLoadingLimpieza] = useState(false);
+  const [resultadoPreparacion, setResultadoPreparacion] = useState<ResultadoPreparacion | null>(null);
+  const [resultadoLimpieza, setResultadoLimpieza] = useState<ResultadoLimpieza | null>(null);
+  const [errorPreparacion, setErrorPreparacion] = useState('');
 
   // Estado para Optimización
   const [turnoId, setTurnoId] = useState('');
@@ -244,6 +288,82 @@ export default function DiagnosticoPage() {
     }
   };
 
+  const handlePrepararDatos = async (proceso: 'optimizacion' | 'fidelizacion' | 'racha') => {
+    setLoadingPreparacionProceso(proceso);
+    setErrorPreparacion('');
+    setResultadoLimpieza(null);
+    setResultadoPreparacion(null);
+    if (proceso === 'optimizacion') {
+      setResultadoOptimizacion(null);
+      setResultadoSimulacion(null);
+    }
+    if (proceso === 'fidelizacion') setResultadoFidelizacion(null);
+    if (proceso === 'racha') setResultadoRacha(null);
+
+    try {
+      const response = await fetch('/api/turnos/diagnostico/preparar-datos/', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ proceso }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrorPreparacion(data.error || 'No se pudieron preparar los datos de prueba');
+        return;
+      }
+
+      setResultadoPreparacion(data);
+      if (data.optimizacion) setTurnoId(String(data.optimizacion.turno_cancelar_id));
+      if (data.fidelizacion) setDiasInactividad(String(data.fidelizacion.dias_inactividad_sugeridos));
+      if (data.racha) setTurnoRachaId(String(data.racha.turno_completar_id));
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorPreparacion('Error de conexión con el servidor');
+    } finally {
+      setLoadingPreparacionProceso(null);
+    }
+  };
+
+  const handleLimpiarDatos = async () => {
+    const confirmed = window.confirm('Esto elimina turnos, billeteras, logs y notificaciones generados para diagnóstico. Los usuarios demo quedan creados. ¿Continuar?');
+    if (!confirmed) return;
+
+    setLoadingLimpieza(true);
+    setErrorPreparacion('');
+    setResultadoLimpieza(null);
+
+    try {
+      const response = await fetch('/api/turnos/diagnostico/limpiar-datos/', {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrorPreparacion(data.error || 'No se pudieron limpiar los datos de prueba');
+        return;
+      }
+
+      setResultadoLimpieza(data);
+      setResultadoPreparacion(null);
+      setResultadoOptimizacion(null);
+      setResultadoSimulacion(null);
+      setResultadoFidelizacion(null);
+      setResultadoRacha(null);
+      setTurnoId('');
+      setDiasInactividad('');
+      setTurnoRachaId('');
+    } catch (error) {
+      console.error('Error:', error);
+      setErrorPreparacion('Error de conexión con el servidor');
+    } finally {
+      setLoadingLimpieza(false);
+    }
+  };
+
+  const preparandoAlgo = loadingPreparacionProceso !== null;
+
   const handleRacha = async () => {
     if (!turnoRachaId) {
       setErrorRacha('Por favor ingresa un ID de turno');
@@ -306,6 +426,136 @@ export default function DiagnosticoPage() {
           y afectarán la base de datos (cancelaciones, créditos, emails enviados).
         </AlertDescription>
       </Alert>
+
+      <Card className="mb-6 border-blue-200 bg-blue-50/60">
+        <CardHeader>
+          <CardTitle>Preparación de pruebas</CardTitle>
+          <CardDescription>
+            Prepará cada escenario por separado para evitar cruces. El botón rojo limpia los datos generados por todos los escenarios.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Button
+              type="button"
+              onClick={() => handlePrepararDatos('optimizacion')}
+              disabled={preparandoAlgo || loadingLimpieza}
+              className="flex-1"
+            >
+              {loadingPreparacionProceso === 'optimizacion' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Preparando...
+                </>
+              ) : (
+                <>
+                  <Database className="mr-2 h-4 w-4" />
+                  Preparar reacomodamiento
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => handlePrepararDatos('fidelizacion')}
+              disabled={preparandoAlgo || loadingLimpieza}
+              className="flex-1"
+            >
+              {loadingPreparacionProceso === 'fidelizacion' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Preparando...
+                </>
+              ) : (
+                <>
+                  <Database className="mr-2 h-4 w-4" />
+                  Preparar olvidados
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => handlePrepararDatos('racha')}
+              disabled={preparandoAlgo || loadingLimpieza}
+              className="flex-1"
+            >
+              {loadingPreparacionProceso === 'racha' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Preparando...
+                </>
+              ) : (
+                <>
+                  <Database className="mr-2 h-4 w-4" />
+                  Preparar racha
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleLimpiarDatos}
+              disabled={preparandoAlgo || loadingLimpieza}
+              className="flex-1"
+            >
+              {loadingLimpieza ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Limpiando datos...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Limpiar datos de prueba
+                </>
+              )}
+            </Button>
+          </div>
+
+          {errorPreparacion && (
+            <Alert variant="destructive">
+              <XCircle className="h-4 w-4" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{errorPreparacion}</AlertDescription>
+            </Alert>
+          )}
+
+          {resultadoPreparacion && (
+            <Alert className="border-green-200 bg-green-50">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <AlertTitle className="text-green-700">Escenario preparado</AlertTitle>
+              <AlertDescription className="text-green-700">
+                <div className="mt-2 grid gap-2 text-sm md:grid-cols-3">
+                  {resultadoPreparacion.optimizacion && (
+                    <div>
+                      <strong>Reacomodamiento:</strong> Juan Perez turno #{resultadoPreparacion.optimizacion.turno_cancelar_id}. Primero Manuel #{resultadoPreparacion.optimizacion.candidato_lejano_id}; si rechaza, Agustin #{resultadoPreparacion.optimizacion.candidato_medio_id}.
+                    </div>
+                  )}
+                  {resultadoPreparacion.fidelizacion && (
+                    <div>
+                      <strong>Olvidados:</strong> usar {resultadoPreparacion.fidelizacion.dias_inactividad_sugeridos} días. Jose tiene saldo; Pedro no tiene saldo.
+                    </div>
+                  )}
+                  {resultadoPreparacion.racha && (
+                    <div>
+                      <strong>Racha:</strong> Rocio Fiel turno #{resultadoPreparacion.racha.turno_completar_id}, racha inicial {resultadoPreparacion.racha.streak_inicial}/{resultadoPreparacion.racha.streak_goal_count}.
+                    </div>
+                  )}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {resultadoLimpieza && (
+            <Alert>
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertTitle>Datos de prueba eliminados</AlertTitle>
+              <AlertDescription>
+                Se limpiaron datos generados para {resultadoLimpieza.clientes_afectados} clientes demo. Los usuarios quedan disponibles para volver a preparar pruebas.
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* OPTIMIZACIÓN DE AGENDA */}
@@ -681,7 +931,7 @@ export default function DiagnosticoPage() {
           <CardHeader>
             <CardTitle>Proceso 3: Fidelidad por Rachas</CardTitle>
             <CardDescription>
-              Completa un turno para incrementar la racha y aplicar premio si alcanza un múltiplo de 5
+              Completa un turno para incrementar la racha y crear un cupón si alcanza la meta configurada
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -735,9 +985,13 @@ export default function DiagnosticoPage() {
                     <p><strong>Cliente:</strong> {resultadoRacha.cliente}</p>
                     <p><strong>Racha actual:</strong> {resultadoRacha.streak.streak_count} turnos</p>
                     <p><strong>Precio:</strong> ${resultadoRacha.precio_anterior.toFixed(2)} → ${resultadoRacha.precio_final.toFixed(2)}</p>
-                    {resultadoRacha.reward ? (
+                    {resultadoRacha.coupon ? (
                       <p>
-                        <strong>Premio:</strong> {resultadoRacha.reward.status} por hito #{resultadoRacha.reward.milestone_number}, descuento ${resultadoRacha.reward.applied_discount_amount.toFixed(2)}.
+                        <strong>Cupón:</strong> {resultadoRacha.coupon.status} por ${resultadoRacha.coupon.discount_amount.toFixed(2)}.
+                      </p>
+                    ) : resultadoRacha.reward ? (
+                      <p>
+                        <strong>Premio:</strong> {resultadoRacha.reward.status} por hito #{resultadoRacha.reward.milestone_number}. {resultadoRacha.reward.reason}
                       </p>
                     ) : (
                       <p><strong>Premio:</strong> no aplica en este turno.</p>

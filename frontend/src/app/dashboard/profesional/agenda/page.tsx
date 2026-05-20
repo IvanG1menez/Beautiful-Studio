@@ -38,8 +38,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatTime, toISODate } from '@/lib/dateUtils';
 import { Turno } from '@/types';
-import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, ExternalLink, Loader2, MapPin, Printer, Sparkles, User, X } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, ExternalLink, Loader2, MapPin, Printer, Sparkles, User } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
@@ -68,6 +68,7 @@ const ESTADO_LABELS: { [key: string]: string } = {
 
 export default function AgendaEmpleadoPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +96,7 @@ export default function AgendaEmpleadoPage() {
   const [procesando, setProcesando] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmActionLabel, setConfirmActionLabel] = useState('Sí, continuar');
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [resumenHoy, setResumenHoy] = useState<number | null>(null);
   const [resumenSemana, setResumenSemana] = useState<number | null>(null);
@@ -616,18 +618,20 @@ export default function AgendaEmpleadoPage() {
     if (validacionHorario.esAdvertencia) {
       // Mostrar advertencia pero permitir continuar
       setConfirmMessage(validacionHorario.mensaje);
+      setConfirmActionLabel('Aceptar');
       setConfirmAction(() => () => {
-        setTurnoActual(turno);
-        setNuevoEstado('completado');
-        setCambioEstadoDialog(true);
+        actualizarEstadoTurno(turno, 'completado');
         setShowConfirmDialog(false);
       });
       setShowConfirmDialog(true);
     } else {
-      // Todo OK, abrir diálogo directamente
-      setTurnoActual(turno);
-      setNuevoEstado('completado');
-      setCambioEstadoDialog(true);
+      setConfirmMessage('¿Dar por finalizado este turno? Confirmá solo si el servicio ya terminó.');
+      setConfirmActionLabel('Aceptar');
+      setConfirmAction(() => () => {
+        actualizarEstadoTurno(turno, 'completado');
+        setShowConfirmDialog(false);
+      });
+      setShowConfirmDialog(true);
     }
   };
 
@@ -643,6 +647,7 @@ export default function AgendaEmpleadoPage() {
         'el cliente';
 
       setConfirmMessage(`Vas a iniciar el turno de ${clienteNombre}. ¿Deseas continuar?`);
+      setConfirmActionLabel('Sí, continuar');
       setConfirmAction(() => async () => {
         await ejecutarCambioEstado();
         setShowConfirmDialog(false);
@@ -659,7 +664,8 @@ export default function AgendaEmpleadoPage() {
         return;
       }
 
-      setConfirmMessage('¿Estás seguro de que deseas finalizar este turno?');
+      setConfirmMessage('¿Dar por finalizado este turno? Confirmá solo si el servicio ya terminó.');
+      setConfirmActionLabel('Aceptar');
       setConfirmAction(() => async () => {
         await ejecutarCambioEstado();
         setShowConfirmDialog(false);
@@ -709,9 +715,11 @@ export default function AgendaEmpleadoPage() {
 
       setCambioEstadoDialog(false);
       loadTurnos(selectedDate);
+      return updatedTurno;
     } catch (err: any) {
       console.error('Error updating turno:', err);
       alert('Error al actualizar el turno: ' + (err.message || 'Error desconocido'));
+      return null;
     } finally {
       setProcesando(false);
     }
@@ -865,6 +873,48 @@ export default function AgendaEmpleadoPage() {
     return 'Sin pago';
   };
 
+  const actualizarEstadoTurno = async (turno: Turno, estado: string, notas = '') => {
+    try {
+      setProcesando(true);
+      const response = await authenticatedFetch(`/turnos/${turno.id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          estado,
+          notas_empleado: notas,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.error || 'Error al actualizar');
+      }
+
+      await loadTurnos(selectedDate);
+    } catch (err: unknown) {
+      console.error('Error updating turno:', err);
+      alert('Error al actualizar el turno: ' + (err instanceof Error ? err.message : 'Error desconocido'));
+    } finally {
+      setProcesando(false);
+    }
+  };
+
+  const confirmarInicioTurno = (turno: Turno) => {
+    const turnoConResumen = turno as Turno & { cliente_nombre?: string; cliente_email?: string };
+    const clienteNombre =
+      turnoConResumen.cliente_nombre ||
+      turno.cliente?.nombre_completo ||
+      turnoConResumen.cliente_email ||
+      'el cliente';
+
+    setConfirmMessage(`Vas a iniciar el turno de ${clienteNombre}. ¿Deseas continuar?`);
+    setConfirmActionLabel('Sí, continuar');
+    setConfirmAction(() => async () => {
+      await actualizarEstadoTurno(turno, 'en_proceso');
+      setShowConfirmDialog(false);
+    });
+    setShowConfirmDialog(true);
+  };
+
   const formatCurrency = (value: number | string | null | undefined): string => {
     const amount = Number(value || 0);
     return amount.toLocaleString('es-AR', {
@@ -918,9 +968,16 @@ export default function AgendaEmpleadoPage() {
   };
 
   const finalizarTurnoActual = async () => {
-    await ejecutarCambioEstado();
+    const updated = await ejecutarCambioEstado();
     setCobroDialogOpen(false);
     resetQrCobro();
+    if (updated && updated.id) {
+      try {
+        router.push(`/dashboard/profesional/turno-finalizado?turno_id=${updated.id}`);
+      } catch (e) {
+        // ignore routing errors
+      }
+    }
   };
 
   const registrarEfectivoYFinalizar = async () => {
@@ -1555,254 +1612,168 @@ export default function AgendaEmpleadoPage() {
                       </div>
                     ) : turnosFiltrados.length > 0 ? (
                       <div className="space-y-4">
-                        {turnosOrdenados.map((turno, index) => (
-                          <div
-                            key={turno.id}
-                            className={`border rounded-lg p-4 hover:bg-gray-50 transition-colors ${turno.id === proximoTurnoId ? 'border-blue-400 bg-blue-50/40' : ''
-                              }`}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-2">
-                                  <Clock className="w-5 h-5 text-gray-500" />
-                                  <span className="font-semibold text-lg">{formatTime(turno.fecha_hora)}</span>
-                                  <Badge className={ESTADO_COLORS[turno.estado]}>
-                                    {ESTADO_LABELS[turno.estado]}
-                                  </Badge>
-                                  <Badge variant="outline" className="text-gray-700">
-                                    {getTurnoDuracion(turno)} min
-                                  </Badge>
-                                  {turno.id === proximoTurnoId && (
-                                    <span className="flex items-center text-xs text-blue-700 font-semibold">
-                                      <Sparkles className="w-3 h-3 mr-1" />
-                                      Proxima cita
-                                    </span>
-                                  )}
-                                </div>
+                        {turnosOrdenados.map((turno, index) => {
+                          const clienteNombre =
+                            (turno as any).cliente_nombre ||
+                            turno.cliente?.nombre_completo ||
+                            (turno as any).cliente_email ||
+                            'Cliente';
+                          const servicioNombre = (turno as any).servicio_nombre || turno.servicio?.nombre || 'Servicio';
+                          const pendiente = getMontoPendienteTurno(turno);
 
-                                <div className="ml-8 space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <User className="w-4 h-4 text-gray-400" />
-                                    <span className="font-medium">
-                                      {(turno as any).cliente_nombre ||
-                                        turno.cliente?.nombre_completo ||
-                                        (turno as any).cliente_email ||
-                                        'Cliente'}
-                                    </span>
-                                  </div>
-
-                                  <div className="text-gray-700">
-                                    <span className="font-medium">
-                                      {(turno as any).servicio_nombre || turno.servicio?.nombre || 'Servicio'}
-                                    </span>
-                                    <span className="text-gray-500 text-sm ml-2">
-                                      ({(turno as any).servicio_duracion ||
-                                        turno.servicio?.duracion_minutos ||
-                                        0}{' '}
-                                      min)
-                                    </span>
-                                  </div>
-
-                                  {((turno as any).sala_nombre || (turno as any).sala_nombre) && (
-                                    <div className="flex items-center gap-2">
-                                      <MapPin className="w-4 h-4 text-gray-400" />
-                                      <span className="text-gray-700">
-                                        <span className="font-medium">Sala:</span>{' '}
-                                        {(turno as any).sala_nombre || (turno as any).sala_nombre}
+                          return (
+                            <details
+                              key={turno.id}
+                              className={`group overflow-hidden rounded-xl border bg-white transition-colors open:bg-slate-50 ${turno.id === proximoTurnoId ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200'
+                                }`}
+                            >
+                              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                                    <Clock className="h-4 w-4 text-slate-500" />
+                                    <span className="text-lg font-semibold text-slate-950">{formatTime(turno.fecha_hora)}</span>
+                                    <Badge className={ESTADO_COLORS[turno.estado]}>{ESTADO_LABELS[turno.estado]}</Badge>
+                                    <Badge variant="outline" className="text-slate-700">{getTurnoDuracion(turno)} min</Badge>
+                                    {turno.id === proximoTurnoId && (
+                                      <span className="flex items-center text-xs font-semibold text-blue-700">
+                                        <Sparkles className="mr-1 h-3 w-3" />
+                                        Próxima cita
                                       </span>
-                                    </div>
-                                  )}
-
-                                  {turno.created_at && (
-                                    <div className="text-sm text-gray-600">
-                                      <span className="font-medium">Solicitado:</span>{' '}
-                                      {new Date(turno.created_at).toLocaleDateString('es-AR', {
-                                        day: '2-digit',
-                                        month: '2-digit',
-                                        year: 'numeric',
-                                      })}{' '}
-                                      a las{' '}
-                                      {new Date(turno.created_at).toLocaleTimeString('es-AR', {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                      })}
-                                    </div>
-                                  )}
-
-                                  <div
-                                    className={`text-sm p-3 rounded-lg border ${turno.notas_cliente
-                                      ? 'bg-blue-50 border-blue-200'
-                                      : 'bg-gray-50 border-gray-200'
-                                      }`}
-                                  >
-                                    <div className="flex items-start gap-2">
-                                      <span
-                                        className={`font-semibold ${turno.notas_cliente ? 'text-blue-900' : 'text-gray-600'
-                                          }`}
-                                      >
-                                        Nota del cliente:
-                                      </span>
-                                    </div>
-                                    {turno.notas_cliente ? (
-                                      <p className="mt-1 text-gray-800 whitespace-pre-wrap">
-                                        {turno.notas_cliente}
-                                      </p>
-                                    ) : (
-                                      <p className="mt-1 text-gray-500 italic">Sin notas registradas</p>
                                     )}
                                   </div>
-
-                                  {turno.notas_empleado && (
-                                    <div className="text-sm text-gray-700 bg-purple-50 border border-purple-200 p-3 rounded-lg">
-                                      <span className="font-semibold text-purple-900">Notas internas:</span>
-                                      <p className="mt-1 whitespace-pre-wrap">{turno.notas_empleado}</p>
-                                    </div>
-                                  )}
-
-                                  {turno.estado === 'completado' && (turno as any).fecha_hora_completado && (
-                                    <div className="text-sm text-green-700 bg-green-50 p-2 rounded border border-green-200">
-                                      <span className="font-medium">✓ Finalizado:</span>{' '}
-                                      {new Date((turno as any).fecha_hora_completado).toLocaleTimeString('es-AR', {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                      })}
-                                    </div>
-                                  )}
-
-                                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                                      <Badge variant={(turno as any).pagado_completo ? 'default' : 'secondary'}>
-                                        {getPagoLabelTurno(turno)}
-                                      </Badge>
-                                      {getMovimientoTurnoLabel(turno) && (
-                                        <Badge variant="outline">{getMovimientoTurnoLabel(turno)}</Badge>
-                                      )}
-                                      {Boolean((turno as any).reacomodamiento_exitoso) && (
-                                        <Badge className="bg-indigo-600 hover:bg-indigo-600">Reacomodado</Badge>
-                                      )}
-                                    </div>
-                                    <div className="grid gap-2 sm:grid-cols-3">
-                                      <div>
-                                        <p className="text-xs font-medium uppercase text-slate-500">Total</p>
-                                        <p className="font-semibold text-slate-900">{formatCurrency(getPrecioTotalTurno(turno))}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-xs font-medium uppercase text-slate-500">Abonado</p>
-                                        <p className="font-semibold text-slate-900">{formatCurrency(turno.senia_pagada || 0)}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-xs font-medium uppercase text-slate-500">Pendiente</p>
-                                        <p className={getMontoPendienteTurno(turno) > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-emerald-700'}>
-                                          {formatCurrency(getMontoPendienteTurno(turno))}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                                      <span>{getCanalReservaLabel(turno.canal_reserva)}</span>
-                                      {turno.metodo_pago && <span>Metodo: {turno.metodo_pago}</span>}
-                                    </div>
+                                  <p className="truncate font-semibold text-slate-900">{clienteNombre}</p>
+                                  <p className="truncate text-sm text-slate-600">{servicioNombre}</p>
+                                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                                    <span>{getPagoLabelTurno(turno)}</span>
+                                    <span className={pendiente > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-emerald-700'}>
+                                      Pendiente: {formatCurrency(pendiente)}
+                                    </span>
                                   </div>
                                 </div>
-                              </div>
+                                <span className="shrink-0 rounded-full border px-3 py-1 text-xs font-medium text-slate-600 group-open:bg-slate-900 group-open:text-white">
+                                  <span className="group-open:hidden">Ver detalle</span>
+                                  <span className="hidden group-open:inline">Ocultar</span>
+                                </span>
+                              </summary>
 
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                              {turno.estado === 'pendiente' && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="default"
-                                    onClick={() => {
-                                      setTurnoActual(turno);
-                                      setNuevoEstado('confirmado');
-                                      setNotasEmpleado('');
-                                      confirmarCambioEstado();
-                                    }}
-                                  >
-                                    <Check className="w-4 h-4 mr-1" />
-                                    Confirmar
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleCambiarEstado(turno)}
-                                  >
-                                    Gestionar
-                                  </Button>
-                                </>
-                              )}
-
-                              {turno.estado === 'confirmado' && (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="default"
-                                    title={!puedeIniciarTurno(turno) ? getMotivoNoIniciable(turno) : ''}
-                                    onClick={() => {
-                                      setTurnoActual(turno);
-                                      setNuevoEstado('en_proceso');
-                                      setNotasEmpleado('');
-                                      confirmarCambioEstado();
-                                    }}
-                                  >
-                                    Iniciar
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleCambiarEstado(turno)}
-                                  >
-                                    Gestionar
-                                  </Button>
-                                </>
-                              )}
-
-                              {turno.estado === 'en_proceso' && (
-                                <Button
-                                  size="sm"
-                                  variant="default"
-                                  className="bg-green-600 hover:bg-green-700"
-                                  onClick={() => handleFinalizarClick(turno)}
-                                >
-                                  <Check className="w-4 h-4 mr-1" />
-                                  Finalizar
-                                </Button>
-                              )}
-
-                              {turno.estado !== 'completado' &&
-                                turno.estado !== 'cancelado' &&
-                                turno.estado !== 'no_asistio' && (
-                                  <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() => {
-                                      setTurnoActual(turno);
-                                      setNuevoEstado('cancelado');
-                                      setCambioEstadoDialog(true);
-                                    }}
-                                  >
-                                    <X className="w-4 h-4 mr-1" />
-                                    Cancelar
-                                  </Button>
+                              <div className="space-y-3 border-t border-slate-200 p-4 pt-3">
+                                {((turno as any).sala_nombre || (turno as any).sala_nombre) && (
+                                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                                    <MapPin className="h-4 w-4 text-slate-400" />
+                                    <span><span className="font-medium">Sala:</span> {(turno as any).sala_nombre || (turno as any).sala_nombre}</span>
+                                  </div>
                                 )}
-                            </div>
 
-                            {index < turnosOrdenados.length - 1 && (() => {
-                              const finActual = getTurnoFin(turno);
-                              const inicioSiguiente = getTurnoInicio(turnosOrdenados[index + 1]);
-                              const gapMin = Math.round(
-                                (inicioSiguiente.getTime() - finActual.getTime()) / 60000
-                              );
-                              if (gapMin <= 0) return null;
-                              return (
-                                <div className="mt-4 ml-8 text-xs text-emerald-700">
-                                  Intervalo libre hasta el siguiente turno: {formatGap(gapMin)}
+                                {turno.created_at && (
+                                  <div className="text-sm text-slate-600">
+                                    <span className="font-medium">Solicitado:</span>{' '}
+                                    {new Date(turno.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}{' '}
+                                    a las {new Date(turno.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                  </div>
+                                )}
+
+                                <div className={`rounded-lg border p-3 text-sm ${turno.notas_cliente ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white'}`}>
+                                  <span className={turno.notas_cliente ? 'font-semibold text-blue-900' : 'font-semibold text-slate-600'}>Nota del cliente:</span>
+                                  {turno.notas_cliente ? (
+                                    <p className="mt-1 whitespace-pre-wrap text-slate-800">{turno.notas_cliente}</p>
+                                  ) : (
+                                    <p className="mt-1 italic text-slate-500">Sin notas registradas</p>
+                                  )}
                                 </div>
-                              );
-                            })()}
-                          </div>
-                        ))}
+
+                                {turno.notas_empleado && (
+                                  <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm text-slate-700">
+                                    <span className="font-semibold text-purple-900">Notas internas:</span>
+                                    <p className="mt-1 whitespace-pre-wrap">{turno.notas_empleado}</p>
+                                  </div>
+                                )}
+
+                                {turno.estado === 'completado' && (turno as any).fecha_hora_completado && (
+                                  <div className="rounded border border-green-200 bg-green-50 p-2 text-sm text-green-700">
+                                    <span className="font-medium">Finalizado:</span>{' '}
+                                    {new Date((turno as any).fecha_hora_completado).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                  </div>
+                                )}
+
+                                <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                                    <Badge variant={(turno as any).pagado_completo ? 'default' : 'secondary'}>{getPagoLabelTurno(turno)}</Badge>
+                                    {getMovimientoTurnoLabel(turno) && <Badge variant="outline">{getMovimientoTurnoLabel(turno)}</Badge>}
+                                    {Boolean((turno as any).reacomodamiento_exitoso) && <Badge className="bg-indigo-600 hover:bg-indigo-600">Reacomodado</Badge>}
+                                    {turno.cupon_racha_aplicado && <Badge className="bg-violet-600 hover:bg-violet-600">Cupón racha</Badge>}
+                                    {turno.oferta_fidelizacion_aplicada && <Badge className="bg-fuchsia-600 hover:bg-fuchsia-600">Cliente olvidado</Badge>}
+                                  </div>
+                                  {turno.cupon_racha_aplicado && (
+                                    <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 p-2 text-xs text-violet-900">
+                                      <span className="font-semibold">Cupón aplicado:</span>{' '}
+                                      {turno.cupon_racha_codigo || 'código de racha'} por {formatCurrency(turno.cupon_racha_descuento || 0)}.
+                                    </div>
+                                  )}
+                                  {turno.oferta_fidelizacion_aplicada && (
+                                    <div className="mb-3 rounded-lg border border-fuchsia-200 bg-fuchsia-50 p-2 text-xs text-fuchsia-900">
+                                      <span className="font-semibold">Oferta de cliente olvidado:</span>{' '}
+                                      pagó este turno con descuento de fidelización
+                                      {Number(turno.oferta_fidelizacion_descuento || 0) > 0
+                                        ? ` (${formatCurrency(turno.oferta_fidelizacion_descuento)} de descuento).`
+                                        : '.'}
+                                    </div>
+                                  )}
+                                  <div className="grid gap-2 sm:grid-cols-3">
+                                    <div>
+                                      <p className="text-xs font-medium uppercase text-slate-500">Total</p>
+                                      <p className="font-semibold text-slate-900">{formatCurrency(getPrecioTotalTurno(turno))}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-medium uppercase text-slate-500">Abonado</p>
+                                      <p className="font-semibold text-slate-900">{formatCurrency(turno.senia_pagada || 0)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-medium uppercase text-slate-500">Pendiente</p>
+                                      <p className={pendiente > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-emerald-700'}>{formatCurrency(pendiente)}</p>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                                    <span>{getCanalReservaLabel(turno.canal_reserva)}</span>
+                                    {turno.metodo_pago && <span>Método: {turno.metodo_pago}</span>}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  {turno.estado === 'pendiente' && (
+                                    <Button size="sm" disabled={procesando} onClick={() => actualizarEstadoTurno(turno, 'confirmado')}>
+                                      <Check className="mr-1 h-4 w-4" />
+                                      Confirmar turno
+                                    </Button>
+                                  )}
+                                  {turno.estado === 'confirmado' && (
+                                    <Button size="sm" disabled={procesando} title={!puedeIniciarTurno(turno) ? getMotivoNoIniciable(turno) : ''} onClick={() => confirmarInicioTurno(turno)}>
+                                      Iniciar turno
+                                    </Button>
+                                  )}
+                                  {turno.estado === 'en_proceso' && (
+                                    <Button size="sm" className={pendiente > 0 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} onClick={() => handleFinalizarClick(turno)}>
+                                      <Check className="mr-1 h-4 w-4" />
+                                      {pendiente > 0 ? 'Cobrar diferencia' : 'Finalizar turno'}
+                                    </Button>
+                                  )}
+                                  {turno.estado !== 'completado' && turno.estado !== 'cancelado' && turno.estado !== 'no_asistio' && (
+                                    <Button size="sm" variant="outline" onClick={() => handleCambiarEstado(turno)}>
+                                      Más opciones
+                                    </Button>
+                                  )}
+                                </div>
+
+                                {index < turnosOrdenados.length - 1 && (() => {
+                                  const finActual = getTurnoFin(turno);
+                                  const inicioSiguiente = getTurnoInicio(turnosOrdenados[index + 1]);
+                                  const gapMin = Math.round((inicioSiguiente.getTime() - finActual.getTime()) / 60000);
+                                  if (gapMin <= 0) return null;
+                                  return <div className="text-xs text-emerald-700">Intervalo libre hasta el siguiente turno: {formatGap(gapMin)}</div>;
+                                })()}
+                              </div>
+                            </details>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="text-center py-12">
@@ -2301,7 +2272,7 @@ export default function AgendaEmpleadoPage() {
               }}
               className="bg-green-600 hover:bg-green-700"
             >
-              Sí, continuar
+              {confirmActionLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

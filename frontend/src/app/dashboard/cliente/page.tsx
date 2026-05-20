@@ -30,7 +30,8 @@ import {
   TrendingUp,
   User,
   Wallet,
-  XCircle
+  XCircle,
+  Zap
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -130,6 +131,24 @@ interface StreakStatus {
   has_active_coupon: boolean;
 }
 
+interface ReacomodamientoOfertaActiva {
+  status: string;
+  token: string;
+  expires_at: string;
+  turno_original: {
+    servicio: string;
+    fecha_hora: string;
+  };
+  turno_nuevo: {
+    fecha_hora: string;
+    descuento: string;
+    credito_billetera?: string;
+  };
+  ahorro: {
+    dias_adelantados: number;
+  };
+}
+
 interface EmpleadoApiItem {
   id: number | string;
   first_name?: string;
@@ -191,6 +210,8 @@ export default function DashboardClientePage() {
   const [perfilCliente, setPerfilCliente] = useState<Cliente | null>(null);
   const [billetera, setBilletera] = useState<Billetera | null>(null);
   const [streakStatus, setStreakStatus] = useState<StreakStatus | null>(null);
+  const [ofertaReacomodamiento, setOfertaReacomodamiento] = useState<ReacomodamientoOfertaActiva | null>(null);
+  const [procesandoOfertaRelampago, setProcesandoOfertaRelampago] = useState(false);
   const [movimientosBilletera, setMovimientosBilletera] = useState<MovimientoBilletera[]>([]);
   const [loadingTurnos, setLoadingTurnos] = useState(true);
   const [loadingPerfil, setLoadingPerfil] = useState(true);
@@ -249,6 +270,7 @@ export default function DashboardClientePage() {
       loadTurnosData();
       loadBilleteraData();
       loadStreakData();
+      loadOfertaReacomodamiento();
     }
   }, [router]);
 
@@ -366,6 +388,14 @@ export default function DashboardClientePage() {
     return `${diff} días`;
   };
 
+  const formatDate = (fechaISO: string) =>
+    new Date(fechaISO).toLocaleString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('es-AR', {
       style: 'currency',
@@ -436,6 +466,46 @@ export default function DashboardClientePage() {
       }
     } catch (error) {
       console.error('Error loading streak data:', error);
+    }
+  };
+
+  const loadOfertaReacomodamiento = async () => {
+    try {
+      const response = await fetch('/api/clientes/me/reacomodamiento-activo/', {
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setOfertaReacomodamiento(data.status === 'activa' ? data : null);
+    } catch (error) {
+      console.error('Error loading reacomodamiento offer:', error);
+    }
+  };
+
+  const responderOfertaRelampago = async (accion: 'aceptar' | 'rechazar') => {
+    if (!ofertaReacomodamiento || procesandoOfertaRelampago) return;
+    setProcesandoOfertaRelampago(true);
+    try {
+      const response = await fetch(`/api/turnos/reasignacion/${ofertaReacomodamiento.token}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || data.mensaje || 'No se pudo procesar la oferta.');
+      if (data.status === 'aceptada') {
+        toast.success('Oferta relámpago aceptada. Tu turno fue adelantado.');
+      } else if (data.status === 'rechazada') {
+        toast.success('Oferta rechazada. Tu turno original se mantiene.');
+      } else if (data.status === 'expirada') {
+        toast.error('La oferta relámpago ya expiró.');
+      }
+      setOfertaReacomodamiento(null);
+      await loadTurnosData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo procesar la oferta.');
+    } finally {
+      setProcesandoOfertaRelampago(false);
     }
   };
 
@@ -1469,6 +1539,46 @@ export default function DashboardClientePage() {
           </Card>
         </div>
       </div>
+
+      {ofertaReacomodamiento && (
+        <div className="border-b border-amber-200 bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400">
+          <div className="mx-auto max-w-7xl px-6 py-5">
+            <div className="flex flex-col gap-4 rounded-3xl border border-white/50 bg-white/90 p-5 shadow-xl md:flex-row md:items-center md:justify-between">
+              <div className="flex gap-4">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-lg">
+                  <Zap className="h-9 w-9" />
+                </div>
+                <div>
+                  <p className="text-sm font-black uppercase tracking-[0.28em] text-orange-700">Oferta relámpago</p>
+                  <h2 className="mt-1 text-2xl font-black text-slate-950">Podés adelantar tu turno ahora</h2>
+                  <p className="mt-1 text-sm text-slate-700">
+                    Tu turno de {ofertaReacomodamiento.turno_original.servicio} puede pasar del {formatDate(ofertaReacomodamiento.turno_original.fecha_hora)} al {formatDate(ofertaReacomodamiento.turno_nuevo.fecha_hora)}.
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-orange-800">
+                    Ahorrás {ofertaReacomodamiento.ahorro.dias_adelantados} días. Responde antes de que expire o desaparece automáticamente.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row md:flex-col lg:flex-row">
+                <Button
+                  className="bg-orange-600 text-white hover:bg-orange-700"
+                  disabled={procesandoOfertaRelampago}
+                  onClick={() => responderOfertaRelampago('aceptar')}
+                >
+                  {procesandoOfertaRelampago ? 'Procesando...' : 'Aceptar oferta'}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={procesandoOfertaRelampago}
+                  onClick={() => responderOfertaRelampago('rechazar')}
+                >
+                  Mantener mi turno
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto max-w-7xl px-6 py-8 space-y-8">
         <section>

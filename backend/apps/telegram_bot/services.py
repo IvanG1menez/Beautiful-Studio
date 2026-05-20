@@ -16,7 +16,7 @@ from apps.turnos.services.reprogramacion_service import (
 )
 from apps.turnos.views import TurnoViewSet
 
-from .models import TelegramConversationState, TelegramLink
+from .models import TelegramConversationState, TelegramLink, TelegramLinkToken
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,12 @@ class TelegramBotService:
             link.chat_id = chat_id
             link.save(update_fields=["chat_id", "last_seen_at"])
 
+        if text.startswith("/start "):
+            payload = text.split(maxsplit=1)[1].strip()
+            if payload.startswith("link_"):
+                self._try_link_by_token(link, payload.removeprefix("link_"))
+                return
+
         if contact and contact.get("phone_number"):
             self._try_link_by_phone(link, contact.get("phone_number"))
             return
@@ -95,20 +101,27 @@ class TelegramBotService:
         command = text.lower()
 
         if self._is_farewell(command):
-            state.state = TelegramConversationState.STATE_IDLE
-            state.pending_turno_id = None
-            state.save(update_fields=["state", "pending_turno_id", "updated_at"])
+            self._end_chat(chat_id, state)
+            return
+
+        if (
+            state.state == TelegramConversationState.STATE_ENDED
+            and command != "/start"
+            and not self._is_greeting(command)
+        ):
             self.send_message(
                 chat_id,
-                "Gracias por escribirnos 💇‍♀️✨\nCuando quieras volver, mandame un \"hola\" o /start y seguimos.",
-                reply_markup={"remove_keyboard": True},
+                "El chat esta finalizado. Mandame \"hola\" cuando quieras volver a empezar.",
             )
             return
 
-        if command in {"/start", "/menu", "menu"}:
+        if command in {"/start", "/menu", "menu"} or self._is_greeting(command):
             if not link.is_verified:
                 self._send_phone_link_instructions(chat_id)
             else:
+                state.state = TelegramConversationState.STATE_IDLE
+                state.pending_turno_id = None
+                state.save(update_fields=["state", "pending_turno_id", "updated_at"])
                 self.send_welcome_message(chat_id, link)
                 self.send_main_menu(chat_id)
             return
@@ -143,17 +156,12 @@ class TelegramBotService:
             self.send_account_status(chat_id, link)
             return
 
-        if self._is_greeting(command) or (
-            state.state == TelegramConversationState.STATE_IDLE and command
-        ):
+        if command:
             self.send_message(
                 chat_id,
-                "¡Hola de nuevo! ✨\nQue lindo tenerte por aca. ¿Que queres hacer hoy?",
+                "No entendi ese mensaje. Para ver opciones escribi \"hola\" o /menu.",
             )
-            self.send_main_menu(chat_id)
             return
-
-        self.send_main_menu(chat_id)
 
     def _handle_turno_modification_command(self, chat_id, link, text):
         """Procesa comandos de modificacion de turnos y aplica cambios en BD."""
@@ -241,6 +249,21 @@ class TelegramBotService:
         if chat_id and message_id:
             self.clear_inline_keyboard(chat_id, message_id)
 
+        state, _ = TelegramConversationState.objects.get_or_create(link=link)
+
+        if data in {"menu:end_chat", "followup:end_chat"}:
+            self._end_chat(chat_id, state)
+            self.answer_callback_query(callback_id)
+            return
+
+        if state.state == TelegramConversationState.STATE_ENDED:
+            self.send_message(
+                chat_id,
+                "El chat esta finalizado. Mandame \"hola\" cuando quieras volver a empezar.",
+            )
+            self.answer_callback_query(callback_id, "Chat finalizado")
+            return
+
         if data == "menu:list_turnos":
             self.send_turnos_list(chat_id, link)
             self.answer_callback_query(callback_id)
@@ -271,26 +294,8 @@ class TelegramBotService:
             self.answer_callback_query(callback_id)
             return
 
-        if data == "menu:end_chat":
-            self.send_message(
-                chat_id,
-                "Gracias por escribirnos 💇‍♀️✨\nCuando quieras volver, mandame un \"hola\" y te ayudo con tus turnos.",
-                reply_markup={"remove_keyboard": True},
-            )
-            self.answer_callback_query(callback_id)
-            return
-
         if data == "followup:back":
             self.send_main_menu(chat_id)
-            self.answer_callback_query(callback_id)
-            return
-
-        if data == "followup:end_chat":
-            self.send_message(
-                chat_id,
-                "Gracias por escribirnos 💇‍♀️✨\nCuando quieras volver, mandame un \"hola\" y te ayudo con tus turnos.",
-                reply_markup={"remove_keyboard": True},
-            )
             self.answer_callback_query(callback_id)
             return
 
@@ -340,6 +345,42 @@ class TelegramBotService:
             return
 
         self.answer_callback_query(callback_id)
+
+    def _try_link_by_token(self, link, raw_token):
+        token_value = (raw_token or "").strip()
+        token = (
+            TelegramLinkToken.objects.select_related("cliente", "cliente__user")
+            .filter(token=token_value)
+            .first()
+        )
+        if not token or token.is_used or token.is_expired:
+            self.send_message(
+                link.chat_id,
+                "El enlace de vinculacion no es valido o vencio. Abrilo nuevamente desde tu panel web o vinculate con tu telefono.",
+            )
+            self._send_phone_link_instructions(link.chat_id)
+            return
+
+        link.cliente = token.cliente
+        link.is_verified = True
+        link.phone_snapshot = (
+            normalize_phone(getattr(token.cliente.user, "phone", "")) or link.phone_snapshot
+        )
+        link.save(
+            update_fields=["cliente", "is_verified", "phone_snapshot", "last_seen_at"]
+        )
+
+        token.used_at = timezone.now()
+        token.save(update_fields=["used_at"])
+
+        TelegramConversationState.objects.get_or_create(link=link)
+
+        self.send_message(
+            link.chat_id,
+            "✅ ¡Cuenta vinculada con exito!\nYa podes gestionar tus turnos desde este chat.",
+            reply_markup={"remove_keyboard": True},
+        )
+        self.send_main_menu(link.chat_id)
 
     def _try_link_by_phone(self, link, raw_phone):
         normalized_input = normalize_phone(raw_phone)
@@ -495,8 +536,14 @@ class TelegramBotService:
         )
 
         if not turnos:
-            self.send_message(chat_id, "📭 No tenes turnos proximos por ahora.")
-            self.send_post_action_prompt(chat_id)
+            self.send_message(
+                chat_id,
+                (
+                    "📭 No tenes turnos proximos por ahora.\n\n"
+                    "Si queres reservar o revisar mas opciones, visita tu panel web."
+                ),
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
+            )
             return
 
         lines = ["📅 Tus proximos turnos:"]
@@ -529,9 +576,13 @@ class TelegramBotService:
         if not cancellable:
             self.send_message(
                 chat_id,
-                "⏳ No hay turnos cancelables ahora.\nRecorda: faltando menos de 2 horas no se puede cancelar.",
+                (
+                    "⏳ No hay turnos cancelables ahora.\n"
+                    "La cancelacion por Telegram respeta la anticipacion minima configurada.\n\n"
+                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                ),
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
-            self.send_main_menu(chat_id)
             return
 
         keyboard_rows = []
@@ -553,6 +604,16 @@ class TelegramBotService:
             reply_markup={"inline_keyboard": keyboard_rows},
         )
 
+    def _end_chat(self, chat_id, state):
+        state.state = TelegramConversationState.STATE_ENDED
+        state.pending_turno_id = None
+        state.save(update_fields=["state", "pending_turno_id", "updated_at"])
+        self.send_message(
+            chat_id,
+            "Gracias por escribirnos 💇‍♀️✨\nCuando quieras volver, mandame un \"hola\" y seguimos.",
+            reply_markup={"remove_keyboard": True},
+        )
+
     def send_turnos_for_reprogram(self, chat_id, link):
         if not link.is_verified or not link.cliente:
             self._send_phone_link_instructions(chat_id)
@@ -566,8 +627,14 @@ class TelegramBotService:
         )
 
         if not turnos:
-            self.send_message(chat_id, "📭 No tenes turnos proximos para reprogramar.")
-            self.send_post_action_prompt(chat_id)
+            self.send_message(
+                chat_id,
+                (
+                    "📭 No tenes turnos proximos para reprogramar.\n\n"
+                    "Si queres reservar o revisar mas opciones, visita tu panel web."
+                ),
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
+            )
             return
 
         keyboard_rows = []
@@ -591,20 +658,24 @@ class TelegramBotService:
             text = "No hay turnos que se puedan reprogramar desde Telegram ahora."
             if blocked_lines:
                 text += "\n\n" + "\n".join(blocked_lines[:5])
-            text += "\n\nPara operaciones con pago o fuera de rango, entra a tu panel web."
+            text += (
+                "\n\n¿No encontras una fecha que te quede bien o necesitas otra alternativa? "
+                "Visita tu panel web para ver mas opciones."
+            )
             self.send_message(
                 chat_id,
                 text,
-                reply_markup={
-                    "inline_keyboard": [[{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}]]
-                },
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
             return
 
         keyboard_rows.append([{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}])
         text = "Elegi el turno que queres reprogramar 🔁"
         if blocked_lines:
-            text += "\n\nAlgunos turnos no aparecen porque requieren gestion desde la web."
+            text += (
+                "\n\nAlgunos turnos no aparecen porque requieren gestion desde la web. "
+                "Si no encontras una fecha que te quede bien, visita tu panel."
+            )
         self.send_message(chat_id, text, reply_markup={"inline_keyboard": keyboard_rows})
 
     def _handle_reprogram_callback(self, chat_id, link, data):
@@ -657,14 +728,9 @@ class TelegramBotService:
                 chat_id,
                 (
                     f"No encontre fechas proximas disponibles con {profesional}.\n"
-                    "Para ver otros profesionales o mas opciones, entra a tu panel web."
+                    "¿No encontras una fecha que te quede bien? Visita tu panel web para ver otros profesionales o mas opciones."
                 ),
-                reply_markup={
-                    "inline_keyboard": [
-                        [{"text": "Abrir panel web", "url": self._reprogram_web_url(turno)}],
-                        [{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}],
-                    ]
-                },
+                reply_markup=self._web_or_menu_keyboard(self._reprogram_web_url(turno)),
             )
             return
 
@@ -694,7 +760,13 @@ class TelegramBotService:
         horarios = self._available_times_for_turno(turno, fecha)
         horarios_visibles = self._visible_hourly_times(horarios, limit=5)
         if not horarios_visibles:
-            self.send_message(chat_id, "No quedan horarios disponibles ese dia. Elegi otra fecha.")
+            self.send_message(
+                chat_id,
+                (
+                    "No quedan horarios disponibles ese dia. Elegi otra fecha.\n\n"
+                    "¿No encontras una fecha que te quede bien? Visita tu panel web para ver mas opciones."
+                ),
+            )
             self.send_reprogram_dates(chat_id, turno)
             return
 
@@ -810,18 +882,34 @@ class TelegramBotService:
             (
                 "Este turno no puede reprogramarse desde Telegram.\n\n"
                 f"Motivo: {reason}.\n\n"
-                "Para continuar, entra a tu panel web:"
+                "¿No encontras una fecha que te quede bien o necesitas resolverlo igual? Entra a tu panel web:"
             ),
             reply_markup={
-                "inline_keyboard": [
-                    [{"text": "Abrir panel web", "url": self._reprogram_web_url(turno)}],
-                    [{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}],
-                ]
+                "inline_keyboard": self._web_or_menu_keyboard(self._reprogram_web_url(turno))["inline_keyboard"]
             },
         )
 
     def _reprogram_web_url(self, turno):
         return f"{self.frontend_url}/dashboard/cliente?reprogramar={turno.id}"
+
+    def _web_panel_url(self):
+        return f"{self.frontend_url}/dashboard/cliente"
+
+    def _web_or_menu_keyboard(self, url):
+        rows = []
+        if self._is_public_url(url):
+            rows.append([{"text": "Abrir panel web", "url": url}])
+        rows.append([{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}])
+        return {"inline_keyboard": rows}
+
+    @staticmethod
+    def _is_public_url(url):
+        value = (url or "").lower()
+        return value.startswith("https://") or (
+            value.startswith("http://")
+            and "localhost" not in value
+            and "127.0.0.1" not in value
+        )
 
     def _next_available_dates(self, turno, limit=5, days_ahead=30):
         dates = []
@@ -889,6 +977,17 @@ class TelegramBotService:
             self.send_main_menu(chat_id)
             return
 
+        if not turno.puede_cancelar():
+            self.send_message(
+                chat_id,
+                (
+                    "Este turno ya no se puede cancelar desde Telegram por la politica de anticipacion.\n\n"
+                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                ),
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
+            )
+            return
+
         state, _ = TelegramConversationState.objects.get_or_create(link=link)
         state.state = TelegramConversationState.STATE_CONFIRM_CANCEL
         state.pending_turno_id = turno.id
@@ -943,6 +1042,17 @@ class TelegramBotService:
             self.send_main_menu(chat_id)
             return
 
+        if not turno.puede_cancelar():
+            self.send_message(
+                chat_id,
+                (
+                    "Este turno ya no se puede cancelar desde Telegram por la politica de anticipacion.\n\n"
+                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                ),
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
+            )
+            return
+
         motivo = self.CANCEL_REASON_MAP[reason_key]
         fecha = timezone.localtime(turno.fecha_hora).strftime("%d/%m/%Y %H:%M")
         text = (
@@ -985,6 +1095,20 @@ class TelegramBotService:
         if not turno:
             self.send_message(chat_id, "No encontre ese turno.")
             self.send_main_menu(chat_id)
+            return
+
+        if not turno.puede_cancelar():
+            state.state = TelegramConversationState.STATE_IDLE
+            state.pending_turno_id = None
+            state.save(update_fields=["state", "pending_turno_id", "updated_at"])
+            self.send_message(
+                chat_id,
+                (
+                    "Este turno ya no se puede cancelar desde Telegram por la politica de anticipacion.\n\n"
+                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                ),
+                reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
+            )
             return
 
         try:
@@ -1075,7 +1199,10 @@ class TelegramBotService:
 
     def _post(self, url, payload):
         try:
-            return requests.post(url, json=payload, timeout=self.timeout)
+            response = requests.post(url, json=payload, timeout=self.timeout)
+            if not response.ok:
+                logger.warning("Telegram API rechazo payload: %s", response.text)
+            return response
         except requests.RequestException as exc:
             logger.exception("Error enviando mensaje a Telegram: %s", exc)
             return None

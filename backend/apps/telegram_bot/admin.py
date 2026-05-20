@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import TelegramLink, TelegramUpdateLog, TelegramConversationState
+from .models import TelegramConversationState, TelegramLink, TelegramLinkToken, TelegramUpdateLog
 
 
 @admin.register(TelegramLink)
@@ -8,6 +8,13 @@ class TelegramLinkAdmin(admin.ModelAdmin):
     list_display = ("telegram_user_id", "chat_id", "cliente", "is_verified", "last_seen_at")
     search_fields = ("telegram_user_id", "chat_id", "phone_snapshot", "cliente__user__email")
     list_filter = ("is_verified",)
+
+
+@admin.register(TelegramLinkToken)
+class TelegramLinkTokenAdmin(admin.ModelAdmin):
+    list_display = ("cliente", "expires_at", "used_at", "created_at")
+    search_fields = ("token", "cliente__user__email")
+    list_filter = ("used_at",)
 
 
 @admin.register(TelegramUpdateLog)

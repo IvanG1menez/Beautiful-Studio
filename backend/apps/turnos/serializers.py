@@ -79,6 +79,11 @@ class TurnoListSerializer(serializers.ModelSerializer):
     reprogramaciones_mensuales_restantes = serializers.SerializerMethodField()
     fue_reprogramado = serializers.SerializerMethodField()
     ultimo_movimiento_reprogramacion = serializers.SerializerMethodField()
+    cupon_racha_aplicado = serializers.SerializerMethodField()
+    cupon_racha_codigo = serializers.SerializerMethodField()
+    cupon_racha_descuento = serializers.SerializerMethodField()
+    oferta_fidelizacion_aplicada = serializers.SerializerMethodField()
+    oferta_fidelizacion_descuento = serializers.SerializerMethodField()
 
     class Meta:
         model = Turno
@@ -129,6 +134,11 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "reprogramaciones_mensuales_restantes",
             "fue_reprogramado",
             "ultimo_movimiento_reprogramacion",
+            "cupon_racha_aplicado",
+            "cupon_racha_codigo",
+            "cupon_racha_descuento",
+            "oferta_fidelizacion_aplicada",
+            "oferta_fidelizacion_descuento",
             "notas_cliente",
             "notas_empleado",
             "reacomodamiento_exitoso",
@@ -345,6 +355,30 @@ class TurnoListSerializer(serializers.ModelSerializer):
     def get_monto_credito_cancelacion(self, obj: Turno) -> Decimal:
         _, monto = self._get_datos_credito_cancelacion(obj)
         return monto
+
+    def _get_streak_coupon_used(self, obj: Turno):
+        return obj.streak_coupons_used.filter(status="usado").order_by("-used_at").first()
+
+    def get_cupon_racha_aplicado(self, obj: Turno) -> bool:
+        return self._get_streak_coupon_used(obj) is not None
+
+    def get_cupon_racha_codigo(self, obj: Turno) -> str:
+        coupon = self._get_streak_coupon_used(obj)
+        return coupon.code if coupon else ""
+
+    def get_cupon_racha_descuento(self, obj: Turno) -> Decimal:
+        coupon = self._get_streak_coupon_used(obj)
+        return coupon.discount_amount if coupon else Decimal("0.00")
+
+    def get_oferta_fidelizacion_aplicada(self, obj: Turno) -> bool:
+        return obj.canal_reserva == "fidelizacion" or "Oferta de cliente olvidado" in (obj.notas_cliente or "")
+
+    def get_oferta_fidelizacion_descuento(self, obj: Turno) -> Decimal:
+        if not self.get_oferta_fidelizacion_aplicada(obj) or not obj.servicio:
+            return Decimal("0.00")
+        precio_servicio = Decimal(str(obj.servicio.precio or 0))
+        precio_final = Decimal(str(obj.precio_final or 0))
+        return max(Decimal("0.00"), precio_servicio - precio_final)
 
 
 class TurnoDetailSerializer(serializers.ModelSerializer):

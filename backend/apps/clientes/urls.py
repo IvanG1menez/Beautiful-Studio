@@ -10,6 +10,7 @@ from .views import (
     streak_status_view,
     claim_streak_coupon_view,
     validate_streak_coupon_view,
+    active_reasignacion_offer_view,
 )
 
 router = DefaultRouter()
@@ -35,6 +36,11 @@ urlpatterns = [
         "me/streak-coupons/validate/",
         validate_streak_coupon_view,
         name="validate-streak-coupon",
+    ),
+    path(
+        "me/reacomodamiento-activo/",
+        active_reasignacion_offer_view,
+        name="active-reasignacion-offer",
     ),
     # Endpoints del ViewSet
     path("", include(router.urls)),

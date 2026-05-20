@@ -26,6 +26,7 @@ class Turno(models.Model):
 
     CANAL_RESERVA_CHOICES = [
         ("web_cliente", "Web cliente"),
+        ("fidelizacion", "Oferta de fidelización"),
         ("panel_profesional", "Panel profesional"),
         ("panel_propietario", "Panel propietario"),
     ]
@@ -433,6 +434,8 @@ class LogReasignacion(models.Model):
         blank=True,
         verbose_name="Estado final",
     )
+    estado_anterior = models.JSONField(null=True, blank=True)
+    estado_posterior = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Log de Reasignación"
@@ -441,6 +444,7 @@ class LogReasignacion(models.Model):
         indexes = [
             models.Index(fields=["token"]),
             models.Index(fields=["estado_final", "-fecha_envio"]),
+            models.Index(fields=["cliente_notificado", "estado_final", "expires_at"]),
         ]
 
     def __str__(self):

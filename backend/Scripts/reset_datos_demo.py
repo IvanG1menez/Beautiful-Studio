@@ -11,9 +11,13 @@ Usuarios creados (login por email):
 - Propietario:  propietario@beautifulstudio.com  / pass: admin123
 - Profesional:  profesional@beautifulstudio.com  / pass: profesional123
 - Profesional 2: profesional2@beautifulstudio.com / pass: profesional123
-- Cliente 1:    cliente1@beautifulstudio.com     / pass: cliente123
-- Cliente 2:    cliente2@beautifulstudio.com     / pass: cliente123
-- Cliente 3:    cliente3@beautifulstudio.com     / pass: cliente123
+- Maria Gomez:      maria.gomez@beautifulstudio.com      / pass: cliente123
+- Juan Perez:       juan.perez@beautifulstudio.com       / pass: cliente123
+- Rocio Fiel:       rocio.fiel@beautifulstudio.com       / pass: cliente123
+- Pedro Olvidado:   pedro.olvidado@beautifulstudio.com   / pass: cliente123
+- Jose Kziolvidado: jose.kziolvidado@beautifulstudio.com / pass: cliente123
+- Manuel MasLejano: manuel.maslejano@beautifulstudio.com / pass: cliente123
+- Agustin Lejano:   agustin.lejano@beautifulstudio.com   / pass: cliente123
 """
 
 from datetime import date, time
@@ -51,8 +55,9 @@ def crear_usuarios_base():
     - Propietario (dueño local): propietario@beautifulstudio.com / admin123
     - Profesional:              profesional@beautifulstudio.com / profesional123
     - Profesional 2:            profesional2@beautifulstudio.com / profesional123
-    - Cliente 1:                cliente1@beautifulstudio.com / cliente123
-    - Cliente 2:                cliente2@beautifulstudio.com / cliente123
+    - Clientes demo:            maria.gomez, juan.perez, rocio.fiel,
+                                pedro.olvidado, jose.kziolvidado,
+                                manuel.maslejano, agustin.lejano
     """
 
     # Importar aquí para evitar problemas de configuración de Django
@@ -238,14 +243,14 @@ def crear_usuarios_base():
 
     servicio_defaults = {
         "descripcion": "Servicio integral de color, lavado y brushing.",
-        "precio": Decimal("1000.00"),
+        "precio": Decimal("20000.00"),
         "descuento_reasignacion": Decimal("0.00"),
         "tipo_descuento_adelanto": "PORCENTAJE",
         "valor_descuento_adelanto": Decimal("90.00"),
         "tiempo_espera_respuesta": 20,
         "porcentaje_sena": Decimal("10.00"),
         "frecuencia_recurrencia_dias": 45,
-        "descuento_fidelizacion_pct": Decimal("90.00"),
+        "descuento_fidelizacion_pct": Decimal("15.00"),
         "descuento_fidelizacion_monto": Decimal("0.00"),
         "duracion_minutos": 120,
         "is_active": True,
@@ -370,167 +375,124 @@ def crear_usuarios_base():
         )
 
     # 4) Clientes de prueba con perfil Cliente
-    # Cliente 1
-    cliente1_email = "cliente1@beautifulstudio.com"
-
-    cliente1_user, created = User.objects.get_or_create(
-        email=cliente1_email,
-        defaults={
-            "username": "cliente1",
-            "first_name": "María",
-            "last_name": "Gómez",
-            "role": "cliente",
-            "is_staff": False,
-            "is_superuser": False,
-        },
-    )
-
-    if created:
-        cliente1_user.set_password("cliente123")
-        cliente1_user.save()
-        print(
-            "✅ Usuario cliente 'cliente1@beautifulstudio.com' creado (pass: cliente123)"
+    def ensure_cliente_demo(email, first_name, last_name, dni, phone, nacimiento, direccion, preferencias, saldo, is_vip=False):
+        username = email.split("@")[0]
+        user, user_created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "username": username,
+                "first_name": first_name,
+                "last_name": last_name,
+                "role": "cliente",
+                "is_staff": False,
+                "is_superuser": False,
+            },
         )
-    else:
-        changed = False
-        if cliente1_user.role != "cliente":
-            cliente1_user.role = "cliente"
-            changed = True
-        if changed:
-            cliente1_user.save(update_fields=["role"])
-        print("ℹ️ Usuario cliente 'cliente1@beautifulstudio.com' ya existía")
+        user.username = user.username or username
+        user.first_name = first_name
+        user.last_name = last_name
+        user.role = "cliente"
+        user.is_staff = False
+        user.is_superuser = False
+        user.dni = user.dni or dni
+        user.phone = user.phone or phone
+        user.set_password("cliente123")
+        user.save()
 
-    # Identidad del cliente 1
-    cliente1_user.first_name = "María"
-    cliente1_user.last_name = "Gómez"
-    cliente1_user.dni = cliente1_user.dni or "30111222"
-    cliente1_user.phone = cliente1_user.phone or "+54 9 11 4444-1111"
-    cliente1_user.save(update_fields=["first_name", "last_name", "dni", "phone"])
+        cliente, cliente_created = Cliente.objects.get_or_create(user=user)
+        cliente.fecha_nacimiento = nacimiento
+        cliente.direccion = direccion
+        cliente.preferencias = preferencias
+        cliente.is_vip = is_vip
+        cliente.is_active = True
+        cliente.save()
 
-    cliente1, created = Cliente.objects.get_or_create(user=cliente1_user)
-    # Datos más reales para el perfil de cliente
-    cliente1.fecha_nacimiento = date(1990, 5, 14)
-    cliente1.direccion = "Av. Siempre Viva 742, Ciudad Autónoma de Buenos Aires"
-    cliente1.preferencias = "Prefiere colores cálidos y turnos por la tarde."
-    cliente1.is_vip = True
-    cliente1.save()
-    if created:
-        print("✅ Perfil Cliente creado para 'cliente1@beautifulstudio.com'")
-    else:
-        print("ℹ️ Perfil Cliente actualizado para 'cliente1@beautifulstudio.com'")
+        billetera, _ = Billetera.objects.get_or_create(cliente=cliente)
+        billetera.saldo = Decimal(str(saldo))
+        billetera.save()
 
-    # Billetera para cliente1 con saldo 1000
-    billetera1, _ = Billetera.objects.get_or_create(cliente=cliente1)
-    billetera1.saldo = Decimal("1000.00")
-    billetera1.save()
+        estado = "creado" if user_created or cliente_created else "actualizado"
+        print(f"✅ Cliente demo '{email}' {estado} (pass: cliente123)")
+        return cliente
 
-    # Cliente 2
-    cliente2_email = "cliente2@beautifulstudio.com"
-
-    cliente2_user, created = User.objects.get_or_create(
-        email=cliente2_email,
-        defaults={
-            "username": "cliente2",
-            "first_name": "Juan",
-            "last_name": "Pérez",
-            "role": "cliente",
-            "is_staff": False,
-            "is_superuser": False,
-        },
+    cliente1 = ensure_cliente_demo(
+        "maria.gomez@beautifulstudio.com",
+        "Maria",
+        "Gomez",
+        "30111222",
+        "+54 9 11 4444-1111",
+        date(1990, 5, 14),
+        "Av. Siempre Viva 742, Ciudad Autonoma de Buenos Aires",
+        "Prefiere colores calidos y turnos por la tarde.",
+        "0.00",
+        True,
     )
-
-    if created:
-        cliente2_user.set_password("cliente123")
-        cliente2_user.save()
-        print(
-            "✅ Usuario cliente 'cliente2@beautifulstudio.com' creado (pass: cliente123)"
-        )
-    else:
-        changed = False
-        if cliente2_user.role != "cliente":
-            cliente2_user.role = "cliente"
-            changed = True
-        if changed:
-            cliente2_user.save(update_fields=["role"])
-        print("ℹ️ Usuario cliente 'cliente2@beautifulstudio.com' ya existía")
-
-    # Identidad del cliente 2
-    cliente2_user.first_name = "Juan"
-    cliente2_user.last_name = "Pérez"
-    cliente2_user.dni = cliente2_user.dni or "30122333"
-    cliente2_user.phone = cliente2_user.phone or "+54 9 11 4444-2222"
-    cliente2_user.save(update_fields=["first_name", "last_name", "dni", "phone"])
-
-    cliente2, created = Cliente.objects.get_or_create(user=cliente2_user)
-    cliente2.fecha_nacimiento = date(1985, 11, 3)
-    cliente2.direccion = "Calle Falsa 123, Córdoba"
-    cliente2.preferencias = "Cortes clásicos, no le gustan cambios muy drásticos."
-    cliente2.is_vip = False
-    cliente2.save()
-    if created:
-        print("✅ Perfil Cliente creado para 'cliente2@beautifulstudio.com'")
-    else:
-        print("ℹ️ Perfil Cliente actualizado para 'cliente2@beautifulstudio.com'")
-
-    # Billetera para cliente2 con saldo 500
-    billetera2, _ = Billetera.objects.get_or_create(cliente=cliente2)
-    billetera2.saldo = Decimal("500.00")
-    billetera2.save()
-
-    # Cliente 3 (sin saldo en billetera)
-    cliente3_email = "cliente3@beautifulstudio.com"
-
-    cliente3_user, created = User.objects.get_or_create(
-        email=cliente3_email,
-        defaults={
-            "username": "cliente3",
-            "first_name": "Laura",
-            "last_name": "Martínez",
-            "role": "cliente",
-            "is_staff": False,
-            "is_superuser": False,
-        },
+    cliente2 = ensure_cliente_demo(
+        "juan.perez@beautifulstudio.com",
+        "Juan",
+        "Perez",
+        "30122333",
+        "+54 9 11 4444-2222",
+        date(1985, 11, 3),
+        "Calle Falsa 123, Cordoba",
+        "Cliente principal para prueba de reacomodamiento.",
+        "0.00",
     )
-
-    if created:
-        cliente3_user.set_password("cliente123")
-        cliente3_user.save()
-        print(
-            "✅ Usuario cliente 'cliente3@beautifulstudio.com' creado (pass: cliente123)"
-        )
-    else:
-        changed = False
-        if cliente3_user.role != "cliente":
-            cliente3_user.role = "cliente"
-            changed = True
-        if changed:
-            cliente3_user.save(update_fields=["role"])
-        print("ℹ️ Usuario cliente 'cliente3@beautifulstudio.com' ya existía")
-
-    # Identidad del cliente 3
-    cliente3_user.first_name = "Laura"
-    cliente3_user.last_name = "Martínez"
-    cliente3_user.dni = cliente3_user.dni or "30133444"
-    cliente3_user.phone = cliente3_user.phone or "+54 9 11 4444-3333"
-    cliente3_user.save(update_fields=["first_name", "last_name", "dni", "phone"])
-
-    cliente3, created = Cliente.objects.get_or_create(user=cliente3_user)
-    cliente3.fecha_nacimiento = date(1992, 7, 21)
-    cliente3.direccion = "Av. Corrientes 1234, Ciudad Autónoma de Buenos Aires"
-    cliente3.preferencias = (
-        "Le gustan los cambios de look completos y probar nuevos servicios."
+    ensure_cliente_demo(
+        "rocio.fiel@beautifulstudio.com",
+        "Rocio",
+        "Fiel",
+        "30133444",
+        "+54 9 11 4444-3333",
+        date(1992, 7, 21),
+        "Av. Corrientes 1234, Ciudad Autonoma de Buenos Aires",
+        "Cliente preparada para fidelidad por rachas.",
+        "0.00",
     )
-    cliente3.is_vip = False
-    cliente3.save()
-    if created:
-        print("✅ Perfil Cliente creado para 'cliente3@beautifulstudio.com'")
-    else:
-        print("ℹ️ Perfil Cliente actualizado para 'cliente3@beautifulstudio.com'")
-
-    # Billetera para cliente3 con saldo 0
-    billetera3, _ = Billetera.objects.get_or_create(cliente=cliente3)
-    billetera3.saldo = Decimal("0.00")
-    billetera3.save()
+    ensure_cliente_demo(
+        "pedro.olvidado@beautifulstudio.com",
+        "Pedro",
+        "Olvidado",
+        "30144555",
+        "+54 9 11 4444-4444",
+        date(1988, 2, 9),
+        "San Martin 555, Buenos Aires",
+        "Cliente olvidado sin saldo para mail promocional.",
+        "0.00",
+    )
+    ensure_cliente_demo(
+        "jose.kziolvidado@beautifulstudio.com",
+        "Jose",
+        "Kziolvidado",
+        "30155666",
+        "+54 9 11 4444-5555",
+        date(1987, 9, 18),
+        "Belgrano 777, Buenos Aires",
+        "Cliente olvidado con saldo para mail de billetera.",
+        "1500.00",
+    )
+    ensure_cliente_demo(
+        "manuel.maslejano@beautifulstudio.com",
+        "Manuel",
+        "MasLejano",
+        "30166777",
+        "+54 9 11 4444-6666",
+        date(1991, 4, 12),
+        "Laprida 888, Buenos Aires",
+        "Candidato mas lejano para reacomodamiento; rechaza oferta.",
+        "0.00",
+    )
+    ensure_cliente_demo(
+        "agustin.lejano@beautifulstudio.com",
+        "Agustin",
+        "Lejano",
+        "30177888",
+        "+54 9 11 4444-7777",
+        date(1993, 12, 1),
+        "Rivadavia 999, Buenos Aires",
+        "Segundo candidato para reacomodamiento; acepta oferta.",
+        "0.00",
+    )
 
     # Crear algunos turnos y pagos de ejemplo para que la base
     # tenga datos "reales" que se vean en los paneles.
@@ -582,13 +544,13 @@ def crear_turnos_demo(owner_user, profesional_user):
         return
 
     cliente1 = Cliente.objects.filter(
-        user__email="cliente1@beautifulstudio.com"
+        user__email="maria.gomez@beautifulstudio.com"
     ).first()
     cliente2 = Cliente.objects.filter(
-        user__email="cliente2@beautifulstudio.com"
+        user__email="juan.perez@beautifulstudio.com"
     ).first()
     cliente3 = Cliente.objects.filter(
-        user__email="cliente3@beautifulstudio.com"
+        user__email="rocio.fiel@beautifulstudio.com"
     ).first()
 
     if not cliente1 or not cliente2:
@@ -603,8 +565,8 @@ def crear_turnos_demo(owner_user, profesional_user):
         servicio=servicio,
         fecha_hora=fecha_turno1,
         estado="confirmado",
-        precio_final=Decimal("1000.00"),
-        senia_pagada=Decimal("1000.00"),
+        precio_final=Decimal("20000.00"),
+        senia_pagada=Decimal("20000.00"),
         canal_reserva="web_cliente",
         metodo_pago="mercadopago",
         es_cliente_registrado=True,
@@ -636,7 +598,7 @@ def crear_turnos_demo(owner_user, profesional_user):
         preference_id="DEMO-PREF-1",
         payment_id="DEMO-PAY-1",
         init_point="https://www.mercadopago.com.ar/checkout/v1/demo",
-        monto=Decimal("1000.00"),
+        monto=Decimal("20000.00"),
         moneda="ARS",
         descripcion="Turno demo pago completo",
         estado="approved",
@@ -650,8 +612,8 @@ def crear_turnos_demo(owner_user, profesional_user):
         servicio=servicio,
         fecha_hora=fecha_turno2,
         estado="pendiente",
-        precio_final=Decimal("1000.00"),
-        senia_pagada=Decimal("100.00"),
+        precio_final=Decimal("20000.00"),
+        senia_pagada=Decimal("10000.00"),
         canal_reserva="panel_profesional",
         metodo_pago="efectivo",
         es_cliente_registrado=True,
@@ -675,8 +637,8 @@ def crear_turnos_demo(owner_user, profesional_user):
         servicio=servicio,
         fecha_hora=fecha_turno3,
         estado="completado",
-        precio_final=Decimal("1000.00"),
-        senia_pagada=Decimal("1000.00"),
+        precio_final=Decimal("20000.00"),
+        senia_pagada=Decimal("20000.00"),
         canal_reserva="panel_profesional",
         metodo_pago="mercadopago_qr",
         es_cliente_registrado=True,
@@ -700,7 +662,7 @@ def crear_turnos_demo(owner_user, profesional_user):
         preference_id="DEMO-PREF-3",
         payment_id="DEMO-PAY-3",
         init_point="https://www.mercadopago.com.ar/checkout/v1/demo",
-        monto=Decimal("1000.00"),
+        monto=Decimal("20000.00"),
         moneda="ARS",
         descripcion="Turno demo QR completado",
         estado="approved",

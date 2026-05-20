@@ -251,7 +251,7 @@ export default function TopBar({ className = '', onMenuToggle, isMobileMenuOpen 
 
                 <DropdownMenuItem
                   onClick={handleLogoutClick}
-                  className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                  className="text-red-600 focus:text-red-700 focus:bg-red-50"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>Cerrar Sesión</span>
@@ -378,7 +378,7 @@ function ClientWalletQuickAccess() {
       <Button
         variant="ghost"
         size="sm"
-        className="flex items-center gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+        className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
         onClick={handleOpen}
         disabled={loadingBilletera}
         title="Tu billetera"
@@ -399,18 +399,18 @@ function ClientWalletQuickAccess() {
           </DialogHeader>
 
           <div className="space-y-4 mt-4">
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-700/60 rounded-lg p-4 flex items-center justify-between">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-green-500">
                   <Wallet className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <p className="text-sm text-green-800 font-medium">Saldo disponible</p>
-                  <p className="text-2xl font-bold text-green-700">
+                  <p className="text-sm text-emerald-800 font-medium">Saldo disponible</p>
+                  <p className="text-2xl font-bold text-emerald-700">
                     {formatCurrency(saldoNumber)}
                   </p>
                   {fechaVencimientoTexto && (
-                    <p className="text-xs text-green-800 mt-1">
+                    <p className="text-xs text-emerald-800 mt-1">
                       Credito vigente hasta el {fechaVencimientoTexto}
                       {billetera?.esta_por_vencer && (
                         <span className="ml-1 font-semibold text-amber-600">(próximo a vencer)</span>
@@ -419,7 +419,7 @@ function ClientWalletQuickAccess() {
                   )}
                 </div>
               </div>
-              <p className="text-sm text-green-800 max-w-xs text-right">
+              <p className="text-sm text-emerald-800 max-w-xs text-right">
                 Cancela turnos con anticipación para acumular crédito y usarlo en tus próximas reservas.
               </p>
             </div>
@@ -429,9 +429,9 @@ function ClientWalletQuickAccess() {
                 <BeautifulSpinner label="Cargando movimientos de tu billetera..." />
               </div>
             ) : movimientos.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 text-sm">
+              <div className="text-center py-8 text-muted-foreground text-sm">
                 <p>No hay movimientos registrados aún.</p>
-                <p className="mt-2 text-green-700">
+                <p className="mt-2 text-emerald-700">
                   Cancela turnos con anticipación para empezar a acumular crédito.
                 </p>
               </div>
@@ -446,8 +446,8 @@ function ClientWalletQuickAccess() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           {mov.tipo === 'credito' ? (
-                            <div className="p-1.5 bg-green-100 rounded-full">
-                              <TrendingUp className="w-4 h-4 text-green-600" />
+                            <div className="p-1.5 bg-emerald-100 rounded-full">
+                              <TrendingUp className="w-4 h-4 text-emerald-600" />
                             </div>
                           ) : (
                             <div className="p-1.5 bg-red-100 rounded-full">
@@ -457,7 +457,7 @@ function ClientWalletQuickAccess() {
                           <span className="font-semibold">{mov.tipo_display}</span>
                           <span
                             className={`text-sm font-semibold px-2 py-0.5 rounded-full ${mov.tipo === 'credito'
-                              ? 'bg-green-100 text-green-700'
+                              ? 'bg-emerald-100 text-emerald-700'
                               : 'bg-red-100 text-red-700'
                               }`}
                           >

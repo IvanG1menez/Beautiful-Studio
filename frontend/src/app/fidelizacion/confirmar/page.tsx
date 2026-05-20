@@ -2,9 +2,9 @@
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
-import { CalendarClock, CheckCircle, Scissors, User as UserIcon } from 'lucide-react';
+import { CalendarClock, Gift, Scissors, ShieldCheck, User as UserIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect } from 'react';
 
@@ -125,19 +125,26 @@ function ConfirmacionFidelizacionInner() {
   const nombreMostrado = user?.first_name || user?.email || 'Cliente';
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-50 to-pink-50 p-4">
-      <Card className="w-full max-w-lg">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-            <CheckCircle className="h-8 w-8 text-green-600" />
+    <div className="min-h-screen flex items-center justify-center bg-[radial-gradient(circle_at_top,_#f5d0fe,_transparent_35%),linear-gradient(135deg,_#faf5ff,_#fff1f2)] p-4">
+      <Card className="w-full max-w-2xl overflow-hidden border-purple-100 shadow-2xl">
+        <div className="bg-linear-to-r from-violet-700 to-fuchsia-600 px-6 py-7 text-center text-white">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/20">
+            <Gift className="h-8 w-8" />
           </div>
-          <CardTitle className="text-2xl">Enlace de fidelización</CardTitle>
-          <CardDescription>
-            Usá este enlace para retomar tu próximo turno sugerido.
+          <CardTitle className="text-3xl">Te preparamos una vuelta especial</CardTitle>
+          <CardDescription className="mt-2 text-violet-100">
+            Este enlace te lleva al último servicio que solicitaste: Color completo + Brushing.
           </CardDescription>
-        </CardHeader>
+        </div>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-3 bg-white/60 rounded-lg px-4 py-3">
+          <Alert className="mt-5 border-violet-200 bg-violet-50">
+            <ShieldCheck className="h-4 w-4 text-violet-700" />
+            <AlertDescription className="text-violet-900">
+              Al continuar vas a ver la reserva sugerida para tu servicio habitual. Si recibiste una promo, el descuento se aplica antes de pagar la seña. Si tenés saldo en billetera, vas a poder usarlo desde tu cuenta.
+            </AlertDescription>
+          </Alert>
+
+          <div className="flex items-center gap-3 bg-white rounded-xl border border-purple-100 px-4 py-3 shadow-sm">
             <UserIcon className="h-5 w-5 text-purple-600" />
             <div>
               <p className="text-sm text-gray-500">Cliente sugerido</p>
@@ -152,12 +159,12 @@ function ConfirmacionFidelizacionInner() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/60 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-3 bg-white rounded-xl border border-purple-100 px-4 py-3 shadow-sm">
             <Scissors className="h-5 w-5 text-purple-600" />
             <div>
               <p className="text-sm text-gray-500">Servicio sugerido</p>
               <p className="font-medium text-gray-800">
-                {servicioId ? `Servicio #${servicioId}` : 'Servicio sugerido por tu estilista'}
+                {servicioId ? 'Color completo + Brushing' : 'Color completo + Brushing'}
               </p>
               {empleadoId && (
                 <p className="text-xs text-gray-500">Profesional recomendado: #{empleadoId}</p>
@@ -165,7 +172,7 @@ function ConfirmacionFidelizacionInner() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/60 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-3 bg-white rounded-xl border border-purple-100 px-4 py-3 shadow-sm">
             <CalendarClock className="h-5 w-5 text-purple-600" />
             <div>
               <p className="text-sm text-gray-500">Horario sugerido</p>

@@ -35,6 +35,7 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
     aplicar_descuento_fidelizacion = serializers.BooleanField(
         required=False, default=False
     )
+    usar_qr = serializers.BooleanField(required=False, default=False)
     coupon_code = serializers.CharField(required=False, allow_blank=True, default="")
 
 
@@ -134,6 +135,7 @@ class ConfirmarPagoManualSerializer(serializers.Serializer):
     preference_id = serializers.CharField()
     payment_id = serializers.CharField()
     motivo = serializers.CharField(required=False, allow_blank=True, default="")
+    reserva = serializers.DictField(required=False)
 
     def validate_preference_id(self, value):
         preference_id = (value or "").strip()

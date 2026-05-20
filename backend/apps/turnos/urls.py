@@ -55,6 +55,16 @@ urlpatterns = [
     ),
     # Herramientas de Diagnóstico
     path(
+        "diagnostico/preparar-datos/",
+        views_diagnostico.diagnostico_preparar_datos,
+        name="diagnostico-preparar-datos",
+    ),
+    path(
+        "diagnostico/limpiar-datos/",
+        views_diagnostico.diagnostico_limpiar_datos,
+        name="diagnostico-limpiar-datos",
+    ),
+    path(
         "diagnostico/optimizacion-agenda/",
         views_diagnostico.diagnostico_optimizacion_agenda,
         name="diagnostico-optimizacion",

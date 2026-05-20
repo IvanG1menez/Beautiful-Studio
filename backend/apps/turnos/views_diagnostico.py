@@ -28,6 +28,60 @@ from apps.emails.tasks import _buscar_proximo_horario_disponible
 logger = logging.getLogger(__name__)
 
 
+def _validar_propietario_diagnostico(request):
+    if request.user.role != "propietario":
+        return Response(
+            {"error": "Solo el propietario puede acceder a herramientas de diagnóstico"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def diagnostico_preparar_datos(request):
+    """Prepara datos reproducibles para todos los procesos de diagnóstico."""
+
+    forbidden = _validar_propietario_diagnostico(request)
+    if forbidden:
+        return forbidden
+
+    try:
+        from Scripts.preparar_diagnostico_procesos import prepare_diagnostic_data
+
+        proceso = (request.data.get("proceso") or "").strip().lower() or None
+        resultado = prepare_diagnostic_data(proceso=proceso)
+        return Response(resultado, status=status.HTTP_201_CREATED)
+    except Exception as exc:
+        logger.exception("Error preparando datos de diagnóstico: %s", exc)
+        return Response(
+            {"error": f"No se pudieron preparar los datos de diagnóstico: {exc}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def diagnostico_limpiar_datos(request):
+    """Elimina los datos generados para pruebas manuales de procesos."""
+
+    forbidden = _validar_propietario_diagnostico(request)
+    if forbidden:
+        return forbidden
+
+    try:
+        from Scripts.preparar_diagnostico_procesos import clean_diagnostic_data
+
+        resultado = clean_diagnostic_data()
+        return Response(resultado, status=status.HTTP_200_OK)
+    except Exception as exc:
+        logger.exception("Error limpiando datos de diagnóstico: %s", exc)
+        return Response(
+            {"error": f"No se pudieron limpiar los datos de diagnóstico: {exc}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def diagnostico_optimizacion_agenda(request):
@@ -904,7 +958,7 @@ def diagnostico_fidelidad_racha(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    from apps.turnos.models import ClienteStreakStats, StreakAuditLog, StreakRewardEvent
+    from apps.turnos.models import ClienteStreakStats, StreakAuditLog, StreakCoupon, StreakRewardEvent
 
     stats = ClienteStreakStats.objects.filter(cliente=turno.cliente).first()
     reward = (
@@ -912,6 +966,7 @@ def diagnostico_fidelidad_racha(request):
         .order_by("-created_at")
         .first()
     )
+    coupon = StreakCoupon.objects.filter(reward_event=reward).first() if reward else None
     audit_logs = list(
         StreakAuditLog.objects.filter(cliente=turno.cliente, turno=turno)
         .order_by("-created_at")
@@ -942,6 +997,17 @@ def diagnostico_fidelidad_racha(request):
                     "reason": reward.reason,
                 }
                 if reward
+                else None
+            ),
+            "coupon": (
+                {
+                    "id": coupon.id,
+                    "status": coupon.status,
+                    "discount_amount": float(coupon.discount_amount or 0),
+                    "code": coupon.code,
+                    "expires_at": coupon.expires_at.isoformat() if coupon.expires_at else None,
+                }
+                if coupon
                 else None
             ),
             "audit_logs": audit_logs,

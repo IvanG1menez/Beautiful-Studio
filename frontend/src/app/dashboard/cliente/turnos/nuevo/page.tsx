@@ -86,6 +86,7 @@ interface AppliedCoupon {
   discount_amount: string;
   precio_total?: string | null;
   precio_final?: string | null;
+  usage_warning?: string;
 }
 
 export default function NuevoTurnoPage() {
@@ -389,7 +390,9 @@ export default function NuevoTurnoPage() {
         discount_amount: data.discount_amount,
         precio_total: data.precio_total,
         precio_final: data.precio_final,
+        usage_warning: data.usage_warning,
       });
+      window.alert(data.usage_warning || 'Este código es de uso único. Al confirmar el pago, tu contador de racha se reseteará.');
     } catch (error) {
       setAppliedCoupon(null);
       setCouponError(error instanceof Error ? error.message : 'No se pudo validar el cupón.');
@@ -967,9 +970,15 @@ export default function NuevoTurnoPage() {
       return;
     }
 
+    if (!servicioSeleccionado || !empleadoSeleccionado || !fechaSeleccionada || !horarioSeleccionado) {
+      setManualPaymentError('No se pudo reconstruir la reserva. Volvé a seleccionar el turno.');
+      return;
+    }
+
     setConfirmingManualPayment(true);
     setManualPaymentError('');
     try {
+      const fechaHora = `${fechaSeleccionada}T${horarioSeleccionado}:00`;
       const response = await fetch(`${API_BASE_URL}/mercadopago/confirmar-cobro-manual/`, {
         method: 'POST',
         headers: getJsonAuthHeaders(),
@@ -977,6 +986,17 @@ export default function NuevoTurnoPage() {
           preference_id: preferenceId,
           payment_id: codigoLimpio,
           motivo: 'Cobro de reserva cliente confirmado manualmente',
+          reserva: {
+            servicio_id: servicioSeleccionado.id,
+            empleado_id: empleadoSeleccionado.id,
+            fecha_hora: fechaHora,
+            notas_cliente: notasCliente.trim() || '',
+            usar_sena: !pagarServicioCompleto,
+            tipo_pago: pagarServicioCompleto ? 'PAGO_COMPLETO' : 'SENIA',
+            creditos_a_aplicar: usarSaldoEnSena ? getSaldoUtilizadoEnPago() : 0,
+            coupon_code: appliedCoupon?.code || '',
+            aplicar_descuento_fidelizacion: isFromFidelizacion && beneficioFromQuery === 'descuento',
+          },
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -1038,7 +1058,7 @@ export default function NuevoTurnoPage() {
     };
 
     return (
-      <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-50 dark:from-background dark:to-background flex items-center justify-center p-4">
+      <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-50 flex items-center justify-center p-4">
         <Card className="w-full max-w-md shadow-xl border-0 text-center">
           <CardContent className="pt-12 pb-10 px-8 flex flex-col items-center gap-6">
 
@@ -2069,9 +2089,10 @@ export default function NuevoTurnoPage() {
                 </div>
                 {couponError && <p className="text-sm text-red-600">{couponError}</p>}
                 {appliedCoupon && (
-                  <p className="text-sm font-medium text-violet-800">
-                    Cupón aplicado: -{formatCurrency(getDescuentoCupon())}. La seña se recalcula sobre el total con descuento.
-                  </p>
+                  <div className="space-y-1 text-sm font-medium text-violet-800">
+                    <p>Cupón aplicado: -{formatCurrency(getDescuentoCupon())}. La seña se recalcula sobre el total con descuento.</p>
+                    <p>{appliedCoupon.usage_warning || 'Es de uso único y al confirmar el pago tu contador de racha se reseteará.'}</p>
+                  </div>
                 )}
               </div>
 

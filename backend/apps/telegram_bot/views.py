@@ -1,18 +1,50 @@
 import logging
+import secrets
+from datetime import timedelta
 
 from django.conf import settings
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import TelegramUpdateLog
+from .models import TelegramLinkToken, TelegramUpdateLog
 from .tasks import process_telegram_update
 from .services import TelegramBotService
 
 logger = logging.getLogger(__name__)
+
+
+class TelegramLinkTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        cliente = getattr(request.user, "cliente_profile", None)
+        if not cliente:
+            return Response(
+                {"detail": "Solo los clientes pueden vincular Telegram."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        token = secrets.token_urlsafe(32)
+        expires_at = timezone.now() + timedelta(minutes=15)
+        TelegramLinkToken.objects.create(
+            token=token,
+            cliente=cliente,
+            expires_at=expires_at,
+        )
+
+        bot_username = getattr(settings, "TELEGRAM_BOT_USERNAME", "beauti0598_bot")
+        return Response(
+            {
+                "telegram_url": f"https://t.me/{bot_username}?start=link_{token}",
+                "expires_at": expires_at,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

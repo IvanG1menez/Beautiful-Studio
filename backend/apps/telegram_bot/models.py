@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 
 class TelegramLink(models.Model):
@@ -24,6 +25,34 @@ class TelegramLink(models.Model):
         return f"Telegram {self.telegram_user_id}"
 
 
+class TelegramLinkToken(models.Model):
+    token = models.CharField(max_length=96, unique=True, db_index=True)
+    cliente = models.ForeignKey(
+        "clientes.Cliente",
+        on_delete=models.CASCADE,
+        related_name="telegram_link_tokens",
+    )
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Telegram Link Token"
+        verbose_name_plural = "Telegram Link Tokens"
+        ordering = ["-created_at"]
+
+    @property
+    def is_used(self):
+        return self.used_at is not None
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    def __str__(self):
+        return f"Token Telegram cliente #{self.cliente_id}"
+
+
 class TelegramUpdateLog(models.Model):
     update_id = models.BigIntegerField(unique=True)
     payload = models.JSONField(default=dict)
@@ -42,10 +71,12 @@ class TelegramUpdateLog(models.Model):
 class TelegramConversationState(models.Model):
     STATE_IDLE = "idle"
     STATE_CONFIRM_CANCEL = "confirm_cancel"
+    STATE_ENDED = "ended"
 
     STATE_CHOICES = [
         (STATE_IDLE, "Idle"),
         (STATE_CONFIRM_CANCEL, "Confirm Cancel"),
+        (STATE_ENDED, "Ended"),
     ]
 
     link = models.OneToOneField(

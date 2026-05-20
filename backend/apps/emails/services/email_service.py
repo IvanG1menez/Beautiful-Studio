@@ -5,11 +5,10 @@ Gestiona el envío de notificaciones por email a profesionales y propietarios
 
 from django.core.mail import send_mail
 from django.conf import settings
-from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.utils import timezone
 from django.urls import reverse
-from typing import Dict, List, Optional
+from typing import Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ class EmailService:
     @staticmethod
     def _get_base_template() -> str:
         """Plantilla base HTML para todos los emails"""
-        return """
+        template = """
         <!DOCTYPE html>
         <html lang="es">
         <head>
@@ -48,132 +47,235 @@ class EmailService:
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
                     line-height: 1.6;
-                    color: #333;
-                    background-color: #f5f5f5;
+                    color: #27212e;
+                    background-color: #f6f0f7;
+                    -webkit-font-smoothing: antialiased;
+                }}
+                .wrapper {{
+                    width: 100%;
+                    padding: 28px 12px;
+                    background: radial-gradient(circle at top left, #f4d9ea 0, #f6f0f7 34%, #f7f2ec 100%);
                 }}
                 .container {{
                     max-width: 600px;
-                    margin: 20px auto;
+                    margin: 0 auto;
                     background-color: #ffffff;
-                    border-radius: 12px;
+                    border-radius: 22px;
                     overflow: hidden;
-                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    border: 1px solid #eaddea;
+                    box-shadow: 0 18px 45px rgba(69, 43, 78, 0.14);
                 }}
                 .header {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    padding: 30px 20px;
-                    text-align: center;
-                    color: white;
+                    background: linear-gradient(135deg, #3b213f 0%, #6f3f78 52%, #b86a91 100%);
+                    padding: 34px 32px 30px;
+                    color: #ffffff;
                 }}
                 .header h1 {{
-                    font-size: 24px;
-                    font-weight: 600;
+                    font-size: 26px;
+                    font-weight: 700;
                     margin: 0;
+                    letter-spacing: -0.02em;
                 }}
                 .header p {{
                     font-size: 14px;
-                    margin-top: 5px;
-                    opacity: 0.9;
+                    margin-top: 8px;
+                    color: #f7dce8;
+                    letter-spacing: 0.04em;
+                    text-transform: uppercase;
                 }}
                 .content {{
-                    padding: 30px 20px;
+                    padding: 34px 32px 30px;
+                }}
+                .content h2 {{
+                    font-size: 23px;
+                    line-height: 1.25;
+                    letter-spacing: -0.02em;
+                }}
+                .content h3 {{
+                    color: #3b213f;
+                    font-size: 16px;
                 }}
                 .info-box {{
-                    background-color: #f8f9fa;
-                    border-left: 4px solid #667eea;
-                    padding: 15px;
-                    margin: 20px 0;
-                    border-radius: 4px;
+                    background: #fbf8fb;
+                    border: 1px solid #eaddea;
+                    border-left: 5px solid #9b5aa2;
+                    padding: 18px;
+                    margin: 22px 0;
+                    border-radius: 16px;
                 }}
                 .info-row {{
                     display: flex;
                     justify-content: space-between;
-                    padding: 8px 0;
-                    border-bottom: 1px solid #e9ecef;
+                    gap: 16px;
+                    padding: 10px 0;
+                    border-bottom: 1px solid #eaddea;
                 }}
                 .info-row:last-child {{
                     border-bottom: none;
                 }}
                 .info-label {{
                     font-weight: 600;
-                    color: #495057;
+                    color: #6d5b73;
+                    font-size: 13px;
                 }}
                 .info-value {{
-                    color: #212529;
+                    color: #27212e;
+                    font-weight: 600;
+                    text-align: right;
                 }}
                 .button {{
                     display: inline-block;
-                    padding: 12px 24px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
+                    padding: 13px 26px;
+                    background: linear-gradient(135deg, #7d4586 0%, #b86a91 100%);
+                    color: #ffffff !important;
                     text-decoration: none;
-                    border-radius: 6px;
-                    font-weight: 600;
-                    margin: 20px 0;
+                    border-radius: 999px;
+                    font-weight: 700;
+                    margin: 22px 0;
                     text-align: center;
+                    box-shadow: 0 10px 20px rgba(125, 69, 134, 0.22);
                 }}
                 .button:hover {{
                     opacity: 0.9;
                 }}
                 .footer {{
-                    background-color: #f8f9fa;
-                    padding: 20px;
+                    background-color: #faf7fa;
+                    padding: 22px 28px;
                     text-align: center;
                     font-size: 12px;
-                    color: #6c757d;
+                    color: #7b6b80;
+                    border-top: 1px solid #eaddea;
                 }}
                 .alert {{
-                    padding: 15px;
-                    margin: 20px 0;
-                    border-radius: 6px;
+                    padding: 16px;
+                    margin: 22px 0;
+                    border-radius: 14px;
                     font-size: 14px;
                 }}
                 .alert-warning {{
-                    background-color: #fff3cd;
-                    border-left: 4px solid #ffc107;
-                    color: #856404;
+                    background-color: #fff7e7;
+                    border-left: 5px solid #f0a020;
+                    color: #7a4a00;
                 }}
                 .alert-success {{
-                    background-color: #d4edda;
-                    border-left: 4px solid #28a745;
-                    color: #155724;
+                    background-color: #eefaf2;
+                    border-left: 5px solid #34a853;
+                    color: #1d6b34;
                 }}
                 .alert-info {{
-                    background-color: #d1ecf1;
-                    border-left: 4px solid #17a2b8;
-                    color: #0c5460;
+                    background-color: #f1f4ff;
+                    border-left: 5px solid #6c7ae0;
+                    color: #303b87;
+                }}
+                .muted {{
+                    color: #7b6b80;
+                    font-size: 13px;
+                }}
+                .email-context {{
+                    margin-bottom: 24px;
+                    padding-bottom: 18px;
+                    border-bottom: 1px solid #eaddea;
+                }}
+                .audience-badge {{
+                    display: inline-block;
+                    padding: 6px 11px;
+                    border-radius: 999px;
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    margin-bottom: 12px;
+                }}
+                .audience-cliente {{
+                    background: #f8e8f1;
+                    color: #7d2756;
+                }}
+                .audience-profesional {{
+                    background: #eef1ff;
+                    color: #354196;
+                }}
+                .audience-propietario {{
+                    background: #fff0dc;
+                    color: #8a4a00;
+                }}
+                .audience-usuario {{
+                    background: #eefaf2;
+                    color: #1d6b34;
+                }}
+                .email-subject-label {{
+                    color: #8a7b90;
+                    display: block;
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.08em;
+                    text-transform: uppercase;
+                    margin-bottom: 4px;
+                }}
+                .email-subject {{
+                    color: #3b213f;
+                    font-size: 18px;
+                    font-weight: 800;
+                    line-height: 1.3;
                 }}
                 @media only screen and (max-width: 600px) {{
+                    .wrapper {{
+                        padding: 0;
+                    }}
                     .container {{
                         margin: 0;
                         border-radius: 0;
+                        border-left: none;
+                        border-right: none;
+                    }}
+                    .header {{
+                        padding: 28px 20px 24px;
                     }}
                     .content {{
-                        padding: 20px 15px;
+                        padding: 26px 18px;
                     }}
                     .info-row {{
                         flex-direction: column;
-                        gap: 5px;
+                        gap: 4px;
+                    }}
+                    .info-value {{
+                        text-align: left;
                     }}
                 }}
             </style>
         </head>
         <body>
-            <div class="container">
-                <div class="header">
-                    <h1>{header_titulo}</h1>
-                    <p>Beautiful Studio</p>
-                </div>
-                <div class="content">
-                    {contenido}
-                </div>
-                <div class="footer">
-                    <p>&copy; 2025 Beautiful Studio. Todos los derechos reservados.</p>
-                    <p>Este es un email automático, por favor no responder.</p>
+            <div class="wrapper">
+                <div class="container">
+                    <div class="header">
+                        <h1>{header_titulo}</h1>
+                        <p>Beautiful Studio</p>
+                    </div>
+                    <div class="content">
+                        {contenido}
+                    </div>
+                    <div class="footer">
+                        <p><strong>Beautiful Studio</strong></p>
+                        <p>&copy; {anio} Beautiful Studio. Todos los derechos reservados.</p>
+                        <p>Este es un email automático, por favor no responder.</p>
+                    </div>
                 </div>
             </div>
         </body>
         </html>
+        """
+        return template.replace("{anio}", str(timezone.now().year))
+
+    @staticmethod
+    def _email_context(destinatario: str, asunto: str) -> str:
+        """Bloque visible para identificar destinatario y asunto dentro del email."""
+        destinatario_limpio = (destinatario or "usuario").strip().lower()
+        asunto_limpio = asunto or "Notificación de Beautiful Studio"
+        return f"""
+            <div class="email-context">
+                <span class="audience-badge audience-{destinatario_limpio}">Para {destinatario_limpio}</span>
+                <span class="email-subject-label">Asunto</span>
+                <div class="email-subject">{asunto_limpio}</div>
+            </div>
         """
 
     @staticmethod
@@ -204,7 +306,8 @@ class EmailService:
             )
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Tienes un nuevo turno asignado</h2>
+                {EmailService._email_context('profesional', 'Tenés un nuevo turno asignado')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Tenés un nuevo turno asignado</h2>
                 
                 <p>Hola <strong>{turno.empleado.user.first_name or turno.empleado.user.username}</strong>,</p>
                 <p>Se te ha asignado un nuevo turno. A continuación los detalles:</p>
@@ -254,7 +357,7 @@ class EmailService:
             )
 
             send_mail(
-                subject=f"Hola {turno.empleado.user.first_name or turno.empleado.user.username}, tienes un nuevo turno",
+                subject=f"Hola {turno.empleado.user.first_name or turno.empleado.user.username}, tenés un nuevo turno",
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email_destino],
@@ -340,7 +443,8 @@ class EmailService:
                 )
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Tu turno ha sido confirmado</h2>
+                {EmailService._email_context('cliente', 'Tu turno está confirmado')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Tu turno está confirmado</h2>
                 
                 <p>Hola <strong>{turno.cliente.user.first_name or turno.cliente.user.username}</strong>,</p>
                 <p>Tu turno ha sido confirmado exitosamente. A continuación los detalles:</p>
@@ -431,7 +535,8 @@ class EmailService:
                 return False
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Se registró un nuevo turno</h2>
+                {EmailService._email_context('propietario', 'Nuevo turno registrado en el sistema')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Se registró un nuevo turno</h2>
                 
                 <p>Se registró un nuevo turno en Beautiful Studio:</p>
                 
@@ -462,7 +567,7 @@ class EmailService:
                     </div>
                 </div>
                 
-                <p style="margin-top: 20px;">Puedes revisar todos los detalles desde tu panel de control.</p>
+                <p style="margin-top: 20px;">Podés revisar todos los detalles desde tu panel de control.</p>
             """
 
             html_message = EmailService._get_base_template().format(
@@ -529,7 +634,8 @@ class EmailService:
             nombre_profesional = empleado.user.get_full_name()
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Te extrañamos en Beautiful Studio</h2>
+                {EmailService._email_context('cliente', 'Tenés crédito disponible para tu próximo turno')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Te extrañamos en Beautiful Studio</h2>
 
                 <p>Hola <strong>{nombre_cliente}</strong>,</p>
                 <p>
@@ -557,20 +663,20 @@ class EmailService:
                     </div>
                 </div>
 
-                <p style="margin-top: 16px;">Puedes usar ese crédito para reservar tu próximo turno ahora mismo:</p>
+                <p style="margin-top: 16px;">Podés usar ese crédito para reservar tu próximo turno ahora mismo:</p>
 
                 <div style="text-align: center;">
                     <a href="{url_reserva}" class="button">Reservar mi turno</a>
                 </div>
 
                 <p style="margin-top: 12px; font-size: 13px; color: #6c757d;">
-                    Si ya utilizaste tu crédito recientemente, puedes ignorar este mensaje.
+                    Si ya utilizaste tu crédito recientemente, podés ignorar este mensaje.
                 </p>
             """
 
             html_message = EmailService._get_base_template().format(
                 titulo="Te extrañamos en Beautiful Studio",
-                header_titulo="Tienes crédito disponible",
+                header_titulo="Tenés crédito disponible",
                 contenido=contenido,
             )
 
@@ -579,7 +685,7 @@ class EmailService:
             email_destino = EmailService._get_email_destinatario(cliente.user.email)
 
             send_mail(
-                subject="Tienes crédito disponible para tu próximo turno",
+                subject="Tenés crédito disponible para tu próximo turno",
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email_destino],
@@ -648,7 +754,8 @@ class EmailService:
             nombre_profesional = empleado.user.get_full_name()
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Tenemos un beneficio especial para vos</h2>
+                {EmailService._email_context('cliente', 'Tenés un beneficio especial en tu próximo turno')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Tenemos un beneficio especial para vos</h2>
 
                 <p>Hola <strong>{nombre_cliente}</strong>,</p>
                 <p>
@@ -729,18 +836,94 @@ class EmailService:
             return False
 
     @staticmethod
+    def enviar_email_cupon_racha(coupon) -> bool:
+        """Envía al cliente el código único de cupón por racha."""
+
+        try:
+            cliente = coupon.cliente
+            if not getattr(cliente, "user", None) or not cliente.user.email:
+                logger.warning("Cliente sin email para cupón de racha")
+                return False
+
+            nombre_cliente = cliente.user.first_name or getattr(cliente, "nombre_completo", "Cliente")
+            expires_text = (
+                coupon.expires_at.strftime("%d/%m/%Y")
+                if coupon.expires_at
+                else "la fecha indicada en tu cuenta"
+            )
+
+            contenido = f"""
+                {EmailService._email_context('cliente', 'Tu código de descuento por racha')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Tu cupón de racha está listo</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+                <p>
+                    Alcanzaste una nueva racha de turnos completados y desbloqueaste
+                    un cupón de descuento para tu próxima reserva.
+                </p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Código:</span>
+                        <span class="info-value" style="font-size: 20px; letter-spacing: 1px;">{coupon.code}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Descuento:</span>
+                        <span class="info-value">${float(coupon.discount_amount):.2f}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Válido hasta:</span>
+                        <span class="info-value">{expires_text}</span>
+                    </div>
+                </div>
+
+                <p style="margin-top: 16px;">
+                    No compartas este código. Es personal, de uso único y se marca como usado
+                    cuando confirmás el pago de la reserva.
+                </p>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Tu cupón de racha",
+                header_titulo="Cupón de fidelidad",
+                contenido=contenido,
+            )
+            plain_message = strip_tags(html_message)
+            email_destino = EmailService._get_email_destinatario(cliente.user.email)
+
+            send_mail(
+                subject="Tu código de descuento por racha",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                "Email de cupón de racha enviado a %s (original: %s)",
+                email_destino,
+                cliente.user.email,
+            )
+            return True
+        except Exception as e:
+            logger.error("Error enviando email de cupón de racha: %s", e)
+            return False
+
+    @staticmethod
     def enviar_email_pago_pendiente_profesional(turno) -> bool:
         """
         Envía email al profesional notificando pago pendiente de un turno
         """
         try:
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Turno pendiente de pago</h2>
+                {EmailService._email_context('profesional', f'Pago pendiente - {turno.cliente.nombre_completo}')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Turno pendiente de pago</h2>
                 
                 <p>Hola <strong>{turno.empleado.user.get_full_name()}</strong>,</p>
                 
                 <div class="alert alert-warning">
-                    <strong>¡Atención!</strong> Tienes un turno completado pendiente de pago.
+                    <strong>Atención:</strong> tenés un turno completado pendiente de pago.
                 </div>
                 
                 <div class="info-box">
@@ -807,6 +990,7 @@ class EmailService:
         try:
             # Email al profesional
             contenido_profesional = f"""
+                {EmailService._email_context('profesional', 'Turno cancelado - ' + turno.fecha_hora.strftime('%d/%m/%Y %H:%M'))}
                 <h2 style="color: #dc3545; margin-bottom: 20px;">Turno cancelado</h2>
                 
                 <p>Hola <strong>{turno.empleado.user.get_full_name()}</strong>,</p>
@@ -852,6 +1036,61 @@ class EmailService:
                 fail_silently=False,
             )
 
+            # Email al cliente
+            if getattr(turno, "cliente", None) and getattr(turno.cliente, "user", None) and turno.cliente.user.email:
+                nombre_cliente = (
+                    turno.cliente.user.first_name
+                    or turno.cliente.user.get_full_name()
+                    or turno.cliente.user.username
+                )
+                contenido_cliente = f"""
+                    {EmailService._email_context('cliente', 'Tu turno en Beautiful Studio fue cancelado')}
+                    <h2 style="color: #7d4586; margin-bottom: 20px;">Tu turno fue cancelado</h2>
+
+                    <p>Hola <strong>{nombre_cliente}</strong>,</p>
+
+                    <div class="alert alert-warning">
+                        Te avisamos que tu turno fue cancelado. Abajo tenés el detalle del turno afectado.
+                    </div>
+
+                    <div class="info-box">
+                        <div class="info-row">
+                            <span class="info-label">Servicio:</span>
+                            <span class="info-value">{turno.servicio.nombre}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Profesional:</span>
+                            <span class="info-value">{turno.empleado.user.get_full_name()}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Fecha y hora:</span>
+                            <span class="info-value">{turno.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
+                        </div>
+                    </div>
+
+                    <p>
+                        Si querés reservar un nuevo horario, podés hacerlo desde tu panel de cliente.
+                        Si tenías una seña o pago asociado, revisaremos el caso según la política del servicio.
+                    </p>
+                """
+
+                html_message_cliente = EmailService._get_base_template().format(
+                    titulo="Turno Cancelado",
+                    header_titulo="Turno cancelado",
+                    contenido=contenido_cliente,
+                )
+
+                email_cliente = EmailService._get_email_destinatario(turno.cliente.user.email)
+
+                send_mail(
+                    subject="Tu turno en Beautiful Studio fue cancelado",
+                    message=strip_tags(html_message_cliente),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[email_cliente],
+                    html_message=html_message_cliente,
+                    fail_silently=False,
+                )
+
             # Email al propietario
             from apps.users.models import User
 
@@ -859,6 +1098,7 @@ class EmailService:
 
             if propietarios.exists():
                 contenido_propietario = f"""
+                    {EmailService._email_context('propietario', f'Turno cancelado - {turno.empleado.user.get_full_name()}')}
                     <h2 style="color: #dc3545; margin-bottom: 20px;">Turno cancelado</h2>
                     
                     <p>Se ha cancelado un turno en Beautiful Studio:</p>
@@ -935,12 +1175,13 @@ class EmailService:
                 """
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Turno modificado</h2>
+                {EmailService._email_context('profesional', 'Un turno asignado fue modificado')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Turno modificado</h2>
                 
                 <p>Hola <strong>{turno.empleado.user.get_full_name()}</strong>,</p>
                 
                 <div class="alert alert-info">
-                    Se ha modificado un turno asignado a ti.
+                    Se modificó un turno asignado a vos.
                 </div>
                 
                 <h3 style="margin-top: 20px;">Cambios realizados:</h3>
@@ -1015,7 +1256,8 @@ class EmailService:
             )
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Tu turno fue actualizado</h2>
+                {EmailService._email_context('cliente', 'Tu turno fue modificado')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Tu turno fue actualizado</h2>
 
                 <p>Hola <strong>{nombre_cliente}</strong>,</p>
 
@@ -1080,12 +1322,13 @@ class EmailService:
         """
         try:
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Recordatorio de turno</h2>
+                {EmailService._email_context('profesional', 'Recordatorio de agenda')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Recordatorio de turno</h2>
                 
                 <p>Hola <strong>{turno.empleado.user.get_full_name()}</strong>,</p>
                 
                 <div class="alert alert-info">
-                    <strong>Recordatorio:</strong> Tienes un turno programado próximamente.
+                    <strong>Recordatorio:</strong> tenés un turno programado próximamente.
                 </div>
                 
                 <div class="info-box">
@@ -1143,6 +1386,87 @@ class EmailService:
             return False
 
     @staticmethod
+    def enviar_email_recordatorio_turno_cliente(turno) -> bool:
+        """Envía email recordatorio al cliente sobre un turno próximo."""
+        try:
+            if not getattr(turno, "cliente", None) or not getattr(turno.cliente, "user", None):
+                logger.warning("Turno %s sin cliente/usuario para recordatorio", turno.id)
+                return False
+
+            if not turno.cliente.user.email:
+                logger.warning("Cliente %s sin email para recordatorio", turno.cliente.id)
+                return False
+
+            nombre_cliente = (
+                turno.cliente.user.first_name
+                or turno.cliente.user.get_full_name()
+                or turno.cliente.user.username
+            )
+
+            contenido = f"""
+                {EmailService._email_context('cliente', 'Recordatorio: tenés un turno en Beautiful Studio')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Te esperamos pronto</h2>
+
+                <p>Hola <strong>{nombre_cliente}</strong>,</p>
+                <p>Te recordamos que tenés un turno programado en Beautiful Studio.</p>
+
+                <div class="info-box">
+                    <div class="info-row">
+                        <span class="info-label">Servicio:</span>
+                        <span class="info-value">{turno.servicio.nombre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Profesional:</span>
+                        <span class="info-value">{turno.empleado.user.get_full_name()}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Fecha y hora:</span>
+                        <span class="info-value">{turno.fecha_hora.strftime('%d/%m/%Y %H:%M')}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Duración estimada:</span>
+                        <span class="info-value">{turno.servicio.duracion_minutos} minutos</span>
+                    </div>
+                </div>
+
+                <div class="alert alert-info">
+                    Te recomendamos llegar unos minutos antes para que podamos recibirte con tranquilidad.
+                </div>
+
+                <p class="muted">
+                    Si necesitás cancelar o reprogramar, hacelo con anticipación desde tu cuenta o contactanos por los canales habituales del salón.
+                </p>
+            """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Recordatorio de Turno",
+                header_titulo="Recordatorio de turno",
+                contenido=contenido,
+            )
+
+            email_destino = EmailService._get_email_destinatario(turno.cliente.user.email)
+
+            send_mail(
+                subject="Recordatorio: tenés un turno en Beautiful Studio",
+                message=strip_tags(html_message),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email_destino],
+                html_message=html_message,
+                fail_silently=False,
+            )
+
+            logger.info(
+                "Email recordatorio enviado a cliente %s (original: %s)",
+                email_destino,
+                turno.cliente.user.email,
+            )
+            return True
+
+        except Exception as e:
+            logger.error("Error enviando email recordatorio al cliente: %s", str(e))
+            return False
+
+    @staticmethod
     def enviar_email_reporte_diario_propietario(datos_reporte: Dict) -> bool:
         """
         Envía email con reporte diario de actividad al propietario
@@ -1160,7 +1484,8 @@ class EmailService:
                 return False
 
             contenido = f"""
-                <h2 style="color: #667eea; margin-bottom: 20px;">Resumen diario de actividad</h2>
+                {EmailService._email_context('propietario', 'Reporte diario - Beautiful Studio')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Resumen diario de actividad</h2>
                 
                 <p>Aquí está el resumen de la actividad de hoy en Beautiful Studio:</p>
                 
@@ -1271,7 +1596,8 @@ class EmailService:
                 titulo_email = "Reacomodo de turno disponible"
                 header_titulo = "Reacomodo de turno"
                 contenido = f"""
-                    <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
+                    {EmailService._email_context('cliente', titulo_email)}
+                    <h2 style="color: #7d4586; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
 
                     <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
                     <p>Se liberó un turno para el mismo servicio y podemos reacomodarte a una fecha más cercana.</p>
@@ -1321,15 +1647,16 @@ class EmailService:
                     </p>
 
                     <p style="color: #718096; font-size: 0.9em; text-align: center;">
-                        Si no deseas adelantar tu turno, simplemente ignora este email.<br>
+                        Si no querés adelantar tu turno, simplemente ignorá este email.<br>
                         Tu turno original se mantendrá sin cambios.
                     </p>
                 """
             else:
-                titulo_email = "Tenemos un turno antes para ti"
+                titulo_email = "Tenemos un turno antes para vos"
                 header_titulo = "Oferta de turno"
                 contenido = f"""
-                    <h2 style="color: #667eea; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
+                    {EmailService._email_context('cliente', titulo_email)}
+                    <h2 style="color: #7d4586; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
 
                     <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
                     <p>Se liberó un turno para el mismo servicio y podemos adelantarte con un descuento especial.</p>
@@ -1378,7 +1705,7 @@ class EmailService:
                     </p>
 
                     <p style="color: #718096; font-size: 0.9em; text-align: center;">
-                        Si no deseas adelantar tu turno, simplemente ignora este email.<br>
+                        Si no querés adelantar tu turno, simplemente ignorá este email.<br>
                         Tu turno original se mantendrá sin cambios.
                     </p>
                 """
@@ -1434,117 +1761,39 @@ class EmailService:
             )
             reset_url = f"{frontend_url}/reset-password?token={token}"
 
-            # Crear HTML del email
-            html_message = f"""
-            <!DOCTYPE html>
-            <html lang="es">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Recuperar Contraseña</title>
-                <style>
-                    * {{
-                        margin: 0;
-                        padding: 0;
-                        box-sizing: border-box;
-                    }}
-                    body {{
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                        line-height: 1.6;
-                        color: #333;
-                        background-color: #f5f5f5;
-                    }}
-                    .container {{
-                        max-width: 600px;
-                        margin: 20px auto;
-                        background-color: #ffffff;
-                        border-radius: 12px;
-                        overflow: hidden;
-                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                    }}
-                    .header {{
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        padding: 30px 20px;
-                        text-align: center;
-                        color: white;
-                    }}
-                    .header h1 {{
-                        font-size: 24px;
-                        font-weight: 600;
-                        margin: 0;
-                    }}
-                    .content {{
-                        padding: 30px 20px;
-                    }}
-                    .button {{
-                        display: inline-block;
-                        padding: 14px 28px;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: white !important;
-                        text-decoration: none;
-                        border-radius: 8px;
-                        font-weight: 600;
-                        text-align: center;
-                        margin: 20px 0;
-                    }}
-                    .warning-box {{
-                        background-color: #fff3cd;
-                        border-left: 4px solid #ffc107;
-                        padding: 15px;
-                        margin: 20px 0;
-                        border-radius: 4px;
-                        color: #856404;
-                    }}
-                    .footer {{
-                        background-color: #f8f9fa;
-                        padding: 20px;
-                        text-align: center;
-                        font-size: 12px;
-                        color: #6c757d;
-                        border-top: 1px solid #e9ecef;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>🔑 Recuperar Contraseña</h1>
-                    </div>
-                    
-                    <div class="content">
-                        <p>Hola{' ' + usuario_nombre if usuario_nombre else ''},</p>
-                        <p style="margin-top: 15px;">Recibimos una solicitud para restablecer la contraseña de tu cuenta en <strong>Beautiful Studio</strong>.</p>
-                        
-                        <p style="margin-top: 15px;">Haz clic en el siguiente botón para crear una nueva contraseña:</p>
-                        
-                        <div style="text-align: center;">
-                            <a href="{reset_url}" class="button">Restablecer Contraseña</a>
-                        </div>
-                        
-                        <div class="warning-box">
-                            <strong>⚠️ Importante:</strong>
-                            <ul style="margin-top: 10px; padding-left: 20px;">
-                                <li>Este enlace es válido por <strong>1 hora</strong></li>
-                                <li>Solo puede ser utilizado una vez</li>
-                                <li>Si no solicitaste este cambio, ignora este email</li>
-                            </ul>
-                        </div>
-                        
-                        <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
-                            Si el botón no funciona, copia y pega este enlace en tu navegador:<br>
-                            <a href="{reset_url}" style="color: #667eea; word-break: break-all;">{reset_url}</a>
-                        </p>
-                    </div>
-                    
-                    <div class="footer">
-                        <p><strong>Beautiful Studio</strong></p>
-                        <p>Sistema de Gestión de Turnos</p>
-                        <p style="margin-top: 10px;">Este es un email automático, por favor no responder.</p>
-                    </div>
+            saludo = f"Hola <strong>{usuario_nombre}</strong>," if usuario_nombre else "Hola,"
+            contenido = f"""
+                {EmailService._email_context('usuario', 'Recuperar contraseña - Beautiful Studio')}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">Restablecé tu contraseña</h2>
+
+                <p>{saludo}</p>
+                <p style="margin-top: 14px;">
+                    Recibimos una solicitud para restablecer la contraseña de tu cuenta en
+                    <strong>Beautiful Studio</strong>.
+                </p>
+
+                <p style="margin-top: 14px;">Usá el siguiente botón para crear una nueva contraseña:</p>
+
+                <div style="text-align: center;">
+                    <a href="{reset_url}" class="button">Restablecer contraseña</a>
                 </div>
-            </body>
-            </html>
+
+                <div class="alert alert-warning">
+                    <strong>Importante:</strong> este enlace es válido por 1 hora, se puede usar una sola vez
+                    y podés ignorar este email si no solicitaste el cambio.
+                </div>
+
+                <p class="muted" style="word-break: break-all;">
+                    Si el botón no funciona, copiá y pegá este enlace en tu navegador:<br>
+                    <a href="{reset_url}" style="color: #7d4586;">{reset_url}</a>
+                </p>
             """
+
+            html_message = EmailService._get_base_template().format(
+                titulo="Recuperar contraseña",
+                header_titulo="Recuperar contraseña",
+                contenido=contenido,
+            )
 
             plain_message = strip_tags(html_message)
 
@@ -1554,7 +1803,7 @@ class EmailService:
             )
 
             send_mail(
-                subject="Recuperar Contraseña - Beautiful Studio",
+                subject="Recuperar contraseña - Beautiful Studio",
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email_dest],

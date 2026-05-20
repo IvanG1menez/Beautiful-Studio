@@ -9,13 +9,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
-import { patch } from '@/services/api';
-import { User } from '@/types';
-import { Bot, MessageCircleHeart, Send, Sparkles } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { post } from '@/services/api';
+import { Bot, Link2, Send, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 const BOT_URL = 'https://t.me/beauti0598_bot';
@@ -28,17 +25,10 @@ const CTA_MESSAGES = [
 ];
 
 export default function TelegramFloatingButton() {
-  const { user, updateUser } = useAuth();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [phoneInput, setPhoneInput] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+  const [isLinking, setIsLinking] = useState(false);
   const [bannerIndex, setBannerIndex] = useState(0);
-  const [profileState, setProfileState] = useState<User | null>(null);
-
-  useEffect(() => {
-    setProfileState(user);
-    setPhoneInput(user?.phone || '');
-  }, [user]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -47,42 +37,29 @@ export default function TelegramFloatingButton() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const hasPhone = useMemo(() => {
-    return !!(profileState?.phone && profileState.phone.trim().length > 0);
-  }, [profileState]);
-
   const openBot = () => {
     window.open(BOT_URL, '_blank', 'noopener,noreferrer');
   };
 
   const handleMainClick = () => {
-    if (hasPhone) {
+    if (user?.has_telegram_link) {
       openBot();
       return;
     }
     setOpen(true);
   };
 
-  const handleSavePhone = async () => {
-    const clean = phoneInput.trim();
-    if (!clean) {
-      toast.error('Ingresa un telefono para continuar');
-      return;
-    }
-
+  const handleLinkTelegram = async () => {
     try {
-      setIsSaving(true);
-      const updated = await patch<User>('/users/phone/', { phone: clean });
-      setProfileState(updated);
-      updateUser(updated);
-
-      toast.success('Telefono sincronizado. Ahora abrimos BeautyBot.');
+      setIsLinking(true);
+      const response = await post<{ telegram_url: string }>('/telegram/link-token/', {});
+      toast.success('Abrimos BeautyBot para vincular tu cuenta.');
       setOpen(false);
-      openBot();
+      window.open(response.telegram_url, '_blank', 'noopener,noreferrer');
     } catch (error: any) {
-      toast.error(error?.message || 'No pudimos guardar tu telefono');
+      toast.error(error?.message || 'No pudimos generar el enlace de Telegram');
     } finally {
-      setIsSaving(false);
+      setIsLinking(false);
     }
   };
 
@@ -130,19 +107,7 @@ export default function TelegramFloatingButton() {
           <div className="rounded-lg border border-cyan-100 bg-cyan-50 p-3 text-sm text-cyan-800">
             ¿Querés gestionar tus turnos desde WhatsApp o Telegram? 📱
             <br />
-            Ingresa tu numero para que BeautyBot te reconozca y te envie recordatorios
-            automaticos.
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="telegram-phone">Numero de telefono</Label>
-            <Input
-              id="telegram-phone"
-              placeholder="Ej: +54 9 11 2233-4455"
-              value={phoneInput}
-              onChange={(e) => setPhoneInput(e.target.value)}
-              autoComplete="tel"
-            />
+            Te vamos a llevar a Telegram con un enlace seguro para que BeautyBot reconozca tu cuenta.
           </div>
 
           <DialogFooter className="gap-2 sm:justify-between">
@@ -150,13 +115,13 @@ export default function TelegramFloatingButton() {
               type="button"
               variant="outline"
               onClick={() => setOpen(false)}
-              disabled={isSaving}
+              disabled={isLinking}
             >
               Mas tarde
             </Button>
-            <Button type="button" onClick={handleSavePhone} disabled={isSaving}>
-              <MessageCircleHeart className="mr-2 h-4 w-4" />
-              {isSaving ? 'Guardando...' : 'Guardar y abrir BeautyBot'}
+            <Button type="button" onClick={handleLinkTelegram} disabled={isLinking}>
+              <Link2 className="mr-2 h-4 w-4" />
+              {isLinking ? 'Generando enlace...' : 'Vincular con BeautyBot'}
             </Button>
           </DialogFooter>
         </DialogContent>

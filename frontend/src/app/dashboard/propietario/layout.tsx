@@ -2,7 +2,6 @@
 
 import TopBar from "@/components/layout/TopBar";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import {
   CalendarDays,
   ChevronDown,
@@ -279,8 +278,8 @@ export default function DashboardPropietarioLayout({
                                   flex items-center gap-3 px-4 py-2 rounded-lg text-sm
                                   transition-colors duration-200
                                   ${subItem.active
-                                    ? 'bg-blue-600 text-white'
-                                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                      ? 'bg-blue-600 text-white'
+                                      : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                                   }
                                 `}
                                 onClick={() => isMobile && setSidebarOpen(false)}
@@ -302,8 +301,8 @@ export default function DashboardPropietarioLayout({
                         transition-colors duration-200
                         ${sidebarOpen ? '' : 'justify-center'}
                         ${item.active
-                          ? 'bg-blue-600 text-white'
-                          : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                            ? 'bg-blue-600 text-white'
+                            : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                         }
                       `}
                       onClick={() => isMobile && setSidebarOpen(false)}
@@ -319,8 +318,7 @@ export default function DashboardPropietarioLayout({
 
           {/* Sidebar Footer */}
           {sidebarOpen && (
-            <div className="p-4 border-t border-gray-800 flex flex-col gap-3">
-              <ThemeToggle />
+            <div className="p-4 border-t border-gray-800">
               <div className="text-xs text-gray-400">
                 <p>Beautiful Studio v1.0</p>
                 <p className="mt-1">© 2025 Todos los derechos reservados</p>
@@ -337,7 +335,7 @@ export default function DashboardPropietarioLayout({
         {/* Overlay para móvil */}
         {isMobile && sidebarOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-30"
+            className="fixed inset-0 bg-black/55 z-30"
             onClick={() => setSidebarOpen(false)}
           />
         )}

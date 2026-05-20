@@ -11,9 +11,11 @@ import {
   Building2,
   Calendar as CalendarIcon,
   Check,
+  CreditCard,
   Download,
   Loader2,
   Printer,
+  QrCode,
   Scissors,
   User,
 } from "lucide-react";
@@ -31,6 +33,12 @@ interface Servicio {
 }
 
 interface Empleado {
+  id: number;
+  first_name: string;
+  last_name: string;
+}
+
+interface EmpleadoApiItem {
   id: number;
   first_name: string;
   last_name: string;
@@ -88,6 +96,8 @@ export default function PagoFidelizacionPage() {
   const mpWindowRef = useRef<Window | null>(null);
   const mpTabCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [mpTabClosed, setMpTabClosed] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"link" | "qr">("link");
+  const [qrPaymentLink, setQrPaymentLink] = useState("");
   const [success, setSuccess] = useState(false);
   const [manualPaymentCode, setManualPaymentCode] = useState("");
   const [manualPaymentError, setManualPaymentError] = useState("");
@@ -127,9 +137,9 @@ export default function PagoFidelizacionPage() {
 
         if (empListRes.ok) {
           const data = await empListRes.json();
-          const lista = Array.isArray(data.results) ? data.results : data;
+          const lista = (Array.isArray(data.results) ? data.results : data) as EmpleadoApiItem[];
           const idBuscado = Number(empleadoId);
-          const encontrado = lista.find((e: any) => e.id === idBuscado);
+          const encontrado = lista.find((e) => e.id === idBuscado);
           if (encontrado) {
             setEmpleado({
               id: encontrado.id,
@@ -227,7 +237,7 @@ export default function PagoFidelizacionPage() {
 
   const calcularPrecioConDescuento = () => {
     if (!servicio) return 0;
-    let precio = parseFloat(servicio.precio || "0") || 0;
+    const precio = parseFloat(servicio.precio || "0") || 0;
     const monto = parseFloat(servicio.descuento_fidelizacion_monto || "0") || 0;
     const pct = parseFloat(servicio.descuento_fidelizacion_pct || "0") || 0;
 
@@ -261,8 +271,10 @@ export default function PagoFidelizacionPage() {
           fecha_hora: fechaHora,
           notas_cliente: "",
           usar_sena: true,
+          tipo_pago: "SENIA",
           creditos_a_aplicar: 0,
           aplicar_descuento_fidelizacion: true,
+          usar_qr: paymentMethod === "qr",
         }),
       });
 
@@ -285,30 +297,34 @@ export default function PagoFidelizacionPage() {
         return;
       }
 
-      const mpWin = window.open(result.init_point, "_blank");
-      mpWindowRef.current = mpWin;
+      const qrLink = result.qr_data || result.qr_init_point || "";
+      if (paymentMethod === "qr" && qrLink) {
+        setQrPaymentLink(qrLink);
+      } else {
+        const mpWin = window.open(result.init_point, "_blank");
+        mpWindowRef.current = mpWin;
+        if (mpWin) {
+          mpTabCheckRef.current = setInterval(() => {
+            if (mpWin.closed) {
+              clearInterval(mpTabCheckRef.current!);
+              mpTabCheckRef.current = null;
+              mpWindowRef.current = null;
+              if (pollingIntervalRef.current !== null) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+              }
+              setMpTabClosed(true);
+              setIsWaitingPayment(false);
+            }
+          }, 1000);
+        }
+      }
       setPreferenceId(result.preference_id);
       setIsWaitingPayment(true);
       setMpTabClosed(false);
-
-      if (mpWin) {
-        mpTabCheckRef.current = setInterval(() => {
-          if (mpWin.closed) {
-            clearInterval(mpTabCheckRef.current!);
-            mpTabCheckRef.current = null;
-            mpWindowRef.current = null;
-            if (pollingIntervalRef.current !== null) {
-              clearInterval(pollingIntervalRef.current);
-              pollingIntervalRef.current = null;
-            }
-            setMpTabClosed(true);
-            setIsWaitingPayment(false);
-          }
-        }, 1000);
-      }
-    } catch (e: any) {
+    } catch (e) {
       console.error("Error iniciando pago fidelización:", e);
-      setError(e?.message || "Error al iniciar el pago. Intentá nuevamente.");
+      setError(e instanceof Error ? e.message : "Error al iniciar el pago. Intentá nuevamente.");
     } finally {
       setLoading(false);
     }
@@ -335,6 +351,7 @@ export default function PagoFidelizacionPage() {
     setPreferenceId("");
     setManualPaymentCode("");
     setManualPaymentError("");
+    setQrPaymentLink("");
   };
 
   const confirmarCobroManual = async () => {
@@ -371,8 +388,8 @@ export default function PagoFidelizacionPage() {
       setIsWaitingPayment(false);
       setTurnoId(body.turno_id || null);
       setSuccess(true);
-    } catch (error: any) {
-      setManualPaymentError(error.message || "No se pudo forzar el pago.");
+    } catch (error) {
+      setManualPaymentError(error instanceof Error ? error.message : "No se pudo forzar el pago.");
     } finally {
       setConfirmingManualPayment(false);
     }
@@ -657,8 +674,18 @@ export default function PagoFidelizacionPage() {
                 </div>
                 <h2 className="text-xl font-bold">Esperando confirmación de pago...</h2>
                 <p className="text-gray-600 text-sm">
-                  Completá el pago en la pestaña de Mercado Pago. Esta pantalla se actualizará automáticamente.
+                  {qrPaymentLink ? 'Escaneá el QR con Mercado Pago. Esta pantalla se actualizará automáticamente.' : 'Completá el pago en la pestaña de Mercado Pago. Esta pantalla se actualizará automáticamente.'}
                 </p>
+                {qrPaymentLink && (
+                  <div className="rounded-xl border bg-white p-4 shadow-sm">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qrPaymentLink)}`}
+                      alt="QR de pago Mercado Pago"
+                      className="mx-auto h-56 w-56"
+                    />
+                    <p className="mt-2 text-xs text-gray-500">Mostrale este QR al cliente o escanealo desde la app.</p>
+                  </div>
+                )}
                 <div className="w-full rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
                   <Label htmlFor="manual-fidelizacion-code" className="text-sm text-amber-950">
                     Número de operación si MP no confirma
@@ -759,6 +786,27 @@ export default function PagoFidelizacionPage() {
             )}
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("link")}
+              className={`rounded-xl border p-4 text-left transition ${paymentMethod === "link" ? "border-purple-500 bg-purple-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+            >
+              <CreditCard className="mb-2 h-5 w-5 text-purple-600" />
+              <p className="font-semibold text-gray-900">Pagar con link</p>
+              <p className="text-sm text-gray-500">Abrimos Mercado Pago en una pestaña nueva.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("qr")}
+              className={`rounded-xl border p-4 text-left transition ${paymentMethod === "qr" ? "border-purple-500 bg-purple-50" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+            >
+              <QrCode className="mb-2 h-5 w-5 text-purple-600" />
+              <p className="font-semibold text-gray-900">Pagar por QR</p>
+              <p className="text-sm text-gray-500">Generamos un QR para cobrar la seña promocional.</p>
+            </button>
+          </div>
+
           <div className="pt-2 flex justify-end gap-3">
             <Button variant="outline" onClick={handleVolver} disabled={loading}>
               Cancelar
@@ -770,7 +818,7 @@ export default function PagoFidelizacionPage() {
                   Iniciando pago...
                 </>
               ) : (
-                "Confirmar y pagar"
+                paymentMethod === "qr" ? "Confirmar y generar QR" : "Confirmar y pagar"
               )}
             </Button>
           </div>

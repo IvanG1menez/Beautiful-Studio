@@ -2,7 +2,6 @@ import { FormEnterNavigation } from "@/components/FormEnterNavigation";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { QueryProvider } from "@/contexts/QueryProvider";
-import { ThemeProvider } from "@/contexts/ThemeContext";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -32,16 +31,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider>
-          <QueryProvider>
-            <AuthProvider>
-              <FormEnterNavigation>
-                {children}
-              </FormEnterNavigation>
-              <Toaster />
-            </AuthProvider>
-          </QueryProvider>
-        </ThemeProvider>
+        <QueryProvider>
+          <AuthProvider>
+            <FormEnterNavigation>
+              {children}
+            </FormEnterNavigation>
+            <Toaster />
+          </AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   );

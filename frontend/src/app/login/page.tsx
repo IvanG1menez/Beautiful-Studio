@@ -168,9 +168,9 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Mensaje de sesión expirada */}
               {sessionExpired && (
-                <Alert variant="default" className="bg-yellow-50 border-yellow-200 dark:bg-yellow-950/40 dark:border-yellow-700/60">
+                <Alert variant="default" className="bg-yellow-50 border-yellow-200">
                   <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  <AlertDescription className="text-yellow-800 dark:text-yellow-100">
+                  <AlertDescription className="text-yellow-800">
                     Tu sesión ha expirado por inactividad. Por favor, inicia sesión nuevamente.
                   </AlertDescription>
                 </Alert>

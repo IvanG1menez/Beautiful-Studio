@@ -19,6 +19,14 @@ from decimal import Decimal
 
 
 DIAG_PREFIX = "DIAG_PROCESOS"
+DIAG_CLIENTES = {
+    "opt_cancel": ("juan.perez@beautifulstudio.com", "Juan", "Perez"),
+    "opt_medio": ("agustin.lejano@beautifulstudio.com", "Agustin", "Lejano"),
+    "opt_lejano": ("manuel.maslejano@beautifulstudio.com", "Manuel", "MasLejano"),
+    "fid_saldo": ("jose.kziolvidado@beautifulstudio.com", "Jose", "Kziolvidado"),
+    "fid_descuento": ("pedro.olvidado@beautifulstudio.com", "Pedro", "Olvidado"),
+    "racha": ("rocio.fiel@beautifulstudio.com", "Rocio", "Fiel"),
+}
 
 
 @contextmanager
@@ -98,12 +106,14 @@ def _ensure_diag_cliente(email, first_name, last_name):
 
 
 def _clean_previous_diag_data(clientes):
+    from apps.clientes.models import Billetera, MovimientoBilletera
     from apps.emails.models import Notificacion
     from apps.turnos.models import (
         ClienteStreakStats,
         HistorialTurno,
         LogReasignacion,
         StreakAuditLog,
+        StreakCoupon,
         StreakExpiryAlertLog,
         StreakRewardEvent,
         Turno,
@@ -118,13 +128,27 @@ def _clean_previous_diag_data(clientes):
         LogReasignacion.objects.filter(turno_cancelado_id__in=turno_ids).delete()
         LogReasignacion.objects.filter(turno_ofrecido_id__in=turno_ids).delete()
         HistorialTurno.objects.filter(turno_id__in=turno_ids).delete()
+        StreakCoupon.objects.filter(used_turno_id__in=turno_ids).update(used_turno=None)
         StreakRewardEvent.objects.filter(turno_id__in=turno_ids).delete()
         StreakAuditLog.objects.filter(turno_id__in=turno_ids).delete()
         Turno.objects.filter(id__in=turno_ids).delete()
 
+    StreakCoupon.objects.filter(cliente__in=clientes).delete()
     ClienteStreakStats.objects.filter(cliente__in=clientes).delete()
     StreakExpiryAlertLog.objects.filter(cliente__in=clientes).delete()
     Notificacion.objects.filter(usuario__in=[cliente.user for cliente in clientes]).delete()
+    MovimientoBilletera.objects.filter(billetera__cliente__in=clientes).delete()
+    Billetera.objects.filter(cliente__in=clientes).delete()
+
+
+def _clean_all_diagnostic_clients():
+    from apps.clientes.models import Cliente
+
+    emails = [data[0] for data in DIAG_CLIENTES.values()]
+    clientes = list(Cliente.objects.filter(user__email__in=emails).select_related("user"))
+    if clientes:
+        _clean_previous_diag_data(clientes)
+    return {"clientes_afectados": len(clientes)}
 
 
 def _ensure_schedule(empleado):
@@ -147,7 +171,9 @@ def _prepare_config():
     config.margen_fidelizacion_dias = 45
     config.descuento_fidelizacion_pct = Decimal("15.00")
     config.streak_expiration_days = 180
-    config.streak_bonus_amount = Decimal("1000.00")
+    config.streak_bonus_amount = Decimal("3000.00")
+    config.streak_goal_count = 5
+    config.streak_coupon_expiration_days = 90
     config.streak_alert_days = [3, 1]
     config.save()
     return config
@@ -298,11 +324,10 @@ def _prepare_racha(empleado, servicio, cliente, config):
     return turno_hito
 
 
-def run():
+def _prepare_common_context():
     from apps.empleados.models import Empleado, EmpleadoServicio
     from apps.servicios.models import Servicio
 
-    print("\n=== Preparando diagnostico de procesos automaticos ===")
     _ensure_base_data()
 
     config = _prepare_config()
@@ -311,19 +336,86 @@ def run():
     servicio.tiempo_espera_respuesta = 15
     servicio.frecuencia_recurrencia_dias = 45
     servicio.bono_reacomodamiento_senia = Decimal("1000.00")
-    servicio.save(update_fields=["tiempo_espera_respuesta", "frecuencia_recurrencia_dias", "bono_reacomodamiento_senia"])
+    servicio.precio = Decimal("20000.00")
+    servicio.save(update_fields=["tiempo_espera_respuesta", "frecuencia_recurrencia_dias", "bono_reacomodamiento_senia", "precio"])
     EmpleadoServicio.objects.get_or_create(empleado=empleado, servicio=servicio)
     _ensure_schedule(empleado)
 
     clientes = {
-        "opt_cancel": _ensure_diag_cliente("diag.opt.cancel@beautifulstudio.com", "Olivia", "Cancelacion"),
-        "opt_medio": _ensure_diag_cliente("diag.opt.medio@beautifulstudio.com", "Martina", "Candidata"),
-        "opt_lejano": _ensure_diag_cliente("diag.opt.lejano@beautifulstudio.com", "Sofia", "Lejana"),
-        "fid_saldo": _ensure_diag_cliente("diag.fid.saldo@beautifulstudio.com", "Clara", "Con Saldo"),
-        "fid_descuento": _ensure_diag_cliente("diag.fid.descuento@beautifulstudio.com", "Paula", "Sin Saldo"),
-        "racha": _ensure_diag_cliente("diag.racha@beautifulstudio.com", "Rocio", "Fiel"),
+        key: _ensure_diag_cliente(email, first_name, last_name)
+        for key, (email, first_name, last_name) in DIAG_CLIENTES.items()
+    }
+    return config, empleado, servicio, clientes
+
+
+def prepare_optimizacion_data():
+    config, empleado, servicio, clientes = _prepare_common_context()
+    _clean_previous_diag_data([clientes["opt_cancel"], clientes["opt_medio"], clientes["opt_lejano"]])
+    turno_cancelado, turno_medio, turno_lejano = _prepare_optimizacion(
+        empleado,
+        servicio,
+        [clientes["opt_cancel"], clientes["opt_medio"], clientes["opt_lejano"]],
+        config,
+    )
+    return {
+        "mensaje": "Datos de optimización preparados correctamente.",
+        "optimizacion": {
+            "turno_cancelar_id": turno_cancelado.id,
+            "cliente_cancelar": clientes["opt_cancel"].user.email,
+            "candidato_lejano_id": turno_lejano.id,
+            "candidato_lejano": clientes["opt_lejano"].user.email,
+            "candidato_medio_id": turno_medio.id,
+            "candidato_medio": clientes["opt_medio"].user.email,
+            "candidato_lejano_fecha": turno_lejano.fecha_hora.isoformat(),
+            "candidato_medio_fecha": turno_medio.fecha_hora.isoformat(),
+        },
     }
 
+
+def prepare_fidelizacion_data():
+    config, empleado, servicio, clientes = _prepare_common_context()
+    _clean_previous_diag_data([clientes["fid_saldo"], clientes["fid_descuento"]])
+    turno_fid_saldo, turno_fid_descuento = _prepare_clientes_olvidados(
+        empleado,
+        servicio,
+        [clientes["fid_saldo"], clientes["fid_descuento"]],
+    )
+    return {
+        "mensaje": "Datos de clientes olvidados preparados correctamente.",
+        "fidelizacion": {
+            "dias_inactividad_sugeridos": int(config.margen_fidelizacion_dias or 45),
+            "cliente_con_saldo": clientes["fid_saldo"].user.email,
+            "cliente_sin_saldo": clientes["fid_descuento"].user.email,
+            "turno_con_saldo_id": turno_fid_saldo.id,
+            "turno_sin_saldo_id": turno_fid_descuento.id,
+        },
+    }
+
+
+def prepare_racha_data():
+    config, empleado, servicio, clientes = _prepare_common_context()
+    _clean_previous_diag_data([clientes["racha"]])
+    turno_racha = _prepare_racha(empleado, servicio, clientes["racha"], config)
+    return {
+        "mensaje": "Datos de racha preparados correctamente.",
+        "racha": {
+            "turno_completar_id": turno_racha.id,
+            "cliente": clientes["racha"].user.email,
+            "streak_inicial": 4,
+            "streak_goal_count": int(config.streak_goal_count or 5),
+        },
+    }
+
+
+def prepare_diagnostic_data(proceso=None):
+    if proceso == "optimizacion":
+        return prepare_optimizacion_data()
+    if proceso == "fidelizacion":
+        return prepare_fidelizacion_data()
+    if proceso == "racha":
+        return prepare_racha_data()
+
+    config, empleado, servicio, clientes = _prepare_common_context()
     _clean_previous_diag_data(list(clientes.values()))
 
     turno_cancelado, turno_medio, turno_lejano = _prepare_optimizacion(
@@ -339,19 +431,63 @@ def run():
     )
     turno_racha = _prepare_racha(empleado, servicio, clientes["racha"], config)
 
+    return {
+        "mensaje": "Datos de diagnóstico preparados correctamente.",
+        "optimizacion": {
+            "turno_cancelar_id": turno_cancelado.id,
+            "cliente_cancelar": clientes["opt_cancel"].user.email,
+            "candidato_lejano_id": turno_lejano.id,
+            "candidato_lejano": clientes["opt_lejano"].user.email,
+            "candidato_medio_id": turno_medio.id,
+            "candidato_medio": clientes["opt_medio"].user.email,
+            "candidato_lejano_fecha": turno_lejano.fecha_hora.isoformat(),
+            "candidato_medio_fecha": turno_medio.fecha_hora.isoformat(),
+        },
+        "fidelizacion": {
+            "dias_inactividad_sugeridos": int(config.margen_fidelizacion_dias or 45),
+            "cliente_con_saldo": clientes["fid_saldo"].user.email,
+            "cliente_sin_saldo": clientes["fid_descuento"].user.email,
+            "turno_con_saldo_id": turno_fid_saldo.id,
+            "turno_sin_saldo_id": turno_fid_descuento.id,
+        },
+        "racha": {
+            "turno_completar_id": turno_racha.id,
+            "cliente": clientes["racha"].user.email,
+            "streak_inicial": 4,
+            "streak_goal_count": int(config.streak_goal_count or 5),
+        },
+    }
+
+
+def clean_diagnostic_data():
+    return {
+        "mensaje": "Datos de diagnóstico eliminados correctamente.",
+        **_clean_all_diagnostic_clients(),
+    }
+
+
+def run():
+    print("\n=== Preparando diagnostico de procesos automaticos ===")
+    resultado = prepare_diagnostic_data()
+
+    turno_cancelado_id = resultado["optimizacion"]["turno_cancelar_id"]
+    turno_lejano_id = resultado["optimizacion"]["candidato_lejano_id"]
+    turno_medio_id = resultado["optimizacion"]["candidato_medio_id"]
+    turno_racha_id = resultado["racha"]["turno_completar_id"]
+
     print("\nEscenarios listos para http://localhost:3000/dashboard/propietario/diagnostico")
     print("\n1) Optimizacion de agenda")
-    print(f"   ID a pegar en 'ID del Turno a Cancelar': {turno_cancelado.id}")
-    print(f"   Candidato mas lejano esperado primero: turno {turno_lejano.id} ({_fmt_dt(turno_lejano.fecha_hora)})")
-    print(f"   Candidato siguiente al simular no respuesta: turno {turno_medio.id} ({_fmt_dt(turno_medio.fecha_hora)})")
+    print(f"   ID a pegar en 'ID del Turno a Cancelar': {turno_cancelado_id}")
+    print(f"   Candidato mas lejano esperado primero: turno {turno_lejano_id}")
+    print(f"   Candidato siguiente al simular no respuesta: turno {turno_medio_id}")
 
     print("\n2) Clientes olvidados")
     print("   Dejar vacio 'Dias de Inactividad' o usar 45.")
-    print(f"   Cliente con saldo: {clientes['fid_saldo'].user.email} (turno ref {turno_fid_saldo.id})")
-    print(f"   Cliente sin saldo: {clientes['fid_descuento'].user.email} (turno ref {turno_fid_descuento.id})")
+    print(f"   Cliente con saldo: {resultado['fidelizacion']['cliente_con_saldo']} (turno ref {resultado['fidelizacion']['turno_con_saldo_id']})")
+    print(f"   Cliente sin saldo: {resultado['fidelizacion']['cliente_sin_saldo']} (turno ref {resultado['fidelizacion']['turno_sin_saldo_id']})")
 
     print("\n3) Fidelidad por rachas")
-    print(f"   ID a pegar en 'ID del Turno a Completar': {turno_racha.id}")
+    print(f"   ID a pegar en 'ID del Turno a Completar': {turno_racha_id}")
     print("   El cliente queda con racha=4; al completar este turno llega al hito 5.")
     print("\nCredenciales utiles:")
     print("   propietario@beautifulstudio.com / admin123")
