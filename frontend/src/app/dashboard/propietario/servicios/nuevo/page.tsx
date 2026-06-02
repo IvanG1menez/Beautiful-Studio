@@ -3,7 +3,7 @@
 import { CategoriaOption, ServicioForm, ServicioFormValues } from '@/components/ServicioForm';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2, Scissors } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -11,8 +11,18 @@ import { useEffect, useState } from 'react';
 interface CategoriaApiItem {
   id: number;
   nombre: string;
+  descripcion?: string;
+  sala_nombre?: string;
   is_active: boolean;
 }
+
+const parseMoney = (value: string) => {
+  const normalized = value
+    .replace(/\s/g, '')
+    .replace(/\.(?=\d{3}(\D|$))/g, '')
+    .replace(',', '.');
+  return parseFloat(normalized) || 0;
+};
 
 export default function NuevoServicioPage() {
   const router = useRouter();
@@ -32,7 +42,14 @@ export default function NuevoServicioPage() {
         if (response.ok) {
           const data = await response.json() as { results?: CategoriaApiItem[] } | CategoriaApiItem[];
           const categoriasData = Array.isArray(data) ? data : (data.results || []);
-          const categoriasActivas = categoriasData.filter((cat) => cat.is_active);
+          const categoriasActivas = categoriasData
+            .filter((cat) => cat.is_active)
+            .map((cat) => ({
+              id: cat.id,
+              nombre: cat.nombre,
+              descripcion: cat.descripcion || '',
+              sala_nombre: cat.sala_nombre,
+            }));
           setCategorias(categoriasActivas);
         } else {
           console.error('Error al cargar categorías');
@@ -50,27 +67,27 @@ export default function NuevoServicioPage() {
     setLoading(true);
 
     try {
-      const precio = parseFloat(values.precio);
+      const precio = parseMoney(values.precio);
       const duracion = parseInt(values.duracion_minutos, 10);
-      const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseFloat(values.valor_descuento_adelanto);
+      const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseMoney(values.valor_descuento_adelanto);
       const tiempoEspera = values.tiempo_espera_respuesta === '' ? 15 : parseInt(values.tiempo_espera_respuesta, 10);
       const porcentajeSena = 50;
-      const montoSenaFijo = values.monto_sena_fijo === '' ? 0 : parseFloat(values.monto_sena_fijo);
+      const montoSenaFijo = values.monto_sena_fijo === '' ? 0 : parseMoney(values.monto_sena_fijo);
       const horasMinimasCredito = values.horas_minimas_credito_cancelacion === ''
         ? 24
         : parseInt(values.horas_minimas_credito_cancelacion, 10);
-      const porcentajeDevolucionSena = 100;
-      const porcentajeDevolucionServicioCompleto = 100;
+      const porcentajeDevolucionSena = parseFloat(values.porcentaje_devolucion_sena || '0');
+      const porcentajeDevolucionServicioCompleto = parseFloat(values.porcentaje_devolucion_servicio_completo || '0');
 
       const descuentoFidelizacionMonto = values.descuento_fidelizacion_monto === ''
         ? 0
-        : parseFloat(values.descuento_fidelizacion_monto);
+        : parseMoney(values.descuento_fidelizacion_monto);
       const bonoReacomodamientoSenia = values.bono_reacomodamiento_senia === ''
         ? 0
-        : parseFloat(values.bono_reacomodamiento_senia);
+        : parseMoney(values.bono_reacomodamiento_senia);
       const bonoReacomodamientoPagoCompleto = values.bono_reacomodamiento_pago_completo === ''
         ? 0
-        : parseFloat(values.bono_reacomodamiento_pago_completo);
+        : parseMoney(values.bono_reacomodamiento_pago_completo);
 
       const dataToSend = {
         nombre: values.nombre,
@@ -96,7 +113,7 @@ export default function NuevoServicioPage() {
 
       const response = await fetch('/api/servicios/', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify(dataToSend),
       });
 
@@ -186,7 +203,7 @@ export default function NuevoServicioPage() {
           tipo_descuento_adelanto: 'MONTO_FIJO',
           valor_descuento_adelanto: '',
           bono_reacomodamiento_senia: '1000',
-          bono_reacomodamiento_pago_completo: '2000',
+          bono_reacomodamiento_pago_completo: '1000',
           tiempo_espera_respuesta: '15',
           porcentaje_sena: '',
           monto_sena_fijo: '',

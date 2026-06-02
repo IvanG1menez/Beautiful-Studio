@@ -477,6 +477,42 @@ def diagnostico_fidelizacion_clientes(request):
         except Cliente.DoesNotExist:
             continue
 
+    # Si el panel preparó el escenario de clientes olvidados, usamos esos dos
+    # turnos explícitamente para evitar cruces con otros turnos futuros/reales
+    # que puedan modificar el "último turno" del cliente.
+    turnos_diag_fidelizacion = list(
+        Turno.objects.filter(
+            notas_cliente__startswith="DIAG_PROCESOS_FID_",
+            estado="completado",
+        )
+        .select_related("cliente__user", "servicio", "empleado__user")
+        .order_by("cliente_id", "-fecha_hora")
+    )
+    if turnos_diag_fidelizacion:
+        candidatos_por_cliente = {}
+        for turno_diag in turnos_diag_fidelizacion:
+            candidatos_por_cliente.setdefault(turno_diag.cliente_id, turno_diag)
+
+        clientes_candidatos = []
+        for turno_diag in candidatos_por_cliente.values():
+            fecha_ref = turno_diag.fecha_hora_completado or turno_diag.fecha_hora
+            dias_sin_turno = (timezone.now() - fecha_ref).days
+            umbral_dias = (
+                dias_inactividad_filtro
+                if dias_inactividad_filtro is not None
+                else config_global.margen_fidelizacion_dias
+            )
+            clientes_candidatos.append(
+                {
+                    "cliente": turno_diag.cliente,
+                    "servicio": turno_diag.servicio,
+                    "dias_sin_turno": dias_sin_turno,
+                    "umbral_usado": umbral_dias,
+                    "turno_ref_id": turno_diag.id,
+                    "forzar_diagnostico": True,
+                }
+            )
+
     # PASO 2: Enviar invitaciones (si está habilitado)
     resultados = []
     emails_enviados = 0
@@ -530,16 +566,23 @@ def diagnostico_fidelizacion_clientes(request):
                     )
                 else:
                     # Buscar el último turno completado de este cliente para el servicio
-                    turno_ref = (
-                        Turno.objects.filter(
-                            cliente=cliente,
-                            servicio=servicio,
-                            estado="completado",
+                    if candidato.get("turno_ref_id"):
+                        turno_ref = (
+                            Turno.objects.filter(id=candidato["turno_ref_id"])
+                            .select_related("empleado__user")
+                            .first()
                         )
-                        .select_related("empleado__user")
-                        .order_by("-fecha_hora")
-                        .first()
-                    )
+                    else:
+                        turno_ref = (
+                            Turno.objects.filter(
+                                cliente=cliente,
+                                servicio=servicio,
+                                estado="completado",
+                            )
+                            .select_related("empleado__user")
+                            .order_by("-fecha_hora")
+                            .first()
+                        )
 
                     if not turno_ref or not turno_ref.empleado:
                         resultado_cliente["email_enviado"] = False
@@ -571,7 +614,7 @@ def diagnostico_fidelizacion_clientes(request):
                             resultado_cliente["email_error"] = (
                                 "Profesional no realiza este servicio"
                             )
-                        elif Notificacion.objects.filter(
+                        elif not candidato.get("forzar_diagnostico") and Notificacion.objects.filter(
                             usuario=cliente.user,
                             tipo="fidelizacion",
                             data__servicio_id=servicio.id,
@@ -583,6 +626,18 @@ def diagnostico_fidelizacion_clientes(request):
                             resultado_cliente["email_status"] = "simulado"
                             resultado_cliente["email_error"] = (
                                 "Ya se envió una notificación en este ciclo"
+                            )
+                        elif Turno.objects.filter(
+                            cliente=cliente,
+                            servicio=servicio,
+                            empleado=empleado,
+                            fecha_hora__gte=timezone.now(),
+                            estado__in=["pendiente", "confirmado", "en_proceso"],
+                        ).exists():
+                            resultado_cliente["email_enviado"] = False
+                            resultado_cliente["email_status"] = "simulado"
+                            resultado_cliente["email_error"] = (
+                                "El cliente ya tiene un turno futuro para este servicio"
                             )
                         else:
                             # Buscar próximo horario disponible

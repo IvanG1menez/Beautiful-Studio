@@ -21,7 +21,8 @@ class ReasignacionReglasPagoTest(TestCase):
     def setUp(self):
         config = ConfiguracionGlobal.get_config()
         config.min_horas_cancelacion_credito = 24
-        config.save(update_fields=["min_horas_cancelacion_credito"])
+        config.dias_rango_reprogramacion = 14
+        config.save(update_fields=["min_horas_cancelacion_credito", "dias_rango_reprogramacion"])
 
         self.servicio = Servicio(
             bono_reacomodamiento_senia=Decimal("1000.00"),
@@ -367,6 +368,25 @@ class ReprogramacionTurnoAPITest(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("24 horas", response.data.get("error", ""))
         self.assertIn("El monto del Servicio Reprog", response.data.get("error", ""))
+
+    def test_cliente_no_puede_reprogramar_fuera_del_rango_configurado(self):
+        self.client_api.force_authenticate(self.user_cliente)
+        config = ConfiguracionGlobal.get_config()
+        config.dias_rango_reprogramacion = 7
+        config.save(update_fields=["dias_rango_reprogramacion"])
+
+        nueva_fecha = timezone.now() + timedelta(days=8)
+        while nueva_fecha.weekday() == 6:
+            nueva_fecha += timedelta(days=1)
+
+        response = self.client_api.post(
+            f"/api/turnos/{self.turno.id}/reprogramar/",
+            {"nueva_fecha_hora": nueva_fecha.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("próximos 7 días", response.data.get("error", ""))
 
     def test_cliente_reprograma_fuera_de_24h_con_alerta_y_auditoria(self):
         self.client_api.force_authenticate(self.user_cliente)

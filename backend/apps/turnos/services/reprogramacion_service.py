@@ -44,49 +44,40 @@ def _esta_en_ventana_sin_penalidad(turno: Turno, ahora) -> bool:
     return ahora <= limite
 
 
-def validar_limite_reprogramacion_cliente_servicio(turno: Turno, ahora=None) -> None:
-    """Permite una reprogramacion por servicio y cliente por mes calendario."""
-    estado = obtener_estado_limite_reprogramacion_cliente_servicio(turno, ahora)
+def validar_rango_reprogramacion(turno: Turno, fecha_hora_nueva, ahora=None) -> None:
+    """Valida que la nueva fecha este dentro del rango configurado."""
+    estado = obtener_estado_rango_reprogramacion(turno, fecha_hora_nueva, ahora)
     if not estado["puede_reprogramar"]:
         raise ValueError(estado["motivo"])
 
 
-def obtener_estado_limite_reprogramacion_cliente_servicio(turno: Turno, ahora=None) -> dict:
-    """Devuelve el estado del limite mensual sin lanzar excepciones."""
+def obtener_estado_rango_reprogramacion(turno: Turno, fecha_hora_nueva=None, ahora=None) -> dict:
+    """Devuelve el estado del rango permitido sin lanzar excepciones."""
     ahora = ahora or timezone.now()
-    inicio_mes = ahora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     config = ConfiguracionGlobal.get_config()
-    limite_mensual = max(1, int(getattr(config, "max_reprogramaciones_mensuales", 1) or 1))
-    reprogramaciones_mes = HistorialTurno.objects.filter(
-        turno__cliente_id=turno.cliente_id,
-        turno__servicio_id=turno.servicio_id,
-        accion="Reprogramacion de turno",
-        created_at__gte=inicio_mes,
-    ).exclude(
-        turno__notas_cliente__startswith="[TEST_REPROGRAMACION]"
-    ).count()
+    dias_rango = int(getattr(config, "dias_rango_reprogramacion", 14) or 14)
+    if dias_rango not in (7, 14):
+        dias_rango = 14
 
-    if reprogramaciones_mes >= limite_mensual:
-        servicio_nombre = getattr(turno.servicio, "nombre", "este servicio")
-        limite_texto = "una vez" if limite_mensual == 1 else f"{limite_mensual} veces"
+    fecha_maxima = ahora + timedelta(days=dias_rango)
+
+    if fecha_hora_nueva and fecha_hora_nueva > fecha_maxima:
         return {
             "puede_reprogramar": False,
-            "codigo": "limite_mensual_servicio",
-            "usadas": reprogramaciones_mes,
-            "limite": limite_mensual,
-            "restantes": 0,
+            "codigo": "fuera_rango_reprogramacion",
+            "dias_rango": dias_rango,
+            "fecha_maxima": fecha_maxima,
             "motivo": (
-                f"Ya reprogramaste {servicio_nombre} {limite_texto} este mes. "
-                "Podras volver a reprogramar este servicio el mes siguiente."
+                f"Solo podés reprogramar dentro de los próximos {dias_rango} días. "
+                "Elegí una fecha dentro del rango permitido."
             ),
         }
 
     return {
         "puede_reprogramar": True,
         "codigo": "disponible",
-        "usadas": reprogramaciones_mes,
-        "limite": limite_mensual,
-        "restantes": max(0, limite_mensual - reprogramaciones_mes),
+        "dias_rango": dias_rango,
+        "fecha_maxima": fecha_maxima,
         "motivo": "",
     }
 
@@ -211,9 +202,6 @@ def reprogramar_turno(
 
     _validar_turno_reprogramable(turno)
     _validar_sin_oferta_reasignacion_activa(turno, ahora)
-    if hasattr(usuario, "cliente_profile"):
-        validar_limite_reprogramacion_cliente_servicio(turno, ahora)
-
     en_ventana = _esta_en_ventana_sin_penalidad(turno, ahora)
     servicio_nombre = getattr(turno.servicio, "nombre", "servicio")
     monto_servicio = Decimal(str(getattr(turno.servicio, "precio", 0) or 0))
@@ -228,6 +216,9 @@ def reprogramar_turno(
 
     if fecha_hora_nueva <= ahora:
         raise ValueError("No se puede reprogramar un turno en el pasado.")
+
+    if hasattr(usuario, "cliente_profile"):
+        validar_rango_reprogramacion(turno, fecha_hora_nueva, ahora)
 
     if fecha_hora_nueva == turno.fecha_hora:
         raise ValueError("La nueva fecha y hora debe ser distinta de la actual.")

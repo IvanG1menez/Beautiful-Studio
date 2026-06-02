@@ -11,6 +11,7 @@ from .views import (
     claim_streak_coupon_view,
     validate_streak_coupon_view,
     active_reasignacion_offer_view,
+    active_fidelizacion_offer_view,
 )
 
 router = DefaultRouter()
@@ -41,6 +42,11 @@ urlpatterns = [
         "me/reacomodamiento-activo/",
         active_reasignacion_offer_view,
         name="active-reasignacion-offer",
+    ),
+    path(
+        "me/fidelizacion-activa/",
+        active_fidelizacion_offer_view,
+        name="active-fidelizacion-offer",
     ),
     # Endpoints del ViewSet
     path("", include(router.urls)),

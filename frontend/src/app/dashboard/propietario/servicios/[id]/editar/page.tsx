@@ -2,7 +2,7 @@
 
 import { CategoriaOption, ServicioForm, ServicioFormValues } from '@/components/ServicioForm';
 import { Button } from '@/components/ui/button';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -10,6 +10,8 @@ import { useEffect, useState } from 'react';
 interface CategoriaApiItem {
   id: number;
   nombre: string;
+  descripcion?: string;
+  sala_nombre?: string;
   is_active: boolean;
 }
 
@@ -36,6 +38,14 @@ interface Servicio {
   descuento_fidelizacion_pct: number;
   descuento_fidelizacion_monto: number;
 }
+
+const parseMoney = (value: string) => {
+  const normalized = value
+    .replace(/\s/g, '')
+    .replace(/\.(?=\d{3}(\D|$))/g, '')
+    .replace(',', '.');
+  return parseFloat(normalized) || 0;
+};
 
 export default function EditarServicioPage() {
   const router = useRouter();
@@ -65,7 +75,14 @@ export default function EditarServicioPage() {
           const categoriasArray = Array.isArray(categoriasData)
             ? categoriasData
             : (categoriasData.results || []);
-          const categoriasActivas = categoriasArray.filter((cat) => cat.is_active);
+          const categoriasActivas = categoriasArray
+            .filter((cat) => cat.is_active)
+            .map((cat) => ({
+              id: cat.id,
+              nombre: cat.nombre,
+              descripcion: cat.descripcion || '',
+              sala_nombre: cat.sala_nombre,
+            }));
           setCategorias(categoriasActivas);
         }
 
@@ -94,7 +111,7 @@ export default function EditarServicioPage() {
 
           // Calcular monto estimado de seña a partir del porcentaje guardado
           let montoSena = 0;
-          if ((servicio.porcentaje_sena ?? 0) > 0 && precioNumero > 0) {
+          if (Number(servicio.porcentaje_sena ?? 0) > 0 && precioNumero > 0) {
             montoSena = (Number(servicio.porcentaje_sena) / 100) * precioNumero;
           }
 
@@ -107,8 +124,8 @@ export default function EditarServicioPage() {
             is_active: servicio.is_active,
             tipo_descuento_adelanto: 'MONTO_FIJO',
             valor_descuento_adelanto: descuentoAdelantoMonto.toString(),
-            bono_reacomodamiento_senia: (servicio.bono_reacomodamiento_senia ?? 1000).toString(),
-            bono_reacomodamiento_pago_completo: (servicio.bono_reacomodamiento_pago_completo ?? 2000).toString(),
+            bono_reacomodamiento_senia: (servicio.bono_reacomodamiento_senia ?? servicio.bono_reacomodamiento_pago_completo ?? 1000).toString(),
+            bono_reacomodamiento_pago_completo: (servicio.bono_reacomodamiento_senia ?? servicio.bono_reacomodamiento_pago_completo ?? 1000).toString(),
             tiempo_espera_respuesta: servicio.tiempo_espera_respuesta?.toString?.() || servicio.tiempo_espera_respuesta?.toString() || '15',
             porcentaje_sena: montoSena ? montoSena.toFixed(2) : '',
             monto_sena_fijo: (servicio.monto_sena_fijo ?? montoSena).toString(),
@@ -143,27 +160,27 @@ export default function EditarServicioPage() {
     setLoading(true);
 
     try {
-      const precio = parseFloat(values.precio);
+      const precio = parseMoney(values.precio);
       const duracion = parseInt(values.duracion_minutos, 10);
-      const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseFloat(values.valor_descuento_adelanto);
+      const descuentoValor = values.valor_descuento_adelanto === '' ? 0 : parseMoney(values.valor_descuento_adelanto);
       const tiempoEspera = values.tiempo_espera_respuesta === '' ? 15 : parseInt(values.tiempo_espera_respuesta, 10);
       const porcentajeSena = 50;
-      const montoSenaFijo = values.monto_sena_fijo === '' ? 0 : parseFloat(values.monto_sena_fijo);
+      const montoSenaFijo = values.monto_sena_fijo === '' ? 0 : parseMoney(values.monto_sena_fijo);
       const horasMinimasCredito = values.horas_minimas_credito_cancelacion === ''
         ? 24
         : parseInt(values.horas_minimas_credito_cancelacion, 10);
-      const porcentajeDevolucionSena = 100;
-      const porcentajeDevolucionServicioCompleto = 100;
+      const porcentajeDevolucionSena = parseFloat(values.porcentaje_devolucion_sena || '0');
+      const porcentajeDevolucionServicioCompleto = parseFloat(values.porcentaje_devolucion_servicio_completo || '0');
 
       const descuentoFidelizacionMonto = values.descuento_fidelizacion_monto === ''
         ? 0
-        : parseFloat(values.descuento_fidelizacion_monto);
+        : parseMoney(values.descuento_fidelizacion_monto);
       const bonoReacomodamientoSenia = values.bono_reacomodamiento_senia === ''
         ? 0
-        : parseFloat(values.bono_reacomodamiento_senia);
+        : parseMoney(values.bono_reacomodamiento_senia);
       const bonoReacomodamientoPagoCompleto = values.bono_reacomodamiento_pago_completo === ''
         ? 0
-        : parseFloat(values.bono_reacomodamiento_pago_completo);
+        : parseMoney(values.bono_reacomodamiento_pago_completo);
 
       const dataToSend = {
         nombre: values.nombre,
@@ -189,7 +206,7 @@ export default function EditarServicioPage() {
 
       const response = await fetch(`/api/servicios/${servicioId}/`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify(dataToSend),
       });
 

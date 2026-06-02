@@ -8,10 +8,11 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.authentication.models import ConfiguracionGlobal
+from apps.clientes.models import Billetera
 from apps.turnos.models import Turno
 from apps.turnos.services.cancelacion_service import cancelar_turno_para_cliente
 from apps.turnos.services.reprogramacion_service import (
-    obtener_estado_limite_reprogramacion_cliente_servicio,
+    obtener_estado_rango_reprogramacion,
     reprogramar_turno,
 )
 from apps.turnos.views import TurnoViewSet
@@ -459,20 +460,35 @@ class TelegramBotService:
         self.send_message(chat_id, f"Hola {nombre} ✨\n¿En que te ayudo hoy?")
 
     def send_account_status(self, chat_id, link):
-        estado = "Vinculada" if link.is_verified else "Pendiente"
+        cliente = getattr(link, "cliente", None)
+        saldo = "0.00"
+        racha = 0
         telefono = link.phone_snapshot or "No registrado"
+
+        if cliente:
+            try:
+                saldo = f"{Billetera.objects.get(cliente=cliente).saldo:.2f}"
+            except Billetera.DoesNotExist:
+                saldo = "0.00"
+
+            stats = getattr(cliente, "streak_stats", None)
+            if stats:
+                racha = int(stats.streak_count or 0)
+
+            if getattr(cliente, "user", None) and cliente.user.phone:
+                telefono = cliente.user.phone
+
         text = (
             "💼 Estado de tu cuenta\n\n"
-            f"• Vinculacion: {estado}\n"
+            f"• Saldo disponible: ${saldo}\n"
+            f"• Racha de turnos: {racha} completados\n"
             f"• Telefono: {telefono}\n\n"
-            "Si queres actualizar tus datos, hacelo desde tu perfil web y despues volve al menu."
+            f"Para ver mas detalles, visita tu panel web:\n{self._web_panel_url()}"
         )
         self.send_message(
             chat_id,
             text,
-            reply_markup={
-                "inline_keyboard": [[{"text": "⬅️ Volver al menu", "callback_data": "menu:home"}]]
-            },
+            reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
         )
 
     def send_help(self, chat_id):
@@ -540,7 +556,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     "📭 No tenes turnos proximos por ahora.\n\n"
-                    "Si queres reservar o revisar mas opciones, visita tu panel web."
+                    f"Si queres reservar o revisar mas opciones, visita tu panel web:\n{self._web_panel_url()}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
@@ -579,7 +595,7 @@ class TelegramBotService:
                 (
                     "⏳ No hay turnos cancelables ahora.\n"
                     "La cancelacion por Telegram respeta la anticipacion minima configurada.\n\n"
-                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                    f"Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local:\n{self._web_panel_url()}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
@@ -631,7 +647,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     "📭 No tenes turnos proximos para reprogramar.\n\n"
-                    "Si queres reservar o revisar mas opciones, visita tu panel web."
+                    f"Si queres reservar o revisar mas opciones, visita tu panel web:\n{self._web_panel_url()}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
@@ -660,7 +676,7 @@ class TelegramBotService:
                 text += "\n\n" + "\n".join(blocked_lines[:5])
             text += (
                 "\n\n¿No encontras una fecha que te quede bien o necesitas otra alternativa? "
-                "Visita tu panel web para ver mas opciones."
+                f"Visita tu panel web para ver mas opciones:\n{self._web_panel_url()}"
             )
             self.send_message(
                 chat_id,
@@ -674,7 +690,7 @@ class TelegramBotService:
         if blocked_lines:
             text += (
                 "\n\nAlgunos turnos no aparecen porque requieren gestion desde la web. "
-                "Si no encontras una fecha que te quede bien, visita tu panel."
+                f"Si no encontras una fecha que te quede bien, visita tu panel:\n{self._web_panel_url()}"
             )
         self.send_message(chat_id, text, reply_markup={"inline_keyboard": keyboard_rows})
 
@@ -728,7 +744,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     f"No encontre fechas proximas disponibles con {profesional}.\n"
-                    "¿No encontras una fecha que te quede bien? Visita tu panel web para ver otros profesionales o mas opciones."
+                    f"¿No encontras una fecha que te quede bien? Visita tu panel web para ver otros profesionales o mas opciones:\n{self._reprogram_web_url(turno)}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._reprogram_web_url(turno)),
             )
@@ -764,7 +780,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     "No quedan horarios disponibles ese dia. Elegi otra fecha.\n\n"
-                    "¿No encontras una fecha que te quede bien? Visita tu panel web para ver mas opciones."
+                    f"¿No encontras una fecha que te quede bien? Visita tu panel web para ver mas opciones:\n{self._reprogram_web_url(turno)}"
                 ),
             )
             self.send_reprogram_dates(chat_id, turno)
@@ -865,7 +881,7 @@ class TelegramBotService:
         if turno.estado in ["cancelado", "completado", "no_asistio", "pendiente_manual", "oferta_enviada", "expirada"]:
             return False, "este turno no se puede reprogramar por su estado actual"
 
-        estado_limite = obtener_estado_limite_reprogramacion_cliente_servicio(turno)
+        estado_limite = obtener_estado_rango_reprogramacion(turno)
         if not estado_limite["puede_reprogramar"]:
             return False, estado_limite["motivo"]
 
@@ -882,7 +898,7 @@ class TelegramBotService:
             (
                 "Este turno no puede reprogramarse desde Telegram.\n\n"
                 f"Motivo: {reason}.\n\n"
-                "¿No encontras una fecha que te quede bien o necesitas resolverlo igual? Entra a tu panel web:"
+                f"¿No encontras una fecha que te quede bien o necesitas resolverlo igual? Entra a tu panel web:\n{self._reprogram_web_url(turno)}"
             ),
             reply_markup={
                 "inline_keyboard": self._web_or_menu_keyboard(self._reprogram_web_url(turno))["inline_keyboard"]
@@ -911,8 +927,11 @@ class TelegramBotService:
             and "127.0.0.1" not in value
         )
 
-    def _next_available_dates(self, turno, limit=5, days_ahead=30):
+    def _next_available_dates(self, turno, limit=5, days_ahead=None):
         dates = []
+        if days_ahead is None:
+            estado_rango = obtener_estado_rango_reprogramacion(turno)
+            days_ahead = int(estado_rango.get("dias_rango") or 14)
         today = timezone.localdate()
         for offset in range(days_ahead + 1):
             candidate = today + timedelta(days=offset)
@@ -982,7 +1001,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     "Este turno ya no se puede cancelar desde Telegram por la politica de anticipacion.\n\n"
-                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                    f"Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local:\n{self._web_panel_url()}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
@@ -1047,7 +1066,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     "Este turno ya no se puede cancelar desde Telegram por la politica de anticipacion.\n\n"
-                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                    f"Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local:\n{self._web_panel_url()}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )
@@ -1105,7 +1124,7 @@ class TelegramBotService:
                 chat_id,
                 (
                     "Este turno ya no se puede cancelar desde Telegram por la politica de anticipacion.\n\n"
-                    "Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local."
+                    f"Si necesitas ayuda con un caso especial, visita tu panel web o contacta al local:\n{self._web_panel_url()}"
                 ),
                 reply_markup=self._web_or_menu_keyboard(self._web_panel_url()),
             )

@@ -74,12 +74,23 @@ interface ComprobanteTurno {
 
 const API_BASE_URL = "/api";
 
+const parseMoney = (value?: string | number | null) => {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return value;
+  const normalized = value
+    .replace(/\s/g, "")
+    .replace(/\.(?=\d{3}(\D|$))/g, "")
+    .replace(",", ".");
+  return Number(normalized) || 0;
+};
+
 export default function PagoFidelizacionPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const servicioId = searchParams.get("servicio");
   const empleadoId = searchParams.get("empleado");
+  const clienteId = searchParams.get("cliente");
   const fecha = searchParams.get("fecha");
   const hora = searchParams.get("hora");
 
@@ -102,6 +113,7 @@ export default function PagoFidelizacionPage() {
   const [manualPaymentCode, setManualPaymentCode] = useState("");
   const [manualPaymentError, setManualPaymentError] = useState("");
   const [confirmingManualPayment, setConfirmingManualPayment] = useState(false);
+  const [fechaHoraReserva, setFechaHoraReserva] = useState("");
   const comprobanteRef = useRef<HTMLDivElement | null>(null);
 
   // Cargar datos de servicio y profesional
@@ -237,9 +249,9 @@ export default function PagoFidelizacionPage() {
 
   const calcularPrecioConDescuento = () => {
     if (!servicio) return 0;
-    const precio = parseFloat(servicio.precio || "0") || 0;
-    const monto = parseFloat(servicio.descuento_fidelizacion_monto || "0") || 0;
-    const pct = parseFloat(servicio.descuento_fidelizacion_pct || "0") || 0;
+    const precio = parseMoney(servicio.precio);
+    const monto = parseMoney(servicio.descuento_fidelizacion_monto);
+    const pct = parseMoney(servicio.descuento_fidelizacion_pct);
 
     if (monto > 0) {
       return Math.max(0, precio - monto);
@@ -266,6 +278,7 @@ export default function PagoFidelizacionPage() {
         method: "POST",
         headers: getJsonAuthHeaders(),
         body: JSON.stringify({
+          cliente_id: clienteId ? Number(clienteId) : undefined,
           servicio_id: servicio.id,
           empleado_id: empleado.id,
           fecha_hora: fechaHora,
@@ -287,6 +300,7 @@ export default function PagoFidelizacionPage() {
       }
 
       const result = await response.json();
+      setFechaHoraReserva(result.fecha_hora || fechaHora);
 
       if (result.status === "free") {
         if (result.turno_id) {
@@ -352,14 +366,15 @@ export default function PagoFidelizacionPage() {
     setManualPaymentCode("");
     setManualPaymentError("");
     setQrPaymentLink("");
+    setFechaHoraReserva("");
   };
 
   const confirmarCobroManual = async () => {
-    const codigoLimpio = manualPaymentCode.trim();
-    if (!preferenceId || !codigoLimpio) {
-      setManualPaymentError("Ingresá el número de operación que figura en Mercado Pago.");
+    if (!preferenceId) {
+      setManualPaymentError("No hay una preferencia activa para registrar.");
       return;
     }
+    const codigoLimpio = manualPaymentCode.trim() || `EMERG-${Date.now()}`;
 
     setConfirmingManualPayment(true);
     setManualPaymentError("");
@@ -371,13 +386,24 @@ export default function PagoFidelizacionPage() {
         body: JSON.stringify({
           preference_id: preferenceId,
           payment_id: codigoLimpio,
-          motivo: "Pago fidelización forzado por cliente",
+          motivo: "Pago fidelización registrado manualmente por emergencia",
+          reserva: {
+            cliente_id: clienteId ? Number(clienteId) : undefined,
+            servicio_id: servicio?.id,
+            empleado_id: empleado?.id,
+            fecha_hora: fechaHoraReserva || (fecha && hora ? `${fecha}T${hora}:00` : undefined),
+            notas_cliente: "",
+            usar_sena: true,
+            tipo_pago: "SENIA",
+            creditos_a_aplicar: 0,
+            aplicar_descuento_fidelizacion: true,
+          },
         }),
       });
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || body.error || "No se pudo forzar el pago.");
+        throw new Error(body.detail || body.error || "No se pudo registrar el pago manual.");
       }
 
       const body = await response.json();
@@ -389,7 +415,7 @@ export default function PagoFidelizacionPage() {
       setTurnoId(body.turno_id || null);
       setSuccess(true);
     } catch (error) {
-      setManualPaymentError(error instanceof Error ? error.message : "No se pudo forzar el pago.");
+      setManualPaymentError(error instanceof Error ? error.message : "No se pudo registrar el pago manual.");
     } finally {
       setConfirmingManualPayment(false);
     }
@@ -686,33 +712,39 @@ export default function PagoFidelizacionPage() {
                     <p className="mt-2 text-xs text-gray-500">Mostrale este QR al cliente o escanealo desde la app.</p>
                   </div>
                 )}
-                <div className="w-full rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
-                  <Label htmlFor="manual-fidelizacion-code" className="text-sm text-amber-950">
-                    Número de operación si MP no confirma
-                  </Label>
-                  <div className="mt-2 flex gap-2">
-                    <Input
-                      id="manual-fidelizacion-code"
-                      value={manualPaymentCode}
-                      onChange={(event) => setManualPaymentCode(event.target.value.replace(/\D/g, ""))}
-                      placeholder="Ej: 1234567890"
-                      disabled={confirmingManualPayment}
-                      className="bg-white"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={confirmarCobroManual}
-                      disabled={!manualPaymentCode.trim() || confirmingManualPayment}
-                    >
-                      {confirmingManualPayment ? "Forzando..." : "Forzar pago"}
-                    </Button>
+                <details className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left text-sm text-slate-600">
+                  <summary className="cursor-pointer text-xs font-medium text-slate-500">
+                    Opciones avanzadas
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    <Label htmlFor="manual-fidelizacion-code" className="text-xs text-slate-600">
+                      Referencia de operación, opcional
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="manual-fidelizacion-code"
+                        value={manualPaymentCode}
+                        onChange={(event) => setManualPaymentCode(event.target.value.replace(/\D/g, ""))}
+                        placeholder="Si la tenés"
+                        disabled={confirmingManualPayment}
+                        className="bg-white"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={confirmarCobroManual}
+                        disabled={confirmingManualPayment}
+                        className="text-slate-500 hover:text-slate-900"
+                      >
+                        {confirmingManualPayment ? "Registrando..." : "Forzar pago"}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Usar solo si Mercado Pago no responde y el cobro ya fue verificado por fuera.
+                    </p>
+                    {manualPaymentError && <p className="text-xs text-red-600">{manualPaymentError}</p>}
                   </div>
-                  <p className="mt-2 text-xs text-amber-800">
-                    Usalo solo si el pago figura recibido en Mercado Pago.
-                  </p>
-                  {manualPaymentError && <p className="mt-2 text-xs text-red-600">{manualPaymentError}</p>}
-                </div>
+                </details>
                 <Button variant="ghost" size="sm" onClick={handleCancelarPago}>
                   Cancelar y volver
                 </Button>
@@ -724,8 +756,9 @@ export default function PagoFidelizacionPage() {
     );
   }
 
-  const precioOriginal = servicio ? parseFloat(servicio.precio || "0") || 0 : 0;
+  const precioOriginal = servicio ? parseMoney(servicio.precio) : 0;
   const precioConDescuento = calcularPrecioConDescuento();
+  const senaPromocional = precioConDescuento / 2;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-50 to-pink-50 p-4">
@@ -776,7 +809,8 @@ export default function PagoFidelizacionPage() {
             {precioConDescuento < precioOriginal ? (
               <p>
                 Precio original: <span className="line-through">${precioOriginal.toFixed(2)}</span>{" "}
-                · Ahora pagás: <strong>${precioConDescuento.toFixed(2)}</strong>
+                · Total con beneficio: <strong>${precioConDescuento.toFixed(2)}</strong>
+                · Seña a pagar ahora: <strong>${senaPromocional.toFixed(2)}</strong>
               </p>
             ) : (
               <p>

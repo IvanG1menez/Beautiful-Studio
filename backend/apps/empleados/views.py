@@ -18,6 +18,113 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from django.shortcuts import get_object_or_404
 
 
+TURNOS_RESERVADOS_BAJA = ["pendiente", "confirmado"]
+TURNOS_PENDIENTES_BAJA = ["pendiente", "pendiente_manual"]
+
+
+def build_empleado_deactivation_check(empleado):
+    """Devuelve bloqueos y advertencias para desactivar un profesional."""
+    from apps.mercadopago.models import PagoMercadoPago
+
+    now = timezone.now()
+    turnos_reservados = empleado.turnos.filter(
+        estado__in=TURNOS_RESERVADOS_BAJA,
+        fecha_hora__gte=now,
+    ).count()
+    turnos_pendientes = empleado.turnos.filter(
+        estado__in=TURNOS_PENDIENTES_BAJA,
+    ).count()
+    turnos_en_proceso = empleado.turnos.filter(estado="en_proceso").count()
+    servicios_activos = empleado.servicios_disponibles.filter(
+        servicio__is_active=True
+    ).count()
+    servicios_inactivos = empleado.servicios_disponibles.filter(
+        servicio__is_active=False
+    ).count()
+    horarios_activos = empleado.horarios_detallados.filter(is_active=True).count()
+    pagos_pendientes = PagoMercadoPago.objects.filter(
+        turno__empleado=empleado,
+        estado__in=["pending", "authorized", "in_process", "in_mediation"],
+    ).count()
+
+    checks = [
+        {
+            "key": "turnos_reservados",
+            "label": "Turnos reservados futuros",
+            "count": turnos_reservados,
+            "ok": turnos_reservados == 0,
+            "blocking": True,
+            "message": "Reprogramá o cancelá los turnos reservados primero.",
+        },
+        {
+            "key": "turnos_pendientes",
+            "label": "Turnos pendientes",
+            "count": turnos_pendientes,
+            "ok": turnos_pendientes == 0,
+            "blocking": True,
+            "message": "Resolvé los turnos pendientes primero.",
+        },
+        {
+            "key": "turnos_en_proceso",
+            "label": "Turnos en proceso",
+            "count": turnos_en_proceso,
+            "ok": turnos_en_proceso == 0,
+            "blocking": True,
+            "message": "Finalizá o cancelá los turnos en proceso primero.",
+        },
+        {
+            "key": "servicios_activos",
+            "label": "Servicios activos asociados",
+            "count": servicios_activos,
+            "ok": servicios_activos == 0,
+            "blocking": True,
+            "message": "Quitá la asociación con servicios activos primero.",
+        },
+        {
+            "key": "disponibilidad",
+            "label": "Disponibilidad publicada",
+            "count": 1 if empleado.is_disponible else 0,
+            "ok": not empleado.is_disponible,
+            "blocking": True,
+            "message": "Marcá al profesional como no disponible primero.",
+        },
+        {
+            "key": "horarios_activos",
+            "label": "Horarios activos",
+            "count": horarios_activos,
+            "ok": horarios_activos == 0,
+            "blocking": True,
+            "message": "Desactivá sus horarios antes de darlo de baja.",
+        },
+        {
+            "key": "pagos_pendientes",
+            "label": "Pagos pendientes o en proceso",
+            "count": pagos_pendientes,
+            "ok": pagos_pendientes == 0,
+            "blocking": True,
+            "message": "Resolvé los pagos pendientes de sus turnos primero.",
+        },
+    ]
+    warnings = []
+    if servicios_inactivos:
+        warnings.append(
+            {
+                "key": "servicios_inactivos",
+                "label": "Servicios inactivos asociados",
+                "count": servicios_inactivos,
+                "message": "No bloquean la baja, pero conviene revisar la asociación.",
+            }
+        )
+
+    blockers = [check for check in checks if check["blocking"] and not check["ok"]]
+    return {
+        "ok": not blockers,
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
 class IsPropietarioOrAdmin(permissions.BasePermission):
     """
     Permiso personalizado que solo permite acceso a propietarios y superusuarios
@@ -115,6 +222,16 @@ class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
         empleado = self.get_object()
         user = empleado.user
 
+        check = build_empleado_deactivation_check(empleado)
+        if empleado.is_active and not check["ok"]:
+            return Response(
+                {
+                    "error": "No se puede desactivar el profesional porque tiene dependencias activas.",
+                    "check": check,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             empleado.is_active = False
             empleado.save()
@@ -142,6 +259,52 @@ class EmpleadoDetailView(generics.RetrieveUpdateDestroyAPIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+
+@api_view(["GET"])
+@permission_classes([IsPropietarioOrAdmin])
+def empleado_deactivation_check(request, empleado_id):
+    """Verifica si el profesional puede ser desactivado sin romper procesos activos."""
+    empleado = get_object_or_404(Empleado, pk=empleado_id)
+    return Response(build_empleado_deactivation_check(empleado))
+
+
+@api_view(["POST", "PATCH"])
+@permission_classes([IsPropietarioOrAdmin])
+def empleado_toggle_active(request, empleado_id):
+    """Activa o desactiva un profesional conservando su historial."""
+    empleado = get_object_or_404(Empleado, pk=empleado_id)
+    currently_active = empleado.is_active and (
+        not empleado.user or empleado.user.is_active
+    )
+
+    if currently_active:
+        check = build_empleado_deactivation_check(empleado)
+        if not check["ok"]:
+            return Response(
+                {
+                    "error": "No se puede desactivar el profesional porque tiene dependencias activas.",
+                    "check": check,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    empleado.is_active = not currently_active
+    empleado.save(update_fields=["is_active", "updated_at"])
+
+    if empleado.user:
+        empleado.user.is_active = empleado.is_active
+        empleado.user.save(update_fields=["is_active"])
+
+    serializer = EmpleadoSerializer(empleado)
+    return Response(
+        {
+            "message": (
+                "Profesional reactivado" if empleado.is_active else "Profesional desactivado"
+            ),
+            "data": serializer.data,
+        }
+    )
 
 
 @api_view(["GET", "PATCH"])

@@ -57,10 +57,32 @@ from .serializers import (
 from . import services
 from apps.turnos.services.reprogramacion_service import (
     reprogramar_turno,
-    validar_limite_reprogramacion_cliente_servicio,
+    validar_rango_reprogramacion,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _slot_turno_disponible(empleado: Empleado, servicio: Servicio, fecha_hora) -> bool:
+    if not fecha_hora or fecha_hora <= timezone.now():
+        return False
+
+    hora_fin = fecha_hora + timedelta(minutes=servicio.duracion_minutos)
+    turnos_dia = Turno.objects.select_related("servicio").filter(
+        empleado=empleado,
+        fecha_hora__date=fecha_hora.date(),
+        estado__in=["pendiente", "confirmado", "en_proceso"],
+    )
+    for turno in turnos_dia:
+        if not turno.fecha_hora or not turno.servicio:
+            continue
+        inicio_existente = turno.fecha_hora
+        fin_existente = inicio_existente + timedelta(
+            minutes=turno.servicio.duracion_minutos
+        )
+        if fecha_hora < fin_existente and hora_fin > inicio_existente:
+            return False
+    return True
 
 
 def _registrar_auditoria_staff(usuario, accion: str, modelo: str, objeto_id: int | None, detalles: dict) -> None:
@@ -87,10 +109,12 @@ def _enviar_link_crear_password(cliente: Cliente, usuario_actor=None, origen: st
         token=secrets.token_urlsafe(32),
         expires_at=timezone.now() + timedelta(hours=24),
     )
-    EmailService.enviar_email_recuperacion_password(
+    email_enviado = EmailService.enviar_email_recuperacion_password(
         email=user_obj.email,
         token=reset_token.token,
         usuario_nombre=user_obj.first_name or "",
+        es_creacion_cuenta=True,
+        validez_horas=24,
     )
     _registrar_auditoria_staff(
         usuario_actor,
@@ -102,6 +126,7 @@ def _enviar_link_crear_password(cliente: Cliente, usuario_actor=None, origen: st
             "cliente_id": cliente.id,
             "email": user_obj.email,
             "origen": origen,
+            "email_enviado": email_enviado,
         },
     )
 
@@ -435,6 +460,17 @@ class CrearPreferenciaSinTurnoView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        if data.get("aplicar_descuento_fidelizacion") and data.get("cliente_id"):
+            cliente_oferta = Cliente.objects.select_related("user").filter(
+                pk=data["cliente_id"]
+            ).first()
+            if not cliente_oferta:
+                return Response(
+                    {"detail": "No se encontró el cliente de la oferta."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            cliente = cliente_oferta
+
         # Obtener servicio para precio y nombre
         try:
             servicio = Servicio.objects.get(pk=data["servicio_id"], is_active=True)
@@ -446,12 +482,29 @@ class CrearPreferenciaSinTurnoView(APIView):
 
         # Verificar que el empleado existe
         try:
-            Empleado.objects.get(pk=data["empleado_id"])
+            empleado_obj = Empleado.objects.get(pk=data["empleado_id"])
         except Empleado.DoesNotExist:
             return Response(
                 {"detail": f"Profesional {data['empleado_id']} no encontrado."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        es_oferta_fidelizacion = bool(data.get("aplicar_descuento_fidelizacion"))
+        fecha_hora_reserva = data["fecha_hora"]
+        if es_oferta_fidelizacion and not _slot_turno_disponible(
+            empleado_obj, servicio, fecha_hora_reserva
+        ):
+            from apps.emails.tasks import _buscar_proximo_horario_disponible
+
+            fecha_recalculada = _buscar_proximo_horario_disponible(
+                empleado_obj, servicio
+            )
+            if not fecha_recalculada:
+                return Response(
+                    {"detail": "No hay horarios libres para esta oferta."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            fecha_hora_reserva = fecha_recalculada
 
         # ── Cálculo de monto ────────────────────────────────────────────────────────
         precio_original = Decimal(str(servicio.precio or 0))
@@ -509,6 +562,8 @@ class CrearPreferenciaSinTurnoView(APIView):
             tipo_pago = "SENIA" if usar_sena else "PAGO_COMPLETO"
 
         monto_sena_fijo = Decimal(str(getattr(servicio, "monto_sena_fijo", 0) or 0))
+        if data.get("aplicar_descuento_fidelizacion"):
+            monto_sena_fijo = Decimal("0")
         if monto_sena_fijo <= 0 and precio_total > 0:
             monto_sena_fijo = (precio_total / Decimal("2")).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -671,6 +726,7 @@ class CrearPreferenciaSinTurnoView(APIView):
                     "preference_id": reference_id,
                     "qr_data": qr_data,
                     "qr_init_point": qr_data,
+                    "fecha_hora": fecha_hora_reserva.isoformat(),
                     "qr_native": True,
                     "public_key": qr_public_key,
                     "qr_public_key": qr_public_key,
@@ -705,6 +761,7 @@ class CrearPreferenciaSinTurnoView(APIView):
                 "preference_id": resultado["preference_id"],
                 "init_point": resultado["init_point"],
                 "sandbox_init_point": resultado["sandbox_init_point"],
+                "fecha_hora": fecha_hora_reserva.isoformat(),
                 "public_key": getattr(settings, "MP_PUBLIC_KEY", ""),
             },
             status=status.HTTP_201_CREATED,
@@ -763,7 +820,7 @@ class CrearPreferenciaReprogramacionView(APIView):
 
         if es_cliente_duenio:
             try:
-                validar_limite_reprogramacion_cliente_servicio(turno, ahora)
+                validar_rango_reprogramacion(turno, data["nueva_fecha_hora"], ahora)
             except ValueError as exc:
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1154,33 +1211,89 @@ class ConfirmarPagoStaffView(APIView):
             )
 
         pago_existente = PagoMercadoPago.objects.select_related("turno").filter(
+            preference_id=preference_id,
+            estado="approved",
+        ).order_by("-actualizado_en").first()
+        if pago_existente:
+            if pago_existente.payment_id != payment_id:
+                pago_existente.payment_id = payment_id
+                pago_existente.save(update_fields=["payment_id", "actualizado_en"])
+            return Response(
+                {"status": "approved", "turno_id": pago_existente.turno.pk, "payment_id": pago_existente.payment_id},
+                status=status.HTTP_200_OK,
+            )
+
+        pago_mismo_id = PagoMercadoPago.objects.filter(
             payment_id=payment_id,
             estado="approved",
-        ).first()
-        if pago_existente:
-            if pago_existente.preference_id != preference_id:
-                return Response(
-                    {"detail": "Ese ID de operación ya fue registrado en otra reserva."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        ).exclude(preference_id=preference_id).first()
+        if pago_mismo_id:
             return Response(
-                {"status": "approved", "turno_id": pago_existente.turno.pk},
-                status=status.HTTP_200_OK,
+                {"detail": "Ese ID de operación ya fue registrado en otra reserva."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             pago_mp = services.obtener_pago(payment_id)
         except ValueError as exc:
-            logger.warning("ConfirmarPagoStaff: no se pudo obtener pago %s: %s", payment_id, exc)
-            return Response(
-                {"detail": "No se encontró ese ID de operación en Mercado Pago."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            logger.warning("ConfirmarPagoStaff: no se pudo obtener pago %s con credenciales generales: %s. Reintentando QR.", payment_id, exc)
+            try:
+                pago_mp = services.obtener_pago(payment_id, use_qr_credentials=True)
+            except ValueError as exc_qr:
+                logger.warning("ConfirmarPagoStaff: no se pudo obtener pago %s con credenciales QR: %s", payment_id, exc_qr)
+                return Response(
+                    {"detail": "No se encontró ese ID de operación en Mercado Pago."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         if pago_mp.get("status") != "approved":
             return Response(
                 {"detail": "El pago existe, pero todavía no está aprobado."},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        orden_presencial = OrdenMercadoPagoPresencial.objects.filter(reference_id=preference_id).first()
+        if orden_presencial is not None:
+            external_reference = pago_mp.get("external_reference") or ""
+            if external_reference != preference_id:
+                return Response(
+                    {"detail": "El ID de operación no corresponde al QR generado para esta reserva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            monto_cobrado = float(
+                pago_mp.get("transaction_amount") or orden_presencial.monto or 0
+            )
+            try:
+                WebhookMercadoPagoView()._crear_turno_desde_orden_presencial(
+                    orden_presencial,
+                    payment_id,
+                    monto_cobrado_override=monto_cobrado or None,
+                )
+            except Exception as exc:
+                logger.error(
+                    "ConfirmarPagoStaff QR nativo: error registrando pago/turno reference_id=%s payment_id=%s: %s",
+                    preference_id,
+                    payment_id,
+                    exc,
+                )
+                return Response(
+                    {"detail": "No se pudo registrar el pago aprobado en el sistema."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            pago = PagoMercadoPago.objects.select_related("turno").filter(
+                preference_id=preference_id,
+                estado="approved",
+            ).first()
+            if not pago:
+                return Response(
+                    {"detail": "El pago fue validado, pero no se encontró el turno creado."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            return Response(
+                {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
+                status=status.HTTP_200_OK,
             )
 
         mp_preference_id = pago_mp.get("preference_id") or ""
@@ -1236,7 +1349,7 @@ class ConfirmarPagoStaffView(APIView):
             )
 
         return Response(
-            {"status": "approved", "turno_id": pago.turno.pk},
+            {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
             status=status.HTTP_200_OK,
         )
 
@@ -1458,6 +1571,69 @@ class ConfirmarCobroManualView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _obtener_pago_aprobado_validado(
+        self,
+        preference_id: str,
+        payment_id: str,
+        *,
+        es_qr: bool = False,
+        monto_esperado: Decimal | None = None,
+    ) -> tuple[dict | None, Response | None]:
+        try:
+            pago_mp = services.obtener_pago(payment_id, use_qr_credentials=es_qr)
+        except ValueError:
+            try:
+                pago_mp = services.obtener_pago(payment_id, use_qr_credentials=not es_qr)
+            except ValueError:
+                return None, Response(
+                    {"detail": "No se encontró ese número de operación en Mercado Pago."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if pago_mp.get("status") != "approved":
+            return None, Response(
+                {"detail": "El pago existe, pero todavía no está aprobado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if es_qr:
+            external_reference = pago_mp.get("external_reference") or ""
+            if external_reference and external_reference != preference_id:
+                return None, Response(
+                    {"detail": "El número de operación no corresponde al QR generado para esta reserva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not external_reference:
+                try:
+                    pago_por_orden = services.buscar_pago_aprobado_por_external_reference(
+                        preference_id,
+                        use_qr_credentials=True,
+                    )
+                except ValueError:
+                    pago_por_orden = None
+                if not pago_por_orden or str(pago_por_orden.get("id") or "") != str(payment_id):
+                    return None, Response(
+                        {"detail": "El número de operación no corresponde al QR generado para esta reserva."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        else:
+            mp_preference_id = pago_mp.get("preference_id") or ""
+            if mp_preference_id != preference_id:
+                return None, Response(
+                    {"detail": "El número de operación no corresponde a esta preferencia de pago."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if monto_esperado is not None:
+            monto_pagado = Decimal(str(pago_mp.get("transaction_amount") or 0))
+            if monto_pagado.quantize(Decimal("0.01")) != monto_esperado.quantize(Decimal("0.01")):
+                return None, Response(
+                    {"detail": "El monto pagado no coincide con el monto de esta reserva."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        return pago_mp, None
+
     def _payload_reserva_manual(self, user, reserva_data: dict, preferencia: dict | None = None) -> tuple[dict | None, Response | None]:
         """Reconstruye el payload del turno si MP no devuelve external_reference."""
         if not reserva_data:
@@ -1476,27 +1652,68 @@ class ConfirmarCobroManualView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        if data.get("aplicar_descuento_fidelizacion") and data.get("cliente_id"):
+            cliente_oferta = Cliente.objects.select_related("user").filter(
+                pk=data["cliente_id"]
+            ).first()
+            if not cliente_oferta:
+                return None, Response(
+                    {"detail": "No se encontró el cliente de la oferta."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            cliente = cliente_oferta
+
+        es_oferta_fidelizacion = bool(data.get("aplicar_descuento_fidelizacion"))
+
         try:
             servicio = Servicio.objects.get(pk=data["servicio_id"])
-            Empleado.objects.get(pk=data["empleado_id"])
+            empleado_obj = Empleado.objects.get(pk=data["empleado_id"])
         except (Servicio.DoesNotExist, Empleado.DoesNotExist):
             return None, Response(
                 {"detail": "No se encontró el servicio o profesional de la reserva."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        fecha_hora_reserva = data["fecha_hora"]
+        if es_oferta_fidelizacion and not _slot_turno_disponible(
+            empleado_obj, servicio, fecha_hora_reserva
+        ):
+            from apps.emails.tasks import _buscar_proximo_horario_disponible
+
+            fecha_recalculada = _buscar_proximo_horario_disponible(
+                empleado_obj, servicio
+            )
+            if not fecha_recalculada:
+                return None, Response(
+                    {"detail": "No hay horarios libres para esta oferta."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            fecha_hora_reserva = fecha_recalculada
+
         precio_original = Decimal(str(servicio.precio or 0))
         precio_total = precio_original
 
-        if data.get("aplicar_descuento_fidelizacion"):
+        if es_oferta_fidelizacion:
             from apps.authentication.models import ConfiguracionGlobal
 
-            config = ConfiguracionGlobal.get_config()
-            global_pct = Decimal(str(getattr(config, "porcentaje_descuento", 0) or 0))
-            if global_pct > 0:
+            descuento_monto = Decimal(str(getattr(servicio, "descuento_fidelizacion_monto", None) or 0))
+            descuento_pct = Decimal(str(getattr(servicio, "descuento_fidelizacion_pct", None) or 0))
+
+            if descuento_monto > 0:
+                precio_total = max(Decimal("0"), precio_total - descuento_monto)
+            elif descuento_pct > 0:
                 precio_total = (
-                    precio_total * (Decimal("100") - global_pct) / Decimal("100")
+                    precio_total * (Decimal("100") - descuento_pct) / Decimal("100")
                 ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                config = ConfiguracionGlobal.get_config()
+                global_pct = Decimal(
+                    str(getattr(config, "descuento_fidelizacion_pct", 0) or 0)
+                )
+                if global_pct > 0:
+                    precio_total = (
+                        precio_total * (Decimal("100") - global_pct) / Decimal("100")
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         streak_coupon = None
         streak_coupon_discount = Decimal("0")
@@ -1516,6 +1733,8 @@ class ConfirmarCobroManualView(APIView):
             tipo_pago = "SENIA" if data.get("usar_sena", True) else "PAGO_COMPLETO"
 
         monto_sena_fijo = Decimal(str(getattr(servicio, "monto_sena_fijo", 0) or 0))
+        if es_oferta_fidelizacion:
+            monto_sena_fijo = Decimal("0")
         if monto_sena_fijo <= 0 and precio_total > 0:
             monto_sena_fijo = (precio_total / Decimal("2")).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -1537,12 +1756,15 @@ class ConfirmarCobroManualView(APIView):
             monto_preferencia = Decimal("0")
 
         monto_cobrado = monto_preferencia or (monto_base - creditos_aplicados)
+        notas_cliente = data.get("notas_cliente", "") or ""
+        if es_oferta_fidelizacion and "Oferta de cliente olvidado" not in notas_cliente:
+            notas_cliente = (notas_cliente + "\n" if notas_cliente else "") + "Oferta de cliente olvidado aplicada."
 
         return {
             "cliente_id": cliente.pk,
             "servicio_id": servicio.pk,
             "empleado_id": data["empleado_id"],
-            "fecha_hora": data["fecha_hora"].isoformat(),
+            "fecha_hora": fecha_hora_reserva.isoformat(),
             "notas_cliente": notas_cliente,
             "usar_sena": tipo_pago == "SENIA",
             "tipo_pago": tipo_pago,
@@ -1553,6 +1775,9 @@ class ConfirmarCobroManualView(APIView):
             "streak_coupon_id": streak_coupon.id if streak_coupon else None,
             "streak_coupon_code": streak_coupon.code if streak_coupon else "",
             "streak_coupon_discount": str(streak_coupon_discount),
+            "canal_reserva": "fidelizacion" if es_oferta_fidelizacion else "web_cliente",
+            "metodo_pago": "mercadopago",
+            "aplicar_descuento_fidelizacion": es_oferta_fidelizacion,
         }, None
 
     def post(self, request, *args, **kwargs):
@@ -1583,6 +1808,26 @@ class ConfirmarCobroManualView(APIView):
             estado="approved",
         ).first()
         if pago_existente:
+            if reserva_manual.get("aplicar_descuento_fidelizacion") and reserva_manual.get("cliente_id"):
+                turno_existente = pago_existente.turno
+                cliente_oferta = Cliente.objects.filter(pk=reserva_manual["cliente_id"]).first()
+                turno_es_fidelizacion = turno_existente.canal_reserva == "fidelizacion" or (
+                    "Oferta de cliente olvidado" in (turno_existente.notas_cliente or "")
+                )
+                if (
+                    cliente_oferta
+                    and turno_es_fidelizacion
+                    and turno_existente.cliente_id != cliente_oferta.id
+                ):
+                    turno_existente.cliente = cliente_oferta
+                    turno_existente.save(update_fields=["cliente", "updated_at"])
+                    pago_existente.cliente = cliente_oferta
+                    pago_existente.save(update_fields=["cliente", "actualizado_en"])
+                    from apps.turnos.signals import _enviar_notificaciones_nuevo_turno
+
+                    transaction.on_commit(
+                        lambda turno_pk=turno_existente.pk: _enviar_notificaciones_nuevo_turno(turno_pk)
+                    )
             if pago_existente.preference_id != preference_id:
                 return Response(
                     {"detail": "Ese número de operación ya fue registrado en otra reserva."},
@@ -1602,11 +1847,15 @@ class ConfirmarCobroManualView(APIView):
             if orden_presencial is not None:
                 orden_payload = dict(orden_presencial.payload or {})
                 es_pago_saldo_turno = orden_payload.get("tipo_movimiento") == "pago_saldo_turno"
+                es_oferta_fidelizacion = bool(
+                    orden_payload.get("aplicar_descuento_fidelizacion")
+                    or orden_payload.get("canal_reserva") == "fidelizacion"
+                )
                 es_cliente_duenio = False
                 if es_pago_saldo_turno and hasattr(user, "cliente_profile"):
                     es_cliente_duenio = int(orden_payload.get("cliente_id") or 0) == user.cliente_profile.id
 
-                if not es_staff_user and not es_cliente_duenio:
+                if not es_staff_user and not es_cliente_duenio and not es_oferta_fidelizacion:
                     return Response(
                         {"detail": "No tiene permisos para confirmar cobros presenciales."},
                         status=status.HTTP_403_FORBIDDEN,
@@ -1653,7 +1902,14 @@ class ConfirmarCobroManualView(APIView):
                 if not es_staff_user:
                     cliente_profile = getattr(user, "cliente_profile", None)
                     cliente_id = turno_payload.get("cliente_id")
-                    if not cliente_profile or int(cliente_id or 0) != cliente_profile.id:
+                    es_oferta_fidelizacion = bool(
+                        turno_payload.get("aplicar_descuento_fidelizacion")
+                        or turno_payload.get("canal_reserva") == "fidelizacion"
+                    )
+                    if (
+                        not es_oferta_fidelizacion
+                        and (not cliente_profile or int(cliente_id or 0) != cliente_profile.id)
+                    ):
                         return Response(
                             {"detail": "No tiene permisos para confirmar este cobro."},
                             status=status.HTTP_403_FORBIDDEN,
@@ -1662,7 +1918,6 @@ class ConfirmarCobroManualView(APIView):
                 turno_payload["metodo_pago"] = "mercadopago_manual"
                 monto_cobrado = float(
                     turno_payload.get("monto_cobrado")
-                    or (preferencia.get("items") or [{}])[0].get("unit_price")
                     or 0
                 )
                 if turno_payload.get("tipo_movimiento") == "reprogramacion_turno":
@@ -1697,14 +1952,16 @@ class ConfirmarCobroManualView(APIView):
 
         pago = PagoMercadoPago.objects.select_related("turno").filter(
             preference_id=preference_id,
-            payment_id=manual_payment_id,
             estado="approved",
-        ).first()
+        ).order_by("-actualizado_en").first()
         if not pago:
             return Response(
                 {"detail": "El cobro fue procesado, pero no se encontró el turno creado."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if manual_payment_id and pago.payment_id != manual_payment_id:
+            pago.payment_id = manual_payment_id
+            pago.save(update_fields=["payment_id", "actualizado_en"])
 
         logger.info(
             "Cobro manual confirmado preference_id=%s turno=%s payment_id=%s usuario=%s motivo=%s",
@@ -1715,7 +1972,7 @@ class ConfirmarCobroManualView(APIView):
             motivo,
         )
         return Response(
-            {"status": "approved", "turno_id": pago.turno.pk},
+            {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
             status=status.HTTP_200_OK,
         )
 
@@ -1829,28 +2086,89 @@ class WebhookMercadoPagoView(APIView):
             )
 
             # Idempotente sobre el slot único (empleado + fecha_hora).
-            # Si el turno ya existe (reintento de webhook, test previo, etc.)
-            # lo reutilizamos — nunca lanzamos IntegrityError.
-            turno_wh, turno_creado = Turno.objects.get_or_create(
+            # Solo reutilizamos el turno si pertenece al mismo cliente. Para
+            # ofertas de fidelización, corregimos datos mal asociados por
+            # intentos previos del flujo de diagnóstico.
+            turno_wh = Turno.objects.filter(
                 empleado=empleado_wh,
                 fecha_hora=fecha_hora_wh,
-                defaults={
-                    "cliente": cliente_wh,
-                    "servicio": servicio_wh,
-                    "notas_cliente": turno_payload.get("notas_cliente", "") or "",
-                    "estado": "confirmado",
-                    "precio_final": precio_total_final_wh,
-                    "senia_pagada": max(Decimal("0"), senia_total),
-                    "canal_reserva": canal_reserva,
-                    "metodo_pago": metodo_pago,
-                    "tipo_pago": tipo_pago,
-                    "es_cliente_registrado": es_cliente_registrado,
-                    "walkin_nombre": walkin_nombre or None,
-                    "walkin_dni": walkin_dni or None,
-                    "walkin_email": walkin_email or None,
-                    "walkin_telefono": walkin_telefono or None,
-                },
-            )
+            ).first()
+            turno_creado = False
+            turno_corregido_cliente = False
+            if turno_wh is not None and turno_wh.cliente_id != cliente_wh.id:
+                es_oferta_fidelizacion = canal_reserva == "fidelizacion" or bool(
+                    turno_payload.get("aplicar_descuento_fidelizacion")
+                )
+                turno_es_fidelizacion = turno_wh.canal_reserva == "fidelizacion" or (
+                    "Oferta de cliente olvidado" in (turno_wh.notas_cliente or "")
+                )
+                if es_oferta_fidelizacion and not turno_es_fidelizacion:
+                    from apps.emails.tasks import _buscar_proximo_horario_disponible
+
+                    fecha_recalculada = _buscar_proximo_horario_disponible(
+                        empleado_wh, servicio_wh
+                    )
+                    if not fecha_recalculada:
+                        raise ValueError(
+                            "El horario sugerido ya está ocupado y no hay otro hueco disponible."
+                        )
+                    fecha_hora_wh = fecha_recalculada
+                    turno_payload["fecha_hora"] = fecha_hora_wh.isoformat()
+                    turno_wh = Turno.objects.filter(
+                        empleado=empleado_wh,
+                        fecha_hora=fecha_hora_wh,
+                    ).first()
+                elif not es_oferta_fidelizacion:
+                    raise ValueError(
+                        "El horario sugerido ya está ocupado por otro cliente. Generá una nueva oferta."
+                    )
+
+                if turno_wh is not None and turno_wh.cliente_id != cliente_wh.id:
+                    turno_wh.cliente = cliente_wh
+                    turno_wh.servicio = servicio_wh
+                    turno_wh.notas_cliente = turno_payload.get("notas_cliente", "") or ""
+                    turno_wh.estado = "confirmado"
+                    turno_wh.precio_final = precio_total_final_wh
+                    turno_wh.senia_pagada = max(Decimal("0"), senia_total)
+                    turno_wh.canal_reserva = canal_reserva
+                    turno_wh.metodo_pago = metodo_pago
+                    turno_wh.tipo_pago = tipo_pago
+                    turno_wh.save(
+                        update_fields=[
+                            "cliente",
+                            "servicio",
+                            "notas_cliente",
+                            "estado",
+                            "precio_final",
+                            "senia_pagada",
+                            "canal_reserva",
+                            "metodo_pago",
+                            "tipo_pago",
+                            "updated_at",
+                        ]
+                    )
+                    turno_corregido_cliente = True
+
+            if turno_wh is None:
+                turno_wh = Turno.objects.create(
+                    empleado=empleado_wh,
+                    fecha_hora=fecha_hora_wh,
+                    cliente=cliente_wh,
+                    servicio=servicio_wh,
+                    notas_cliente=turno_payload.get("notas_cliente", "") or "",
+                    estado="confirmado",
+                    precio_final=precio_total_final_wh,
+                    senia_pagada=max(Decimal("0"), senia_total),
+                    canal_reserva=canal_reserva,
+                    metodo_pago=metodo_pago,
+                    tipo_pago=tipo_pago,
+                    es_cliente_registrado=es_cliente_registrado,
+                    walkin_nombre=walkin_nombre or None,
+                    walkin_dni=walkin_dni or None,
+                    walkin_email=walkin_email or None,
+                    walkin_telefono=walkin_telefono or None,
+                )
+                turno_creado = True
             if not turno_creado:
                 logger.info(
                     "Webhook MP: turno pk=%s ya existía (slot ocupado), reutilizando.",
@@ -1934,6 +2252,13 @@ class WebhookMercadoPagoView(APIView):
                 descripcion=f"Turno #{turno_wh.pk} — {servicio_wh.nombre}",
                 estado="approved",
             )
+
+            if turno_corregido_cliente:
+                from apps.turnos.signals import _enviar_notificaciones_nuevo_turno
+
+                transaction.on_commit(
+                    lambda turno_pk=turno_wh.pk: _enviar_notificaciones_nuevo_turno(turno_pk)
+                )
 
         # Descontar créditos de billetera fuera del atomic (error no crítico)
         if creditos_wh > 0:
@@ -2655,7 +2980,7 @@ class VerificarPagoView(APIView):
                     estado="approved",
                 )
                 return Response(
-                    {"status": "approved", "turno_id": pago.turno.pk},
+                    {"status": "approved", "turno_id": pago.turno.pk, "payment_id": pago.payment_id},
                     status=status.HTTP_200_OK,
                 )
             except PagoMercadoPago.DoesNotExist:

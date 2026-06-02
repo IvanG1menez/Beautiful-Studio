@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, ExternalLink, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
@@ -257,7 +257,11 @@ export default function EditarProfesionalPage() {
 
           if (horariosResponse.ok) {
             const horariosData = await horariosResponse.json();
-            const horariosExistentes = horariosData.results || horariosData;
+            const horariosExistentes: Array<{
+              dia_semana: number;
+              hora_inicio: string;
+              hora_fin: string;
+            }> = horariosData.results || horariosData;
 
             // Resetear horarios
             const nuevosHorarios: HorariosConfig = {};
@@ -269,7 +273,7 @@ export default function EditarProfesionalPage() {
             });
 
             // Agrupar horarios por día
-            horariosExistentes.forEach((h: any) => {
+            horariosExistentes.forEach((h) => {
               if (!nuevosHorarios[h.dia_semana].activo) {
                 nuevosHorarios[h.dia_semana].activo = true;
               }
@@ -364,7 +368,7 @@ export default function EditarProfesionalPage() {
 
       const response = await fetch(`/api/empleados/${empleadoId}/`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify(dataToSend)
       });
 
@@ -388,7 +392,7 @@ export default function EditarProfesionalPage() {
         `/api/empleados/${empleadoId}/servicios/`,
         {
           method: 'POST',
-          headers: getAuthHeaders(),
+          headers: getJsonAuthHeaders(),
           body: JSON.stringify({
             servicio: Number(formData.especialidades),
             nivel_experiencia: 3,
@@ -408,7 +412,12 @@ export default function EditarProfesionalPage() {
       }
 
       // Guardar horarios detallados
-      const horariosArray: any[] = [];
+      const horariosArray: Array<{
+        dia_semana: number;
+        hora_inicio: string;
+        hora_fin: string;
+        is_active: boolean;
+      }> = [];
       Object.entries(horarios).forEach(([dia, config]) => {
         if (config.activo && config.rangos.length > 0) {
           config.rangos.forEach((rango: RangoHorario) => {
@@ -428,7 +437,7 @@ export default function EditarProfesionalPage() {
         `/api/empleados/${empleadoId}/horarios/bulk/`,
         {
           method: 'POST',
-          headers: getAuthHeaders(),
+          headers: getJsonAuthHeaders(),
           body: JSON.stringify({ horarios: horariosArray })
         }
       );
@@ -463,7 +472,7 @@ export default function EditarProfesionalPage() {
     }
   };
 
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({
       ...prev,
       [field]: value

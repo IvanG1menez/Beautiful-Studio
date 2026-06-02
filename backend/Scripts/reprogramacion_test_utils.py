@@ -62,7 +62,7 @@ def cleanup_previous_reprogramming_tests(reset_monthly_limit: bool = True) -> di
     deleted = {
         "turnos": 0,
         "historial": 0,
-        "historial_limite_mensual": 0,
+        "historial_reprogramacion": 0,
         "logs_reasignacion": 0,
         "pagos_mercadopago": 0,
     }
@@ -86,14 +86,14 @@ def cleanup_previous_reprogramming_tests(reset_monthly_limit: bool = True) -> di
 
     if reset_monthly_limit:
         inicio_mes = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        historial_limite_qs = HistorialTurno.objects.filter(
+        historial_reprogramacion_qs = HistorialTurno.objects.filter(
             turno__cliente__user__email=DEMO_CLIENT_EMAIL,
             turno__servicio__nombre=DEMO_SERVICE_NAME,
             accion="Reprogramacion de turno",
             created_at__gte=inicio_mes,
         )
-        deleted["historial_limite_mensual"] = historial_limite_qs.count()
-        historial_limite_qs.delete()
+        deleted["historial_reprogramacion"] = historial_reprogramacion_qs.count()
+        historial_reprogramacion_qs.delete()
 
     return deleted
 

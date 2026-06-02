@@ -209,6 +209,18 @@ export const profesionalTurnosApi = {
     }
   },
 
+  validarPagoStaff: async (payload: ConfirmarPagoStaffPayload): Promise<ConfirmarPagoStaffResponse> => {
+    try {
+      const response = await apiClient.post<ConfirmarPagoStaffResponse>(
+        '/mercadopago/confirmar-pago-staff/',
+        payload,
+      );
+      return response.data;
+    } catch (error: unknown) {
+      throw new Error(handleApiError(error).message);
+    }
+  },
+
   cancelarPagoStaff: async (payload: CancelarPagoStaffPayload): Promise<CancelarPagoStaffResponse> => {
     try {
       const response = await apiClient.post<CancelarPagoStaffResponse>(

@@ -106,8 +106,14 @@ def _ensure_diag_cliente(email, first_name, last_name):
 
 
 def _clean_previous_diag_data(clientes):
+    from django.db.models import Q
     from apps.clientes.models import Billetera, MovimientoBilletera
     from apps.emails.models import Notificacion
+    from apps.mercadopago.models import (
+        OrdenMercadoPagoPresencial,
+        PagoMercadoPago,
+        PreferenciaMercadoPagoCancelada,
+    )
     from apps.turnos.models import (
         ClienteStreakStats,
         HistorialTurno,
@@ -119,9 +125,26 @@ def _clean_previous_diag_data(clientes):
         Turno,
     )
 
+    cliente_ids = [cliente.id for cliente in clientes]
+    usuarios = [cliente.user for cliente in clientes]
+
+    ordenes_qr = OrdenMercadoPagoPresencial.objects.filter(
+        payload__cliente_id__in=cliente_ids
+    )
+    preferencias_qr = list(ordenes_qr.values_list("reference_id", flat=True))
+    preferencias_pago = list(
+        PagoMercadoPago.objects.filter(cliente__in=clientes).values_list(
+            "preference_id", flat=True
+        )
+    )
+
     turno_ids = list(
         Turno.objects.filter(cliente__in=clientes)
-        .filter(notas_cliente__startswith=DIAG_PREFIX)
+        .filter(
+            Q(notas_cliente__startswith=DIAG_PREFIX)
+            | Q(canal_reserva="fidelizacion")
+            | Q(notas_cliente__icontains="Oferta de cliente olvidado")
+        )
         .values_list("id", flat=True)
     )
     if turno_ids:
@@ -131,12 +154,18 @@ def _clean_previous_diag_data(clientes):
         StreakCoupon.objects.filter(used_turno_id__in=turno_ids).update(used_turno=None)
         StreakRewardEvent.objects.filter(turno_id__in=turno_ids).delete()
         StreakAuditLog.objects.filter(turno_id__in=turno_ids).delete()
+        PagoMercadoPago.objects.filter(turno_id__in=turno_ids).delete()
         Turno.objects.filter(id__in=turno_ids).delete()
+
+    ordenes_qr.delete()
+    PreferenciaMercadoPagoCancelada.objects.filter(
+        preference_id__in=[*preferencias_qr, *preferencias_pago]
+    ).delete()
 
     StreakCoupon.objects.filter(cliente__in=clientes).delete()
     ClienteStreakStats.objects.filter(cliente__in=clientes).delete()
     StreakExpiryAlertLog.objects.filter(cliente__in=clientes).delete()
-    Notificacion.objects.filter(usuario__in=[cliente.user for cliente in clientes]).delete()
+    Notificacion.objects.filter(usuario__in=usuarios).delete()
     MovimientoBilletera.objects.filter(billetera__cliente__in=clientes).delete()
     Billetera.objects.filter(cliente__in=clientes).delete()
 
@@ -193,6 +222,7 @@ def _prepare_optimizacion(empleado, servicio, clientes, config):
     fecha_medio = _next_free_slot(fecha_cancelado + timedelta(days=3), empleado, Turno)
     fecha_lejano = _next_free_slot(fecha_cancelado + timedelta(days=9), empleado, Turno)
     sena = (Decimal(servicio.precio or 0) * Decimal("0.50")).quantize(Decimal("0.01"))
+    pago_completo = Decimal(servicio.precio or 0).quantize(Decimal("0.01"))
 
     with _mute_turno_post_save_signals(Turno):
         turno_cancelado = Turno.objects.create(
@@ -212,9 +242,10 @@ def _prepare_optimizacion(empleado, servicio, clientes, config):
             servicio=servicio,
             fecha_hora=fecha_medio,
             estado="confirmado",
-            tipo_pago="SENIA",
-            senia_pagada=sena,
+            tipo_pago="PAGO_COMPLETO",
+            senia_pagada=pago_completo,
             precio_final=servicio.precio,
+            metodo_pago="mercadopago",
             notas_cliente=f"{DIAG_PREFIX}_OPT_CANDIDATO_MEDIO",
         )
         turno_lejano = Turno.objects.create(
@@ -226,6 +257,7 @@ def _prepare_optimizacion(empleado, servicio, clientes, config):
             tipo_pago="SENIA",
             senia_pagada=sena,
             precio_final=servicio.precio,
+            metodo_pago="mercadopago",
             notas_cliente=f"{DIAG_PREFIX}_OPT_CANDIDATO_LEJANO",
         )
 
@@ -335,9 +367,7 @@ def _prepare_common_context():
     servicio = Servicio.objects.get(nombre="Color completo + Brushing")
     servicio.tiempo_espera_respuesta = 15
     servicio.frecuencia_recurrencia_dias = 45
-    servicio.bono_reacomodamiento_senia = Decimal("1000.00")
-    servicio.precio = Decimal("20000.00")
-    servicio.save(update_fields=["tiempo_espera_respuesta", "frecuencia_recurrencia_dias", "bono_reacomodamiento_senia", "precio"])
+    servicio.save(update_fields=["tiempo_espera_respuesta", "frecuencia_recurrencia_dias"])
     EmpleadoServicio.objects.get_or_create(empleado=empleado, servicio=servicio)
     _ensure_schedule(empleado)
 

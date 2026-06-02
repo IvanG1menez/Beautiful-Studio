@@ -19,6 +19,7 @@ class CrearPreferenciaSinTurnoSerializer(serializers.Serializer):
 
     servicio_id = serializers.IntegerField(min_value=1)
     empleado_id = serializers.IntegerField(min_value=1)
+    cliente_id = serializers.IntegerField(required=False, min_value=1)
     fecha_hora = serializers.DateTimeField()
     notas_cliente = serializers.CharField(required=False, allow_blank=True, default="")
     # Compatibilidad legacy: si True, cobra seña; si False, total.

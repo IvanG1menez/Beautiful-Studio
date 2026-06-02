@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { formatTime } from '@/lib/dateUtils';
 import { turnosService } from '@/services/turnos';
 import {
@@ -25,6 +25,7 @@ import {
   Clock,
   Gift,
   Loader2,
+  Sparkles,
   Sun,
   Sunrise,
   TrendingUp,
@@ -61,11 +62,13 @@ interface Turno {
   monto_pendiente_original?: string;
   descuento_aplicado?: string;
   puede_reprogramar?: boolean;
+  puede_cancelar?: boolean;
+  elegible_credito_cancelacion?: boolean;
+  monto_credito_cancelacion?: string;
   motivo_no_reprogramable?: string;
   reprogramacion_bloqueada_codigo?: string | null;
-  reprogramaciones_mensuales_usadas?: number;
-  reprogramaciones_mensuales_max?: number;
-  reprogramaciones_mensuales_restantes?: number;
+  reprogramacion_rango_dias?: number;
+  reprogramacion_fecha_maxima?: string | null;
   notas_cliente?: string;
   notas_empleado?: string;
   created_at: string;
@@ -149,6 +152,16 @@ interface ReacomodamientoOfertaActiva {
   };
 }
 
+interface FidelizacionOfertaActiva {
+  status: string;
+  beneficio: 'saldo' | 'descuento';
+  servicio: { id: number; nombre: string };
+  empleado: { id: number; nombre: string };
+  fecha_sugerida: string;
+  saldo_billetera: string;
+  url: string;
+}
+
 interface EmpleadoApiItem {
   id: number | string;
   first_name?: string;
@@ -211,6 +224,7 @@ export default function DashboardClientePage() {
   const [billetera, setBilletera] = useState<Billetera | null>(null);
   const [streakStatus, setStreakStatus] = useState<StreakStatus | null>(null);
   const [ofertaReacomodamiento, setOfertaReacomodamiento] = useState<ReacomodamientoOfertaActiva | null>(null);
+  const [ofertaFidelizacion, setOfertaFidelizacion] = useState<FidelizacionOfertaActiva | null>(null);
   const [procesandoOfertaRelampago, setProcesandoOfertaRelampago] = useState(false);
   const [movimientosBilletera, setMovimientosBilletera] = useState<MovimientoBilletera[]>([]);
   const [loadingTurnos, setLoadingTurnos] = useState(true);
@@ -271,6 +285,7 @@ export default function DashboardClientePage() {
       loadBilleteraData();
       loadStreakData();
       loadOfertaReacomodamiento();
+      loadOfertaFidelizacion();
     }
   }, [router]);
 
@@ -429,18 +444,26 @@ export default function DashboardClientePage() {
     return `${year}-${month}-${day}`;
   };
 
-  const buildAgendaRange = (daysAhead = 45) => {
+  const buildAgendaRange = (daysAhead = 14) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    return Array.from({ length: daysAhead }, (_, index) => {
+    return Array.from({ length: daysAhead + 1 }, (_, index) => {
       const candidate = new Date(today);
       candidate.setDate(today.getDate() + index);
       return candidate;
     });
   };
 
-  const dateRange = useMemo(() => buildAgendaRange(45), []);
+  const getReprogramacionRangeDays = (turno?: Turno | null) => {
+    const rango = Number(turno?.reprogramacion_rango_dias ?? 14);
+    return [7, 14].includes(rango) ? rango : 14;
+  };
+
+  const dateRange = useMemo(
+    () => buildAgendaRange(getReprogramacionRangeDays(turnoParaReprogramar)),
+    [turnoParaReprogramar?.reprogramacion_rango_dias]
+  );
   const dateScrollRef = useRef<HTMLDivElement | null>(null);
 
   const scrollDates = (direction: 'left' | 'right') => {
@@ -479,6 +502,19 @@ export default function DashboardClientePage() {
       setOfertaReacomodamiento(data.status === 'activa' ? data : null);
     } catch (error) {
       console.error('Error loading reacomodamiento offer:', error);
+    }
+  };
+
+  const loadOfertaFidelizacion = async () => {
+    try {
+      const response = await fetch('/api/clientes/me/fidelizacion-activa/', {
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setOfertaFidelizacion(data.status === 'activa' ? data : null);
+    } catch (error) {
+      console.error('Error loading fidelizacion offer:', error);
     }
   };
 
@@ -543,17 +579,52 @@ export default function DashboardClientePage() {
     return !['cancelado', 'completado', 'no_asistio', 'pendiente_manual'].includes(turno.estado);
   };
 
+  const cancelarTurnoDesdeResumen = async (turno: Turno) => {
+    const montoCredito = Number(turno.monto_credito_cancelacion || 0);
+    const avisoCredito = turno.elegible_credito_cancelacion && montoCredito > 0
+      ? `\n\nAl cancelar vas a recibir $${montoCredito.toFixed(2)} de crédito en tu billetera.`
+      : '\n\nNo se generará crédito en tu billetera.';
+    const motivo = window.prompt(
+      `Indicanos el motivo de cancelación para ${turno.servicio_nombre}.${avisoCredito}`,
+      'Cancelación solicitada por el cliente'
+    );
+    if (!motivo || !motivo.trim()) return;
+
+    const confirmado = window.confirm(`¿Confirmás la cancelación del turno?${avisoCredito}`);
+    if (!confirmado) return;
+
+    try {
+      const response = await fetch(`/api/turnos/${turno.id}/`, {
+        method: 'DELETE',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ motivo: motivo.trim() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'No se pudo cancelar el turno.');
+      }
+      const credito = Number(data.monto_credito || 0);
+      toast.success(
+        data.credito_aplicado && credito > 0
+          ? `Turno cancelado. Se acreditaron $${credito.toFixed(2)} en tu billetera.`
+          : 'Turno cancelado correctamente.'
+      );
+      window.dispatchEvent(new Event('wallet-updated'));
+      await Promise.all([loadTurnosData(), loadBilleteraData()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cancelar el turno.');
+    }
+  };
+
   const getMotivoNoReprogramable = (turno: Turno) => {
     if (turno.motivo_no_reprogramable) return turno.motivo_no_reprogramable;
     if (turno.estado === 'pendiente_manual') return 'Ya tenés una solicitud de reprogramación en revisión.';
     return 'Este turno no se puede reprogramar.';
   };
 
-  const getReprogramacionCounter = (turno: Turno) => {
-    const usadas = Number(turno.reprogramaciones_mensuales_usadas ?? 0);
-    const max = Number(turno.reprogramaciones_mensuales_max ?? 1);
-    const restantes = Math.max(0, Number(turno.reprogramaciones_mensuales_restantes ?? max - usadas));
-    return `${restantes}/${max} disponibles`;
+  const getReprogramacionRangeLabel = (turno: Turno) => {
+    const rango = getReprogramacionRangeDays(turno);
+    return `Hasta ${rango} días`;
   };
 
   const getPeriodConfig = (period: 'morning' | 'afternoon') => {
@@ -599,9 +670,10 @@ export default function DashboardClientePage() {
   const cargarAgendaSingle = async (turno: Turno, empleadoId: number) => {
     const mapa: Record<string, string[]> = {};
     const disponibles: string[] = [];
+    const rangoFechas = buildAgendaRange(getReprogramacionRangeDays(turno));
 
     await Promise.all(
-      dateRange.map(async (fecha) => {
+      rangoFechas.map(async (fecha) => {
         const fechaISO = dateKeyLocal(fecha);
         const res = await fetch(
           `/api/turnos/disponibilidad/?profesional_id=${empleadoId}&servicio=${turno.servicio}&fecha=${fechaISO}`,
@@ -630,9 +702,10 @@ export default function DashboardClientePage() {
   const cargarAgendaGlobal = async (turno: Turno, aplicarFechas = true) => {
     const mapaGlobal: Record<string, SlotAgrupado[]> = {};
     const mapaFechas: string[] = [];
+    const rangoFechas = buildAgendaRange(getReprogramacionRangeDays(turno));
 
     await Promise.all(
-      dateRange.map(async (fecha) => {
+      rangoFechas.map(async (fecha) => {
         const fechaISO = dateKeyLocal(fecha);
         const res = await fetch(
           `/api/turnos/disponibilidad/?profesional_id=null&servicio=${turno.servicio}&fecha=${fechaISO}`,
@@ -820,8 +893,8 @@ export default function DashboardClientePage() {
 
   const reprogramacionSubtitle = turnoParaReprogramar
     ? viewMode === 'single'
-      ? `Con ${turnoParaReprogramar.empleado_nombre} - ${turnoParaReprogramar.servicio_nombre}`
-      : `${turnoParaReprogramar.servicio_nombre} - Todos los profesionales`
+      ? `Con ${turnoParaReprogramar.empleado_nombre} - ${turnoParaReprogramar.servicio_nombre} - próximos ${getReprogramacionRangeDays(turnoParaReprogramar)} días`
+      : `${turnoParaReprogramar.servicio_nombre} - Todos los profesionales - próximos ${getReprogramacionRangeDays(turnoParaReprogramar)} días`
     : 'Selecciona una nueva fecha y hora para el turno.';
 
   const penalidadServicioNombre = turnoParaReprogramar?.servicio_nombre || 'servicio';
@@ -1313,225 +1386,253 @@ export default function DashboardClientePage() {
 
   return (
     <div className="min-h-screen bg-[#f5eff8]">
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 px-6 py-8 lg:flex-row lg:items-center">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight text-slate-900">¡Hola, {perfilCliente?.user?.first_name || 'Cliente'}! ✨</h1>
-            <p className="mt-2 text-xl text-slate-500">Te esperamos para consentirte 💖</p>
-          </div>
-
-          <Card className="w-full max-w-xl rounded-3xl border border-emerald-300 bg-[#f3fcf6] shadow-lg">
-            <CardContent className="p-6">
+      <div className="border-b border-violet-100 bg-white">
+        <div className="mx-auto max-w-7xl px-6 py-8">
+          <Card className="overflow-hidden rounded-[2rem] border-violet-100 bg-linear-to-br from-white via-violet-50/70 to-emerald-50/60 shadow-sm">
+            <CardContent className="p-0">
               {loadingPerfil || loadingBilletera ? (
-                <BeautifulSpinner label="Cargando billetera..." />
+                <div className="p-10">
+                  <BeautifulSpinner label="Cargando tu panel..." />
+                </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-emerald-300 bg-emerald-100/60 p-3.5">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="rounded-xl bg-emerald-500 p-3 text-white">
-                          <Wallet className="h-6 w-6" />
-                        </div>
-                        <div>
-                          <p className="text-base font-semibold text-emerald-900">Saldo disponible</p>
-                          <p className="text-2xl font-extrabold leading-tight text-emerald-800">
-                            {formatCurrency(saldoBilletera)}
-                          </p>
-                          {fechaVencimientoBilletera && (
-                            <p className="mt-1 text-sm text-emerald-900">
-                              Crédito vigente hasta el {fechaVencimientoBilletera}
-                              {billetera?.esta_por_vencer && (
-                                <span className="ml-1 font-semibold text-amber-700">(próximo a vencer)</span>
-                              )}
-                            </p>
-                          )}
-                        </div>
+                <div className="grid gap-8 p-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(420px,1.1fr)] lg:p-8">
+                  <div className="flex min-h-[300px] flex-col justify-between rounded-3xl border border-white/80 bg-white/70 p-6 shadow-xs backdrop-blur-sm lg:p-8">
+                    <div>
+                      <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700">
+                        <Sparkles className="h-4 w-4" />
+                        Panel de cliente
                       </div>
-
-                      <div className="max-w-sm text-left text-emerald-900 sm:text-right">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-800 underline decoration-emerald-500/70 underline-offset-2 hover:text-emerald-900"
-                            >
-                              <CircleHelp className="h-4 w-4" />
-                              ¿Cómo funciona?
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-lg">
-                            <DialogHeader>
-                              <DialogTitle>¿Cómo funciona el crédito de tu billetera?</DialogTitle>
-                              <DialogDescription>
-                                El crédito se genera automáticamente cuando cancelás un turno con la anticipación mínima definida por el estudio.
-                              </DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-3 text-sm text-slate-700">
-                              <p>
-                                1. Si cancelás dentro del plazo permitido, el sistema acredita el monto correspondiente en tu billetera.
-                              </p>
-                              <p>
-                                2. Ese saldo se descuenta en tus próximas reservas hasta agotarse o hasta su fecha de vencimiento.
-                              </p>
-                              <p>
-                                3. En esta sección podés ver tu saldo actual, vencimiento y todos los movimientos de crédito/débito.
-                              </p>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
-                      </div>
+                      <h1 className="max-w-xl text-4xl font-bold tracking-tight text-slate-950 sm:text-5xl">
+                        Hola, {perfilCliente?.user?.first_name || 'Cliente'}
+                      </h1>
+                      <p className="mt-4 max-w-md text-lg leading-8 text-slate-600">
+                        Tu próximo momento de cuidado empieza acá. Reservá, revisá tus beneficios y seguí tus turnos desde un solo lugar.
+                      </p>
+                    </div>
+                    <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                      <Button
+                        className="h-12 rounded-2xl bg-violet-700 px-6 text-base font-semibold text-white hover:bg-violet-800"
+                        onClick={() => router.push('/dashboard/cliente/turnos/nuevo')}
+                      >
+                        Reservar turno
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-12 rounded-2xl border-violet-200 bg-white px-6 text-base font-semibold text-violet-800 hover:bg-violet-50"
+                        onClick={() => router.push('/dashboard/cliente/turnos')}
+                      >
+                        Ver mis turnos
+                      </Button>
                     </div>
                   </div>
 
-                  {streakStatus && (
-                    <div className="rounded-2xl border border-violet-300 bg-violet-50 p-3.5">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3">
-                          <div className="rounded-xl bg-violet-500 p-3 text-white">
-                            <Gift className="h-6 w-6" />
+                  <div className="space-y-4">
+                    <div className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-xs">
+                      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-sm shadow-emerald-200">
+                            <Wallet className="h-7 w-7" />
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-base font-semibold text-violet-950">Racha de turnos</p>
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <button type="button" className="text-violet-700 hover:text-violet-900">
-                                    <CircleHelp className="h-4 w-4" />
-                                  </button>
-                                </DialogTrigger>
-                                <DialogContent className="max-w-lg">
-                                  <DialogHeader>
-                                    <DialogTitle>¿Cómo funciona la racha?</DialogTitle>
-                                    <DialogDescription>
-                                      Cada turno completado suma a tu racha. Al llegar a la meta configurada por el estudio, se genera un cupón para una próxima reserva.
-                                    </DialogDescription>
-                                  </DialogHeader>
-                                  <div className="space-y-3 text-sm text-slate-700">
-                                    <p>1. Completá {streakStatus.goal_count} turnos para desbloquear un cupón.</p>
-                                    <p>2. Reclamalo para revelar tu código único.</p>
-                                    <p>3. Usalo en el último paso de una nueva reserva. Solo podés tener un cupón activo a la vez.</p>
-                                  </div>
-                                </DialogContent>
-                              </Dialog>
-                            </div>
-                            <p className="mt-1 text-sm text-violet-800">
-                              {streakStatus.progress_count}/{streakStatus.goal_count} turnos completados
+                          <div>
+                            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Saldo disponible</p>
+                            <p className="mt-1 text-3xl font-extrabold leading-tight text-emerald-900">
+                              {formatCurrency(saldoBilletera)}
                             </p>
-                            <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-violet-200">
-                              <div
-                                className="h-full rounded-full bg-violet-600 transition-all"
-                                style={{ width: `${Math.min(100, Math.max(0, streakStatus.progress_percent))}%` }}
-                              />
-                            </div>
-                            {streakStatus.active_coupon && (
-                              <div className="mt-3 rounded-xl border border-violet-200 bg-white p-3 text-sm text-violet-950">
-                                <p className="font-semibold">
-                                  Cupón disponible por {formatCurrency(parseFloat(streakStatus.active_coupon.discount_amount || '0'))}
-                                </p>
-                                {streakStatus.active_coupon.status === 'reclamado' && streakStatus.active_coupon.code ? (
-                                  <p className="mt-1 font-mono text-base">{streakStatus.active_coupon.code}</p>
-                                ) : (
-                                  <p className="mt-1 text-violet-700">Reclamalo para ver tu código.</p>
+                            {fechaVencimientoBilletera && (
+                              <p className="mt-1 text-sm text-emerald-800">
+                                Vigente hasta el {fechaVencimientoBilletera}
+                                {billetera?.esta_por_vencer && (
+                                  <span className="ml-1 font-semibold text-amber-700">(próximo a vencer)</span>
                                 )}
-                              </div>
+                              </p>
                             )}
                           </div>
                         </div>
-                        {streakStatus.active_coupon && streakStatus.active_coupon.status === 'pendiente' && (
-                          <Button
-                            type="button"
-                            onClick={claimStreakCoupon}
-                            disabled={claimingCoupon}
-                            className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
-                          >
-                            {claimingCoupon ? 'Reclamando...' : 'Reclamar cupón'}
-                          </Button>
-                        )}
+                        <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                              >
+                                <CircleHelp className="h-4 w-4" />
+                                ¿Cómo funciona?
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-lg">
+                              <DialogHeader>
+                                <DialogTitle>¿Cómo funciona el crédito de tu billetera?</DialogTitle>
+                                <DialogDescription>
+                                  El crédito se genera automáticamente cuando cancelás un turno con la anticipación mínima definida por el estudio.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="space-y-3 text-sm text-slate-700">
+                                <p>1. Si cancelás dentro del plazo permitido, el sistema acredita el monto correspondiente en tu billetera.</p>
+                                <p>2. Ese saldo se descuenta en tus próximas reservas hasta agotarse o hasta su fecha de vencimiento.</p>
+                                <p>3. En esta sección podés ver tu saldo actual, vencimiento y todos los movimientos de crédito/débito.</p>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                          <Dialog onOpenChange={(open) => { if (open) setHistorialPage(1); }}>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" className="rounded-full border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50">
+                                Historial
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-2xl">
+                              <DialogHeader>
+                                <DialogTitle>Historial de devoluciones</DialogTitle>
+                                <DialogDescription>
+                                  Aquí podés ver los créditos acreditados en tu billetera por cancelaciones dentro de término.
+                                </DialogDescription>
+                              </DialogHeader>
+
+                              {devoluciones.length === 0 ? (
+                                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                                  Aún no tienes devoluciones registradas.
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  {historialActual.map((mov) => (
+                                    <div key={mov.id} className="rounded-xl border border-emerald-200 bg-white p-4">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="mb-1 flex items-center gap-2">
+                                            <span className="rounded-full bg-emerald-100 p-1.5">
+                                              <TrendingUp className="h-4 w-4 text-emerald-700" />
+                                            </span>
+                                            <span className="text-base font-semibold text-slate-900">{mov.tipo_display}</span>
+                                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">
+                                              +{formatCurrency(parseFloat(mov.monto || '0'))}
+                                            </span>
+                                          </div>
+                                          <p className="text-sm text-slate-600">{mov.descripcion || 'Sin descripción'}</p>
+                                          <p className="mt-2 text-xs text-slate-500">
+                                            Saldo anterior: {formatCurrency(parseFloat(mov.saldo_anterior || '0'))}
+                                            <span className="mx-2">→</span>
+                                            <span className="font-semibold text-slate-700">
+                                              Saldo nuevo: {formatCurrency(parseFloat(mov.saldo_nuevo || '0'))}
+                                            </span>
+                                          </p>
+                                        </div>
+                                        <div className="shrink-0 text-right text-xs text-slate-500">
+                                          <p>{new Date(mov.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                          <p>{new Date(mov.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+
+                                  {totalHistorialPages > 1 && (
+                                    <div className="flex items-center justify-between pt-2">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={historialPage === 1}
+                                        onClick={() => setHistorialPage((prev) => Math.max(1, prev - 1))}
+                                      >
+                                        Anterior
+                                      </Button>
+                                      <span className="text-sm text-slate-600">
+                                        Página {historialPage} de {totalHistorialPages}
+                                      </span>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={historialPage === totalHistorialPages}
+                                        onClick={() => setHistorialPage((prev) => Math.min(totalHistorialPages, prev + 1))}
+                                      >
+                                        Siguiente
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </DialogContent>
+                          </Dialog>
+                        </div>
                       </div>
                     </div>
-                  )}
 
-                  <div className="flex justify-end">
-                    <Dialog onOpenChange={(open) => { if (open) setHistorialPage(1); }}>
-                      <DialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className="rounded-xl border-emerald-300 text-emerald-800 hover:bg-emerald-50"
-                        >
-                          Historial
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-2xl">
-                        <DialogHeader>
-                          <DialogTitle>Historial de devoluciones</DialogTitle>
-                          <DialogDescription>
-                            Aquí podés ver los créditos acreditados en tu billetera por cancelaciones dentro de término.
-                          </DialogDescription>
-                        </DialogHeader>
-
-                        {devoluciones.length === 0 ? (
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                            Aún no tienes devoluciones registradas.
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {historialActual.map((mov) => (
-                              <div key={mov.id} className="rounded-xl border border-emerald-200 bg-white p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="mb-1 flex items-center gap-2">
-                                      <span className="rounded-full bg-emerald-100 p-1.5">
-                                        <TrendingUp className="h-4 w-4 text-emerald-700" />
-                                      </span>
-                                      <span className="text-base font-semibold text-slate-900">{mov.tipo_display}</span>
-                                      <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">
-                                        +{formatCurrency(parseFloat(mov.monto || '0'))}
-                                      </span>
+                    {streakStatus && (
+                      <div className="rounded-3xl border border-violet-200 bg-white p-5 shadow-xs">
+                        <div className="flex flex-col gap-5">
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-sm shadow-violet-200">
+                              <Gift className="h-7 w-7" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-violet-700">Beneficio por fidelidad</p>
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <button type="button" className="rounded-full p-1 text-violet-600 hover:bg-violet-50 hover:text-violet-900">
+                                      <CircleHelp className="h-4 w-4" />
+                                    </button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-lg">
+                                    <DialogHeader>
+                                      <DialogTitle>¿Cómo funciona la racha?</DialogTitle>
+                                      <DialogDescription>
+                                        Cada turno completado suma a tu racha. Al llegar a la meta configurada por el estudio, se genera un cupón para una próxima reserva.
+                                      </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-3 text-sm text-slate-700">
+                                      <p>1. Completá {streakStatus.goal_count} turnos para desbloquear un cupón.</p>
+                                      <p>2. Reclamalo para revelar tu código único.</p>
+                                      <p>3. Usalo en el último paso de una nueva reserva. Solo podés tener un cupón activo a la vez.</p>
                                     </div>
-                                    <p className="text-sm text-slate-600">{mov.descripcion || 'Sin descripción'}</p>
-                                    <p className="mt-2 text-xs text-slate-500">
-                                      Saldo anterior: {formatCurrency(parseFloat(mov.saldo_anterior || '0'))}
-                                      <span className="mx-2">→</span>
-                                      <span className="font-semibold text-slate-700">
-                                        Saldo nuevo: {formatCurrency(parseFloat(mov.saldo_nuevo || '0'))}
-                                      </span>
-                                    </p>
-                                  </div>
-                                  <div className="shrink-0 text-right text-xs text-slate-500">
-                                    <p>{new Date(mov.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                                    <p>{new Date(mov.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</p>
-                                  </div>
-                                </div>
+                                  </DialogContent>
+                                </Dialog>
                               </div>
-                            ))}
-
-                            {totalHistorialPages > 1 && (
-                              <div className="flex items-center justify-between pt-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={historialPage === 1}
-                                  onClick={() => setHistorialPage((prev) => Math.max(1, prev - 1))}
-                                >
-                                  Anterior
-                                </Button>
-                                <span className="text-sm text-slate-600">
-                                  Página {historialPage} de {totalHistorialPages}
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={historialPage === totalHistorialPages}
-                                  onClick={() => setHistorialPage((prev) => Math.min(totalHistorialPages, prev + 1))}
-                                >
-                                  Siguiente
-                                </Button>
-                              </div>
-                            )}
+                              <h2 className="mt-1 text-2xl font-bold text-slate-950">Tu cupón está más cerca</h2>
+                              <p className="mt-1 text-sm text-slate-600">
+                                {streakStatus.progress_count} de {streakStatus.goal_count} turnos completados
+                              </p>
+                            </div>
                           </div>
-                        )}
-                      </DialogContent>
-                    </Dialog>
+
+                          <div>
+                            <div className="h-2.5 overflow-hidden rounded-full bg-violet-100">
+                              <div
+                                className="h-full rounded-full bg-linear-to-r from-violet-600 to-fuchsia-500 transition-all"
+                                style={{ width: `${Math.min(100, Math.max(0, streakStatus.progress_percent))}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {streakStatus.active_coupon && (
+                            <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <Badge className="rounded-full bg-violet-100 px-3 py-1 text-violet-800 hover:bg-violet-100">
+                                    Cupón listo
+                                  </Badge>
+                                  <p className="mt-3 text-xl font-extrabold text-violet-950">
+                                    {formatCurrency(parseFloat(streakStatus.active_coupon.discount_amount || '0'))} de descuento
+                                  </p>
+                                  {streakStatus.active_coupon.status === 'reclamado' && streakStatus.active_coupon.code ? (
+                                    <p className="mt-1 font-mono text-base font-semibold text-violet-900">{streakStatus.active_coupon.code}</p>
+                                  ) : (
+                                    <p className="mt-1 text-sm text-violet-700">Reclamalo para ver tu código.</p>
+                                  )}
+                                </div>
+                                {streakStatus.active_coupon.status === 'pendiente' && (
+                                  <Button
+                                    type="button"
+                                    onClick={claimStreakCoupon}
+                                    disabled={claimingCoupon}
+                                    className="rounded-2xl bg-violet-700 px-5 text-white hover:bg-violet-800"
+                                  >
+                                    {claimingCoupon ? 'Reclamando...' : 'Ver cupón'}
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1557,6 +1658,14 @@ export default function DashboardClientePage() {
                   <p className="mt-1 text-sm font-semibold text-orange-800">
                     Ahorrás {ofertaReacomodamiento.ahorro.dias_adelantados} días. Responde antes de que expire o desaparece automáticamente.
                   </p>
+                  {(Number(ofertaReacomodamiento.turno_nuevo.descuento || 0) > 0 || Number(ofertaReacomodamiento.turno_nuevo.credito_billetera || 0) > 0) && (
+                    <p className="mt-1 text-sm font-bold text-green-700">
+                      Oferta por reacomodamiento:{' '}
+                      {Number(ofertaReacomodamiento.turno_nuevo.credito_billetera || 0) > 0
+                        ? `$${ofertaReacomodamiento.turno_nuevo.credito_billetera} de crédito en billetera`
+                        : `$${ofertaReacomodamiento.turno_nuevo.descuento} de descuento`}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row md:flex-col lg:flex-row">
@@ -1580,169 +1689,261 @@ export default function DashboardClientePage() {
         </div>
       )}
 
+      {ofertaFidelizacion && (
+        <div className="border-b border-violet-200 bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500">
+          <div className="mx-auto max-w-7xl px-6 py-5">
+            <div className="flex flex-col gap-4 rounded-3xl border border-white/50 bg-white/90 p-5 shadow-xl md:flex-row md:items-center md:justify-between">
+              <div className="flex gap-4">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-violet-700 text-white shadow-lg">
+                  <Gift className="h-9 w-9" />
+                </div>
+                <div>
+                  <p className="text-sm font-black uppercase tracking-[0.28em] text-violet-700">Te esperamos de vuelta</p>
+                  <h2 className="mt-1 text-2xl font-black text-slate-950">Tenés un beneficio activo para reservar</h2>
+                  <p className="mt-1 text-sm text-slate-700">
+                    Tu servicio sugerido es {ofertaFidelizacion.servicio.nombre} con {ofertaFidelizacion.empleado.nombre}.
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-violet-800">
+                    {ofertaFidelizacion.beneficio === 'saldo'
+                      ? `Tenés $${Number(ofertaFidelizacion.saldo_billetera || 0).toFixed(2)} de saldo disponible para usar.`
+                      : 'Tenés una promo de cliente frecuente para confirmar tu próximo turno.'}
+                  </p>
+                </div>
+              </div>
+              <Button
+                className="bg-violet-700 text-white hover:bg-violet-800"
+                onClick={() => router.push(ofertaFidelizacion.url)}
+              >
+                Reservar con beneficio
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto max-w-7xl px-6 py-8 space-y-8">
         <section>
           <div className="mb-4 flex items-center gap-2">
-            <Clock className="h-5 w-5 text-purple-600" />
-            <h2 className="text-3xl font-bold text-slate-900">Tu Próxima Cita</h2>
+            <Clock className="h-5 w-5 text-violet-600" />
+            <h2 className="text-3xl font-bold text-slate-950">Tu próximo turno</h2>
           </div>
 
           {loadingTurnos ? (
             <Card className="rounded-3xl border-slate-200 bg-white">
               <CardContent className="py-12">
-                <BeautifulSpinner label="Cargando próxima cita..." />
+                <BeautifulSpinner label="Cargando próximo turno..." />
               </CardContent>
             </Card>
           ) : proximoCita ? (
-            <div className="rounded-3xl bg-linear-to-r from-indigo-500 via-violet-500 to-purple-500 p-6 text-white shadow-lg">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex items-start gap-5">
-                  <div className="rounded-3xl border border-white/30 bg-white/15 px-6 py-5 text-center backdrop-blur-xs">
-                    <p className="text-5xl font-bold leading-none">{getDateParts(proximoCita.fecha_hora).day}</p>
-                    <p className="mt-1 text-2xl font-medium">{getDateParts(proximoCita.fecha_hora).month}</p>
+            <Card className="overflow-hidden rounded-3xl border-violet-100 bg-white shadow-sm">
+              <CardContent className="p-0">
+                <div className="grid gap-0 lg:grid-cols-[220px_1fr_240px]">
+                  <div className="bg-linear-to-br from-violet-700 via-purple-700 to-fuchsia-600 p-6 text-white">
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/75">Reservado</p>
+                    <div className="mt-8 rounded-3xl border border-white/20 bg-white/15 px-6 py-5 text-center backdrop-blur-xs">
+                      <p className="text-6xl font-bold leading-none">{getDateParts(proximoCita.fecha_hora).day}</p>
+                      <p className="mt-2 text-2xl font-semibold capitalize">{getDateParts(proximoCita.fecha_hora).month}</p>
+                    </div>
+                    <Badge className="mt-5 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-violet-800 hover:bg-white">
+                      {getDiasHasta(proximoCita.fecha_hora)}
+                    </Badge>
                   </div>
 
-                  <div>
-                    <h3 className="text-3xl font-bold leading-tight">{proximoCita.servicio_nombre}</h3>
-                    <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-lg text-white/90">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-5 w-5" />
+                  <div className="p-6 lg:p-7">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="rounded-full border-violet-200 bg-violet-50 px-3 py-1 text-violet-700">
+                        {getEstadoLabel(proximoCita)}
+                      </Badge>
+                      {proximoCita.estado === 'pendiente_manual' && (
+                        <Badge variant="outline" className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+                          En revisión
+                        </Badge>
+                      )}
+                    </div>
+                    <h3 className="mt-4 text-3xl font-bold leading-tight text-slate-950">{proximoCita.servicio_nombre}</h3>
+                    <div className="mt-4 grid gap-3 text-base text-slate-600 sm:grid-cols-2">
+                      <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3">
+                        <Clock className="h-5 w-5 text-violet-600" />
                         <span>{formatTime(proximoCita.fecha_hora)} - {proximoCita.servicio_duracion}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span>💁</span>
+                      <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3">
+                        <User className="h-5 w-5 text-violet-600" />
                         <span>{proximoCita.empleado_nombre}</span>
                       </div>
                     </div>
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
+                      {getPagoResumen(proximoCita)}
+                    </div>
+                    <p className="mt-4 text-sm text-slate-500">
+                      {proximoCita.estado === 'pendiente_manual'
+                        ? 'Tu solicitud de reprogramación está en revisión del profesional.'
+                        : 'Podés cancelar hasta 24 horas antes del turno.'}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col justify-between border-t border-slate-100 bg-violet-50/50 p-6 lg:border-l lg:border-t-0">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-700">Total</p>
+                      <p className="mt-2 text-4xl font-extrabold leading-tight text-slate-950">
+                        ${parseFloat(proximoCita.monto_pendiente || proximoCita.precio_final || proximoCita.servicio_precio || '0').toFixed(0)}
+                      </p>
+                    </div>
+                    <div className="mt-6 space-y-3">
+                      <Button
+                        className="h-11 w-full rounded-2xl bg-violet-700 text-base font-semibold text-white hover:bg-violet-800"
+                        onClick={() => router.push('/dashboard/cliente/turnos')}
+                      >
+                        Ver detalle
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-11 w-full rounded-2xl border-violet-200 bg-white text-base font-semibold text-violet-800 hover:bg-violet-50"
+                        onClick={() => abrirDialogoReprogramacion(proximoCita)}
+                        disabled={!puedeReprogramarTurno(proximoCita)}
+                        title={!puedeReprogramarTurno(proximoCita) ? getMotivoNoReprogramable(proximoCita) : undefined}
+                      >
+                        {!puedeReprogramarTurno(proximoCita) ? (
+                          <span className="inline-flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4" />
+                            No disponible
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2">
+                            Reprogramar
+                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                              {getReprogramacionRangeLabel(proximoCita)}
+                            </span>
+                          </span>
+                        )}
+                      </Button>
+                      {proximoCita.puede_cancelar && (
+                        <Button
+                          variant="outline"
+                          className="h-11 w-full rounded-2xl border-red-200 bg-white text-base font-semibold text-red-700 hover:bg-red-50"
+                          onClick={() => cancelarTurnoDesdeResumen(proximoCita)}
+                        >
+                          Cancelar turno
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
-
-                <div className="text-left lg:text-right">
-                  <p className="text-lg text-white/80">Total</p>
-                  <p className="text-5xl font-extrabold leading-tight">
-                    ${parseFloat(proximoCita.monto_pendiente || proximoCita.precio_final || proximoCita.servicio_precio || '0').toFixed(0)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="my-5 border-t border-white/20" />
-
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <p className="text-lg text-white/90">
-                  {proximoCita.estado === 'pendiente_manual'
-                    ? 'Tu solicitud de reprogramación está en revisión del profesional'
-                    : 'Puedes cancelar hasta 24 horas antes del turno'}
-                </p>
-                <Badge className="w-fit rounded-full bg-white/20 px-6 py-2 text-xl text-white">{getDiasHasta(proximoCita.fecha_hora)}</Badge>
-              </div>
-
-              {proximoCita.estado === 'pendiente_manual' && (
-                <div className="mt-4 rounded-2xl border border-white/25 bg-white/15 px-4 py-3 text-sm text-white/95">
-                  Estado: {getEstadoLabel(proximoCita)}. Te avisaremos cuando el profesional asigne un nuevo horario.
-                </div>
-              )}
-
-              <div className="mt-4 rounded-2xl border border-white/25 bg-white/10 px-4 py-3 text-sm text-white/95">
-                {getPagoResumen(proximoCita)}
-              </div>
-
-              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Button
-                  className="h-12 rounded-2xl bg-white text-lg font-semibold text-purple-700 hover:bg-white/95"
-                  onClick={() => router.push('/dashboard/cliente/turnos')}
-                >
-                  Ver mis turnos
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-12 rounded-2xl border-white/30 bg-white/10 text-lg font-semibold text-white hover:bg-white/20"
-                  onClick={() => abrirDialogoReprogramacion(proximoCita)}
-                  disabled={!puedeReprogramarTurno(proximoCita)}
-                  title={!puedeReprogramarTurno(proximoCita) ? getMotivoNoReprogramable(proximoCita) : undefined}
-                >
-                  {!puedeReprogramarTurno(proximoCita) ? (
-                    <span className="inline-flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5" />
-                      Reprogramación no disponible
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-2">
-                      Reprogramar turno
-                      <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs font-semibold">
-                        {getReprogramacionCounter(proximoCita)}
-                      </span>
-                    </span>
-                  )}
-                </Button>
-              </div>
-              {!puedeReprogramarTurno(proximoCita) && (
-                <div className="mt-3 rounded-2xl border border-white/25 bg-white/15 px-4 py-3 text-sm text-white/95">
-                  <span className="font-semibold">No se puede reprogramar:</span>{' '}
-                  {getMotivoNoReprogramable(proximoCita)}
-                </div>
-              )}
-            </div>
+                {!puedeReprogramarTurno(proximoCita) && (
+                  <div className="border-t border-amber-100 bg-amber-50 px-6 py-3 text-sm text-amber-800">
+                    <span className="font-semibold">No se puede reprogramar:</span>{' '}
+                    {getMotivoNoReprogramable(proximoCita)}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           ) : (
-            <Card className="rounded-3xl border-slate-200 bg-white">
-              <CardContent className="py-12 text-center">
-                <Calendar className="mx-auto mb-4 h-12 w-12 text-slate-300" />
-                <p className="text-xl text-slate-600">No tienes citas próximas</p>
-                <Button className="mt-4" onClick={() => router.push('/dashboard/cliente/turnos/nuevo')}>
-                  Reservar nuevo turno
-                </Button>
+            <Card className="overflow-hidden rounded-3xl border-violet-100 bg-white shadow-sm">
+              <CardContent className="p-0">
+                <div className="grid gap-0 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div className="bg-linear-to-br from-violet-700 via-purple-700 to-fuchsia-600 p-8 text-white">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-white/15 backdrop-blur-xs">
+                      <Calendar className="h-8 w-8" />
+                    </div>
+                    <h3 className="mt-8 text-3xl font-bold">Sin turnos próximos</h3>
+                    <p className="mt-3 max-w-sm text-base leading-7 text-white/85">
+                      Reservá tu próximo turno y dejá organizado tu momento de cuidado.
+                    </p>
+                  </div>
+                  <div className="flex flex-col justify-center p-8">
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-700">Próximo paso</p>
+                    <h3 className="mt-2 text-2xl font-bold text-slate-950">Elegí servicio, profesional y horario</h3>
+                    <p className="mt-3 max-w-xl text-slate-600">
+                      El proceso de reserva es rápido y vas a ver el resumen antes de confirmar.
+                    </p>
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                      <Button
+                        className="h-12 rounded-2xl bg-violet-700 px-6 text-base font-semibold text-white hover:bg-violet-800"
+                        onClick={() => router.push('/dashboard/cliente/turnos/nuevo')}
+                      >
+                        Reservar turno
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-12 rounded-2xl border-violet-200 px-6 text-base font-semibold text-violet-800 hover:bg-violet-50"
+                        onClick={() => router.push('/dashboard/cliente/turnos')}
+                      >
+                        Ver mis turnos
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
         </section>
 
         <section>
-          <h2 className="mb-4 text-3xl font-bold text-slate-900">Próximas Citas</h2>
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <h2 className="text-3xl font-bold text-slate-950">Turnos siguientes</h2>
+            {siguientesCitas.length > 0 && (
+              <Button
+                variant="outline"
+                className="hidden rounded-full border-violet-200 bg-white text-violet-800 hover:bg-violet-50 sm:inline-flex"
+                onClick={() => router.push('/dashboard/cliente/turnos')}
+              >
+                Ver todos
+              </Button>
+            )}
+          </div>
           {loadingTurnos ? (
             <Card className="rounded-3xl border-slate-200 bg-white">
               <CardContent className="py-10">
-                <BeautifulSpinner label="Cargando próximas citas..." />
+                <BeautifulSpinner label="Cargando turnos siguientes..." />
               </CardContent>
             </Card>
           ) : siguientesCitas.length > 0 ? (
-            <div className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-2">
               {siguientesCitas.map((turno) => {
                 const precio = parseFloat(turno.monto_pendiente || turno.precio_final || turno.servicio_precio || '0');
                 return (
                   <div
                     key={turno.id}
-                    className="w-full rounded-3xl border border-slate-200 bg-white p-6 text-left transition-all hover:shadow-sm"
+                    className="w-full rounded-3xl border border-violet-100 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
                   >
                     <div
-                      className="flex cursor-pointer items-center justify-between gap-4"
+                      className="flex cursor-pointer items-start justify-between gap-4"
                       onClick={() => router.push('/dashboard/cliente/turnos')}
                     >
-                      <div className="flex min-w-0 items-center gap-5">
-                        <div className="rounded-3xl bg-purple-100 px-5 py-3 text-center text-purple-700">
-                          <p className="text-4xl font-bold leading-none">{getDateParts(turno.fecha_hora).day}</p>
-                          <p className="mt-1 text-xl font-medium">{getDateParts(turno.fecha_hora).month}</p>
+                      <div className="flex min-w-0 items-start gap-4">
+                        <div className="shrink-0 rounded-2xl bg-violet-50 px-4 py-3 text-center text-violet-700">
+                          <p className="text-3xl font-bold leading-none">{getDateParts(turno.fecha_hora).day}</p>
+                          <p className="mt-1 text-sm font-semibold uppercase tracking-wide">{getDateParts(turno.fecha_hora).month}</p>
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate text-2xl font-bold text-slate-900">{turno.servicio_nombre}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-6 gap-y-1 text-base text-slate-600">
-                            <span className="flex items-center gap-2"><Clock className="h-4 w-4" /> {formatTime(turno.fecha_hora)}</span>
-                            <span>💁 {turno.empleado_nombre}</span>
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-600">
+                              {getDiasHasta(turno.fecha_hora)}
+                            </Badge>
+                            {turno.estado === 'pendiente_manual' && (
+                              <Badge variant="outline" className="rounded-full border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs text-blue-700">
+                                En revisión
+                              </Badge>
+                            )}
                           </div>
-                          <p className="mt-2 text-sm text-slate-600">{getPagoResumen(turno)}</p>
-                          {turno.estado === 'pendiente_manual' && (
-                            <p className="mt-2 text-sm font-medium text-blue-700">{getEstadoLabel(turno)}</p>
-                          )}
+                          <p className="truncate text-xl font-bold text-slate-950">{turno.servicio_nombre}</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                            <span className="flex items-center gap-2"><Clock className="h-4 w-4" /> {formatTime(turno.fecha_hora)}</span>
+                            <span className="flex items-center gap-2"><User className="h-4 w-4" /> {turno.empleado_nombre}</span>
+                          </div>
+                          <p className="mt-3 line-clamp-2 text-sm text-slate-500">{getPagoResumen(turno)}</p>
                         </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-4xl font-bold text-slate-900">${Number.isFinite(precio) ? precio.toFixed(0) : '0'}</p>
-                        <p className="mt-1 text-lg text-slate-500">{getDiasHasta(turno.fecha_hora)}</p>
+                      <div className="hidden shrink-0 text-right sm:block">
+                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Total</p>
+                        <p className="mt-1 text-2xl font-extrabold text-slate-950">${Number.isFinite(precio) ? precio.toFixed(0) : '0'}</p>
                       </div>
                     </div>
 
-                    <div className="mt-4 border-t border-slate-200 pt-4">
+                    <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-lg font-extrabold text-slate-950 sm:hidden">${Number.isFinite(precio) ? precio.toFixed(0) : '0'}</p>
                       <Button
                         variant="outline"
-                        className="h-10 rounded-xl border-purple-200 bg-purple-50 px-5 text-base font-semibold text-purple-700 hover:bg-purple-100"
+                        className="h-10 rounded-xl border-violet-200 bg-violet-50 px-5 text-sm font-semibold text-violet-700 hover:bg-violet-100"
                         onClick={() => abrirDialogoReprogramacion(turno)}
                         disabled={!puedeReprogramarTurno(turno)}
                         title={!puedeReprogramarTurno(turno) ? getMotivoNoReprogramable(turno) : undefined}
@@ -1755,8 +1956,8 @@ export default function DashboardClientePage() {
                         ) : (
                           <span className="inline-flex items-center gap-2">
                             Reprogramar
-                            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700">
-                              {getReprogramacionCounter(turno)}
+                            <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-violet-700">
+                              {getReprogramacionRangeLabel(turno)}
                             </span>
                           </span>
                         )}
@@ -1772,24 +1973,30 @@ export default function DashboardClientePage() {
               })}
             </div>
           ) : (
-            <Card className="rounded-3xl border-slate-200 bg-white">
-              <CardContent className="py-10 text-center">
-                <p className="text-lg text-slate-600">No hay más citas próximas.</p>
+            <Card className="rounded-3xl border-violet-100 bg-white shadow-sm">
+              <CardContent className="py-8 text-center">
+                <p className="text-base text-slate-500">No tenés más turnos agendados por ahora.</p>
               </CardContent>
             </Card>
           )}
         </section>
 
         <section>
-          <div className="rounded-3xl border-2 border-dashed border-slate-300 bg-white/40 p-10 text-center">
-            <Calendar className="mx-auto mb-4 h-12 w-12 text-purple-600" />
-            <h3 className="text-3xl font-bold text-slate-900">¿Quieres agendar otro turno?</h3>
-            <p className="mt-2 text-xl text-slate-600">Reserva tu próxima cita en segundos</p>
+          <div className="flex flex-col items-start justify-between gap-5 rounded-3xl border border-violet-100 bg-white p-6 shadow-sm sm:flex-row sm:items-center">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-50 text-violet-700">
+                <Calendar className="h-7 w-7" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold text-slate-950">¿Querés reservar otro momento para vos?</h3>
+                <p className="mt-1 text-base text-slate-600">Elegí servicio y horario en pocos pasos.</p>
+              </div>
+            </div>
             <Button
-              className="mt-6 h-12 rounded-2xl bg-linear-to-r from-purple-700 to-pink-600 px-8 text-lg font-semibold hover:opacity-95"
+              className="h-12 rounded-2xl bg-violet-700 px-8 text-base font-semibold text-white hover:bg-violet-800"
               onClick={() => router.push('/dashboard/cliente/turnos/nuevo')}
             >
-              Reservar nuevo turno
+              Reservar turno
             </Button>
           </div>
         </section>

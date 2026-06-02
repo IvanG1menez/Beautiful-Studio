@@ -39,7 +39,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { formatTime, toISODate } from '@/lib/dateUtils';
 import { Turno } from '@/types';
 import { AlertCircle, Calendar, Check, ChevronLeft, ChevronRight, Clock, CreditCard, DollarSign, ExternalLink, Loader2, MapPin, Printer, Sparkles, User } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 
 const ESTADO_COLORS: { [key: string]: string } = {
@@ -68,7 +68,6 @@ const ESTADO_LABELS: { [key: string]: string } = {
 
 export default function AgendaEmpleadoPage() {
   const { user } = useAuth();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +78,10 @@ export default function AgendaEmpleadoPage() {
   const [diasTrabajo, setDiasTrabajo] = useState<number[]>([]);
   const [turnosMes, setTurnosMes] = useState<Turno[]>([]);
   const [loadingMes, setLoadingMes] = useState(false);
-  const [tableScope, setTableScope] = useState<'dia' | 'semana' | 'mes'>('dia');
+  const currentMonthValue = new Date().toISOString().slice(0, 7);
+  const [tableScope, setTableScope] = useState<'dia' | 'semana' | 'mes' | 'rango_meses'>('dia');
+  const [rangoMesInicio, setRangoMesInicio] = useState(currentMonthValue);
+  const [rangoMesFin, setRangoMesFin] = useState(currentMonthValue);
   const [tableTurnos, setTableTurnos] = useState<Turno[]>([]);
   const [loadingTabla, setLoadingTabla] = useState(false);
   const [modoCompletar, setModoCompletar] = useState(false);
@@ -115,15 +117,24 @@ export default function AgendaEmpleadoPage() {
   const [qrWaitingPayment, setQrWaitingPayment] = useState(false);
   const [qrPaymentApproved, setQrPaymentApproved] = useState(false);
   const [qrNative, setQrNative] = useState(false);
+  const [finalizacionExitosaOpen, setFinalizacionExitosaOpen] = useState(false);
+  const [finalizacionExitosaMessage, setFinalizacionExitosaMessage] = useState('Turno finalizado con éxito.');
   const qrPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const fechaParam = searchParams.get('fecha');
-    if (!fechaParam) return;
+    const turnoFinalizado = searchParams.get('turno_finalizado');
 
-    const parsed = new Date(`${fechaParam}T00:00:00`);
-    if (!Number.isNaN(parsed.getTime())) {
-      setSelectedDate(parsed);
+    if (fechaParam) {
+      const parsed = new Date(`${fechaParam}T00:00:00`);
+      if (!Number.isNaN(parsed.getTime())) {
+        setSelectedDate(parsed);
+      }
+    }
+
+    if (turnoFinalizado === '1') {
+      setFinalizacionExitosaMessage('Turno registrado con éxito.');
+      setFinalizacionExitosaOpen(true);
     }
   }, [searchParams]);
 
@@ -499,6 +510,26 @@ export default function AgendaEmpleadoPage() {
     }
   };
 
+  const changeMonth = (months: number) => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(newDate.getMonth() + months);
+    setSelectedDate(newDate);
+  };
+
+  const getMonthInputValue = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  const setSelectedMonth = (value: string) => {
+    if (!value) return;
+    const [year, month] = value.split('-').map(Number);
+    const newDate = new Date(selectedDate);
+    newDate.setFullYear(year, month - 1, 1);
+    setSelectedDate(newDate);
+  };
+
   // Ir a hoy
   const goToToday = () => {
     setSelectedDate(new Date());
@@ -512,7 +543,7 @@ export default function AgendaEmpleadoPage() {
   // Filtrar turnos
   const turnosFiltrados = filtrarPorEstado(turnos);
 
-  const loadTurnosTabla = async (fechaReferencia: Date, scope: 'dia' | 'semana' | 'mes') => {
+  const loadTurnosTabla = async (fechaReferencia: Date, scope: 'dia' | 'semana' | 'mes' | 'rango_meses') => {
     if (!empleadoId) return;
 
     try {
@@ -534,11 +565,20 @@ export default function AgendaEmpleadoPage() {
         finSemana.setDate(inicioSemana.getDate() + 6);
         fechaDesde = inicioSemana.toISOString().split('T')[0];
         fechaHasta = finSemana.toISOString().split('T')[0];
-      } else {
+      } else if (scope === 'mes') {
         const inicioMes = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth(), 1);
         const finMes = new Date(fechaReferencia.getFullYear(), fechaReferencia.getMonth() + 1, 0);
         fechaDesde = inicioMes.toISOString().split('T')[0];
         fechaHasta = finMes.toISOString().split('T')[0];
+      } else {
+        const [inicioYear, inicioMonth] = rangoMesInicio.split('-').map(Number);
+        const [finYear, finMonth] = rangoMesFin.split('-').map(Number);
+        const inicioMes = new Date(inicioYear, inicioMonth - 1, 1);
+        const finMes = new Date(finYear, finMonth, 0);
+        const inicioFinal = inicioMes <= finMes ? inicioMes : finMes;
+        const finFinal = inicioMes <= finMes ? finMes : new Date(inicioYear, inicioMonth, 0);
+        fechaDesde = inicioFinal.toISOString().split('T')[0];
+        fechaHasta = finFinal.toISOString().split('T')[0];
       }
 
       const response = await authenticatedFetch(
@@ -784,6 +824,12 @@ export default function AgendaEmpleadoPage() {
   });
 
   const proximoTurnoId = proximosTurnos.find((turno) => getTurnoInicio(turno) > new Date())?.id;
+  const proximoTurno = proximosTurnos.find((turno) => getTurnoInicio(turno) > new Date()) || null;
+  const proximoTurnoResumen = proximoTurno as (Turno & {
+    cliente_nombre?: string;
+    cliente_email?: string;
+    servicio_nombre?: string;
+  }) | null;
 
   // Formatear hora
   // Formatear hora (convertir de UTC a hora local)
@@ -935,6 +981,20 @@ export default function AgendaEmpleadoPage() {
     return 'Origen no informado';
   };
 
+  const getSalaTurnoLabel = (turno: Turno): string => {
+    const turnoConSala = turno as Turno & {
+      sala_nombre?: string;
+      categoria_nombre?: string;
+    };
+    return (
+      turnoConSala.sala_nombre ||
+      turno.servicio?.categoria?.sala_nombre ||
+      turnoConSala.categoria_nombre ||
+      turno.servicio?.categoria?.nombre ||
+      'Sala no asignada'
+    );
+  };
+
   const getMovimientoTurnoLabel = (turno: Turno): string | null => {
     const movimiento = (turno as any).ultimo_movimiento_reprogramacion;
     if (!movimiento) return null;
@@ -972,11 +1032,8 @@ export default function AgendaEmpleadoPage() {
     setCobroDialogOpen(false);
     resetQrCobro();
     if (updated && updated.id) {
-      try {
-        router.push(`/dashboard/profesional/turno-finalizado?turno_id=${updated.id}`);
-      } catch (e) {
-        // ignore routing errors
-      }
+      setFinalizacionExitosaMessage('Turno finalizado con éxito.');
+      setFinalizacionExitosaOpen(true);
     }
   };
 
@@ -1107,146 +1164,213 @@ export default function AgendaEmpleadoPage() {
     if (empleadoId && viewMode === 'tabla') {
       void loadTurnosTabla(selectedDate, tableScope);
     }
-  }, [empleadoId, viewMode, selectedDate, tableScope]);
+  }, [empleadoId, viewMode, selectedDate, tableScope, rangoMesInicio, rangoMesFin]);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Encabezado principal */}
-      <div className="border-b bg-card">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-500 mb-1">
-              ¡Hola, {user?.first_name || 'Profesional'}!
-            </p>
-            <h1 className="text-3xl font-bold text-gray-900">Agenda Profesional</h1>
-            <p className="text-gray-600 mt-1">Gestiona tus citas y reuniones</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              variant={modoCompletar ? 'outline' : 'default'}
-              onClick={() => setModoCompletar((prev) => !prev)}
-              className="flex items-center gap-2"
-            >
-              <span>Completar Turnos</span>
-              {totalTurnosPendientes > 0 && (
-                <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-black/80 px-2 text-xs font-semibold text-white">
-                  {totalTurnosPendientes}
-                </span>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => window.location.assign('/dashboard/profesional/reservar-turno')}
-            >
-              Reservar turno
-            </Button>
-            <Button variant="outline" onClick={() => window.print()} disabled={modoCompletar}>
-              <Printer className="w-4 h-4 mr-2" />
-              Imprimir agenda
-            </Button>
-          </div>
+    <div className="min-h-screen bg-[#f5eff8]">
+      <div className="border-b border-violet-100 bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <Card className="overflow-hidden rounded-[2rem] border-violet-100 bg-linear-to-br from-white via-violet-50/75 to-white shadow-sm">
+            <CardContent className="p-0">
+              <div className="grid gap-0 lg:grid-cols-[1fr_420px]">
+                <div className="p-6 lg:p-8">
+                  <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700">
+                    <Sparkles className="h-4 w-4" />
+                    Panel profesional
+                  </div>
+                  <h1 className="max-w-2xl text-4xl font-bold tracking-tight text-slate-950 sm:text-5xl">
+                    Hola, {user?.first_name || 'Profesional'}
+                  </h1>
+                  <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
+                    Revisá tus turnos, confirmaciones y pagos del día desde una agenda clara y lista para trabajar.
+                  </p>
+
+                  <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                    <Button
+                      className="h-12 rounded-2xl bg-violet-700 px-6 text-base font-semibold text-white hover:bg-violet-800"
+                      onClick={() => window.location.assign('/dashboard/profesional/reservar-turno')}
+                    >
+                      Agendar turno
+                    </Button>
+                    <Button
+                      variant={modoCompletar ? 'default' : 'outline'}
+                      onClick={() => setModoCompletar((prev) => !prev)}
+                      className={modoCompletar
+                        ? 'h-12 rounded-2xl bg-slate-950 px-6 text-base font-semibold text-white hover:bg-slate-800'
+                        : 'h-12 rounded-2xl border-violet-200 bg-white px-6 text-base font-semibold text-violet-800 hover:bg-violet-50'
+                      }
+                    >
+                      Turnos por completar
+                      {totalTurnosPendientes > 0 && (
+                        <span className="ml-2 inline-flex min-w-6 items-center justify-center rounded-full bg-violet-100 px-2 text-xs font-semibold text-violet-800">
+                          {totalTurnosPendientes}
+                        </span>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => window.print()}
+                      disabled={modoCompletar}
+                      className="h-12 rounded-2xl border-slate-200 bg-white px-6 text-base font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Printer className="mr-2 h-4 w-4" />
+                      Imprimir
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border-t border-violet-100 bg-white/80 p-6 lg:border-l lg:border-t-0 lg:p-8">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-700">Próximo turno</p>
+                  {proximoTurno ? (
+                    <div className="mt-4 rounded-3xl border border-violet-100 bg-violet-50/70 p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-3xl font-extrabold text-slate-950">{formatTime(proximoTurno.fecha_hora)}</p>
+                          <p className="mt-2 font-semibold text-slate-800">
+                            {proximoTurnoResumen?.cliente_nombre || proximoTurno.cliente?.nombre_completo || proximoTurnoResumen?.cliente_email || 'Cliente'}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {proximoTurnoResumen?.servicio_nombre || proximoTurno.servicio?.nombre || 'Servicio'}
+                          </p>
+                        </div>
+                        <Badge className="rounded-full bg-white px-3 py-1 text-violet-800 hover:bg-white">
+                          {ESTADO_LABELS[proximoTurno.estado]}
+                        </Badge>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-3xl border border-dashed border-violet-200 bg-white p-5 text-slate-600">
+                      No hay otro turno activo en la agenda seleccionada.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        <Dialog open={finalizacionExitosaOpen} onOpenChange={setFinalizacionExitosaOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-emerald-700">
+                <Check className="h-5 w-5" />
+                Turno finalizado con éxito
+              </DialogTitle>
+              <DialogDescription>{finalizacionExitosaMessage}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button type="button" onClick={() => setFinalizacionExitosaOpen(false)}>
+                Aceptar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {!modoCompletar && (
           <>
             {/* Tarjetas de resumen */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Hoy</CardTitle>
-                  <CardDescription>Turnos del día de hoy</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-3xl font-semibold text-purple-600">
-                    {resumenHoy !== null ? resumenHoy : '-'}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {formatDate(new Date())}
-                  </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Card className="rounded-3xl border-violet-100 bg-white shadow-sm">
+                <CardContent className="flex items-center justify-between gap-4 p-5">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-violet-700">Turnos hoy</p>
+                    <p className="mt-2 text-3xl font-extrabold text-slate-950">{resumenHoy !== null ? resumenHoy : '-'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{formatDate(new Date())}</p>
+                  </div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-700">
+                    <Calendar className="h-6 w-6" />
+                  </div>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Esta Semana</CardTitle>
-                  <CardDescription>Turnos de la semana actual</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-3xl font-semibold text-emerald-600">
-                    {resumenSemana !== null ? resumenSemana : '-'}
-                  </p>
+              <Card className="rounded-3xl border-emerald-100 bg-white shadow-sm">
+                <CardContent className="flex items-center justify-between gap-4 p-5">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-emerald-700">Esta semana</p>
+                    <p className="mt-2 text-3xl font-extrabold text-slate-950">{resumenSemana !== null ? resumenSemana : '-'}</p>
+                    <p className="mt-1 text-xs text-slate-500">Turnos programados</p>
+                  </div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                    <Clock className="h-6 w-6" />
+                  </div>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Confirmadas</CardTitle>
-                  <CardDescription>Citas confirmadas del día seleccionado</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-3xl font-semibold text-emerald-600">{resumenConfirmados}</p>
+              <Card className="rounded-3xl border-blue-100 bg-white shadow-sm">
+                <CardContent className="flex items-center justify-between gap-4 p-5">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">Confirmados</p>
+                    <p className="mt-2 text-3xl font-extrabold text-slate-950">{resumenConfirmados}</p>
+                    <p className="mt-1 text-xs text-slate-500">Del día seleccionado</p>
+                  </div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                    <Check className="h-6 w-6" />
+                  </div>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">Turnos pendientes</CardTitle>
-                  <CardDescription>A la espera de confirmación</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-3xl font-semibold text-amber-500">{resumenPendientes}</p>
+              <Card className="rounded-3xl border-amber-100 bg-white shadow-sm">
+                <CardContent className="flex items-center justify-between gap-4 p-5">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-amber-700">Por confirmar</p>
+                    <p className="mt-2 text-3xl font-extrabold text-slate-950">{resumenPendientes}</p>
+                    <p className="mt-1 text-xs text-slate-500">Esperando respuesta</p>
+                  </div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+                    <AlertCircle className="h-6 w-6" />
+                  </div>
                 </CardContent>
               </Card>
-
             </div>
-
-            {/* Filtros */}
-            <Card>
-              <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle>Filtros</CardTitle>
-                  <CardDescription>Filtra tus turnos por estado</CardDescription>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <Select value={filtroEstado} onValueChange={setFiltroEstado}>
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue placeholder="Filtrar por estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todos">Todos los estados</SelectItem>
-                      <SelectItem value="pendiente">Pendientes</SelectItem>
-                      <SelectItem value="confirmado">Confirmados</SelectItem>
-                      <SelectItem value="en_proceso">En Proceso</SelectItem>
-                      <SelectItem value="completado">Completados</SelectItem>
-                      <SelectItem value="cancelado">Cancelados</SelectItem>
-                      <SelectItem value="no_asistio">No Asistieron</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardHeader>
-            </Card>
 
             {/* Calendario + lista lateral */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
               {/* Calendario y vista semanal/mensual */}
               <div className="lg:col-span-2 space-y-4">
-                <Card>
+                <Card className="rounded-3xl border-violet-100 bg-white shadow-sm">
                   <CardHeader className="space-y-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <Tabs value={viewMode} onValueChange={(val) => setViewMode(val as 'dia' | 'semana' | 'mes' | 'tabla')}>
-                        <TabsList className="grid grid-cols-4 w-full max-w-sm">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                      <div>
+                        <CardTitle className="text-2xl font-bold text-slate-950">Agenda</CardTitle>
+                        <CardDescription>Vista operativa de tus turnos y estados</CardDescription>
+                      </div>
+
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                        <Tabs value={viewMode} onValueChange={(val) => setViewMode(val as 'dia' | 'semana' | 'mes' | 'tabla')}>
+                          <TabsList className="grid w-full grid-cols-4 rounded-2xl bg-violet-50 p-1 md:w-[360px]">
                           <TabsTrigger value="dia">Día</TabsTrigger>
                           <TabsTrigger value="semana">Semana</TabsTrigger>
                           <TabsTrigger value="mes">Mes</TabsTrigger>
                           <TabsTrigger value="tabla">Tabla</TabsTrigger>
-                        </TabsList>
-                      </Tabs>
+                          </TabsList>
+                        </Tabs>
 
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" size="icon" onClick={() => changeDate(-1)}>
+                        <Select value={filtroEstado} onValueChange={setFiltroEstado}>
+                          <SelectTrigger className="h-10 rounded-2xl border-violet-100 bg-white md:w-[190px]">
+                            <SelectValue placeholder="Filtrar por estado" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="todos">Todos los estados</SelectItem>
+                            <SelectItem value="pendiente">Pendientes</SelectItem>
+                            <SelectItem value="confirmado">Confirmados</SelectItem>
+                            <SelectItem value="en_proceso">En proceso</SelectItem>
+                            <SelectItem value="completado">Completados</SelectItem>
+                            <SelectItem value="cancelado">Cancelados</SelectItem>
+                            <SelectItem value="no_asistio">No asistieron</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                        <Calendar className="h-4 w-4 text-violet-600" />
+                        <span>{formatDate(selectedDate)}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button className="rounded-xl border-slate-200 bg-white" variant="outline" size="icon" onClick={() => changeDate(-1)}>
                           <ChevronLeft className="w-4 h-4" />
                         </Button>
                         <Button
@@ -1254,35 +1378,44 @@ export default function AgendaEmpleadoPage() {
                           size="sm"
                           onClick={goToToday}
                           disabled={isTodaySelected}
+                          className="rounded-xl text-slate-700 hover:bg-white"
                         >
                           Hoy
                         </Button>
-                        <Button variant="outline" size="icon" onClick={() => changeDate(1)}>
+                        <Button className="rounded-xl border-slate-200 bg-white" variant="outline" size="icon" onClick={() => changeDate(1)}>
                           <ChevronRight className="w-4 h-4" />
                         </Button>
+                        <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
+                        <Button className="rounded-xl border-slate-200 bg-white" variant="outline" size="sm" onClick={() => changeMonth(-1)}>
+                          Mes anterior
+                        </Button>
+                        <Input
+                          type="month"
+                          value={getMonthInputValue(selectedDate)}
+                          onChange={(e) => setSelectedMonth(e.target.value)}
+                          className="h-9 w-[150px] rounded-xl border-slate-200 bg-white"
+                        />
+                        <Button className="rounded-xl border-slate-200 bg-white" variant="outline" size="sm" onClick={() => changeMonth(1)}>
+                          Mes siguiente
+                        </Button>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                      <Calendar className="w-4 h-4" />
-                      <span>{formatDate(selectedDate)}</span>
                     </div>
                   </CardHeader>
                   <CardContent>
                     {viewMode === 'dia' && (
-                      <div className="rounded-lg border bg-white h-[480px] flex flex-col">
-                        <div className="border-b px-4 py-3 flex items-center justify-between">
+                      <div className="flex h-[480px] flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white">
+                        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-4">
                           <div>
-                            <h3 className="text-sm font-semibold text-gray-900">Agenda del día</h3>
-                            <p className="text-xs text-gray-500">Vista cronológica de tus turnos por hora</p>
+                            <h3 className="text-sm font-semibold text-slate-950">Agenda del día</h3>
+                            <p className="text-xs text-slate-500">Vista cronológica por horario</p>
                           </div>
-                          <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                          <div className="flex items-center gap-3 text-[11px] text-slate-500">
                             <div className="flex items-center gap-1">
-                              <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                              <span className="h-2 w-2 rounded-full bg-violet-600" />
                               <span>Turno</span>
                             </div>
                             <div className="flex items-center gap-1">
-                              <span className="h-px w-4 bg-gray-300" />
+                              <span className="h-px w-4 bg-slate-300" />
                               <span>Sin turnos</span>
                             </div>
                           </div>
@@ -1293,8 +1426,8 @@ export default function AgendaEmpleadoPage() {
                             <BeautifulSpinner label="Cargando turnos del día..." />
                           </div>
                         ) : turnosOrdenados.length === 0 ? (
-                          <div className="flex-1 flex flex-col items-center justify-center text-sm text-muted-foreground">
-                            <Calendar className="w-10 h-10 text-gray-300 mb-3" />
+                          <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-500">
+                            <Calendar className="mb-3 h-10 w-10 text-violet-200" />
                             No hay turnos para este día.
                           </div>
                         ) : (
@@ -1308,21 +1441,21 @@ export default function AgendaEmpleadoPage() {
                               const etiquetaHora = `${hora.toString().padStart(2, '0')}:00`;
 
                               return (
-                                <div key={hora} className="flex border-b last:border-b-0">
-                                  <div className="w-16 flex items-start justify-end pr-3 pt-3 text-xs text-gray-400">
+                                <div key={hora} className="flex border-b border-slate-100 last:border-b-0">
+                                  <div className="flex w-16 items-start justify-end pr-3 pt-3 text-xs text-slate-400">
                                     {etiquetaHora}
                                   </div>
                                   <div className="relative flex-1 py-3">
-                                    <div className="absolute left-2 top-0 bottom-0 border-l border-dashed border-gray-200" />
+                                    <div className="absolute bottom-0 left-2 top-0 border-l border-dashed border-slate-200" />
                                     {turnosEnHora.length > 0 ? (
                                       <div className="space-y-2 ml-6">
                                         {turnosEnHora.map((turno) => (
                                           <div
                                             key={turno.id}
-                                            className="relative rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-gray-800 shadow-sm"
+                                            className={`relative rounded-2xl border px-3 py-2 text-xs shadow-sm ${turno.id === proximoTurnoId ? 'border-violet-300 bg-violet-50 text-slate-900' : 'border-slate-100 bg-white text-slate-800'}`}
                                           >
                                             <div className="flex items-center gap-2 mb-1">
-                                              <Clock className="w-3 h-3 text-indigo-500" />
+                                              <Clock className="h-3 w-3 text-violet-600" />
                                               <span className="font-semibold text-[11px]">
                                                 {formatTime(turno.fecha_hora)}
                                               </span>
@@ -1333,7 +1466,7 @@ export default function AgendaEmpleadoPage() {
                                             <div className="text-[11px] font-medium truncate">
                                               {(turno as any).servicio_nombre || turno.servicio?.nombre || 'Servicio'}
                                             </div>
-                                            <div className="text-[11px] text-gray-600 truncate">
+                                            <div className="truncate text-[11px] text-slate-600">
                                               {(turno as any).cliente_nombre ||
                                                 turno.cliente?.nombre_completo ||
                                                 (turno as any).cliente_email ||
@@ -1343,7 +1476,7 @@ export default function AgendaEmpleadoPage() {
                                         ))}
                                       </div>
                                     ) : (
-                                      <div className="ml-6 text-[11px] text-gray-400">
+                                      <div className="ml-6 text-[11px] text-slate-400">
                                         Sin turnos en este horario
                                       </div>
                                     )}
@@ -1495,23 +1628,43 @@ export default function AgendaEmpleadoPage() {
 
                     {viewMode === 'tabla' && (
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
                           <div className="text-sm text-gray-600">
                             Rango de tabla
                           </div>
-                          <Select
-                            value={tableScope}
-                            onValueChange={(val) => setTableScope(val as 'dia' | 'semana' | 'mes')}
-                          >
-                            <SelectTrigger className="w-[180px]">
-                              <SelectValue placeholder="Seleccionar rango" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="dia">Día</SelectItem>
-                              <SelectItem value="semana">Semana</SelectItem>
-                              <SelectItem value="mes">Mes</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Select
+                              value={tableScope}
+                              onValueChange={(val) => setTableScope(val as 'dia' | 'semana' | 'mes' | 'rango_meses')}
+                            >
+                              <SelectTrigger className="w-[190px] rounded-xl">
+                                <SelectValue placeholder="Seleccionar rango" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="dia">Día</SelectItem>
+                                <SelectItem value="semana">Semana</SelectItem>
+                                <SelectItem value="mes">Mes</SelectItem>
+                                <SelectItem value="rango_meses">Rango de meses</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {tableScope === 'rango_meses' && (
+                              <>
+                                <Input
+                                  type="month"
+                                  value={rangoMesInicio}
+                                  onChange={(e) => setRangoMesInicio(e.target.value)}
+                                  className="h-10 w-[150px] rounded-xl"
+                                />
+                                <span className="text-sm text-slate-500">hasta</span>
+                                <Input
+                                  type="month"
+                                  value={rangoMesFin}
+                                  onChange={(e) => setRangoMesFin(e.target.value)}
+                                  className="h-10 w-[150px] rounded-xl"
+                                />
+                              </>
+                            )}
+                          </div>
                         </div>
 
                         <div className="rounded-lg border bg-white overflow-hidden">
@@ -1583,10 +1736,10 @@ export default function AgendaEmpleadoPage() {
 
               {/* Lista de turnos del día */}
               <div className="space-y-4">
-                <Card>
+                <Card className="rounded-3xl border-violet-100 bg-white shadow-sm">
                   <CardHeader>
                     <CardTitle className="flex flex-col gap-1">
-                      <span className="text-sm font-medium text-gray-500">
+                      <span className="text-sm font-medium capitalize text-violet-700">
                         {selectedDate.toLocaleDateString('es-AR', {
                           weekday: 'long',
                           day: '2-digit',
@@ -1594,9 +1747,9 @@ export default function AgendaEmpleadoPage() {
                           year: 'numeric',
                         })}
                       </span>
-                      <span className="text-xl font-semibold text-gray-900">{turnosFiltrados.length} cita{turnosFiltrados.length !== 1 ? 's' : ''}</span>
+                      <span className="text-2xl font-bold text-slate-950">{turnosFiltrados.length} turno{turnosFiltrados.length !== 1 ? 's' : ''}</span>
                     </CardTitle>
-                    <CardDescription>Listado detallado de turnos del día</CardDescription>
+                    <CardDescription>Detalle del día seleccionado</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {loading ? (
@@ -1624,7 +1777,7 @@ export default function AgendaEmpleadoPage() {
                           return (
                             <details
                               key={turno.id}
-                              className={`group overflow-hidden rounded-xl border bg-white transition-colors open:bg-slate-50 ${turno.id === proximoTurnoId ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200'
+                              className={`group overflow-hidden rounded-2xl border bg-white transition-colors open:bg-slate-50 ${turno.id === proximoTurnoId ? 'border-violet-300 bg-violet-50/50' : 'border-slate-200'
                                 }`}
                             >
                               <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
@@ -1635,9 +1788,9 @@ export default function AgendaEmpleadoPage() {
                                     <Badge className={ESTADO_COLORS[turno.estado]}>{ESTADO_LABELS[turno.estado]}</Badge>
                                     <Badge variant="outline" className="text-slate-700">{getTurnoDuracion(turno)} min</Badge>
                                     {turno.id === proximoTurnoId && (
-                                      <span className="flex items-center text-xs font-semibold text-blue-700">
+                                      <span className="flex items-center text-xs font-semibold text-violet-700">
                                         <Sparkles className="mr-1 h-3 w-3" />
-                                        Próxima cita
+                                        Próximo turno
                                       </span>
                                     )}
                                   </div>
@@ -1650,19 +1803,17 @@ export default function AgendaEmpleadoPage() {
                                     </span>
                                   </div>
                                 </div>
-                                <span className="shrink-0 rounded-full border px-3 py-1 text-xs font-medium text-slate-600 group-open:bg-slate-900 group-open:text-white">
+                                <span className="shrink-0 rounded-full border border-violet-100 bg-white px-3 py-1 text-xs font-medium text-slate-600 group-open:bg-slate-900 group-open:text-white">
                                   <span className="group-open:hidden">Ver detalle</span>
                                   <span className="hidden group-open:inline">Ocultar</span>
                                 </span>
                               </summary>
 
                               <div className="space-y-3 border-t border-slate-200 p-4 pt-3">
-                                {((turno as any).sala_nombre || (turno as any).sala_nombre) && (
-                                  <div className="flex items-center gap-2 text-sm text-slate-700">
-                                    <MapPin className="h-4 w-4 text-slate-400" />
-                                    <span><span className="font-medium">Sala:</span> {(turno as any).sala_nombre || (turno as any).sala_nombre}</span>
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2 text-sm text-slate-700">
+                                  <MapPin className="h-4 w-4 text-slate-400" />
+                                  <span><span className="font-medium">Sala:</span> {getSalaTurnoLabel(turno)}</span>
+                                </div>
 
                                 {turno.created_at && (
                                   <div className="text-sm text-slate-600">
@@ -1776,9 +1927,9 @@ export default function AgendaEmpleadoPage() {
                         })}
                       </div>
                     ) : (
-                      <div className="text-center py-12">
-                        <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                        <p className="text-gray-500 text-lg">
+                      <div className="py-12 text-center">
+                        <Calendar className="mx-auto mb-4 h-16 w-16 text-violet-200" />
+                        <p className="text-lg text-slate-500">
                           No hay turnos para {filtroEstado !== 'todos' ? `estado "${ESTADO_LABELS[filtroEstado]}"` : 'este día'}
                         </p>
                       </div>
@@ -1945,7 +2096,7 @@ export default function AgendaEmpleadoPage() {
                             'Cliente';
                           const servicio =
                             (turno as any).servicio_nombre || turno.servicio?.nombre || 'Servicio';
-                          const sala = (turno as any).sala_nombre || (turno as any).sala_nombre;
+                          const sala = getSalaTurnoLabel(turno);
 
                           return (
                             <div
@@ -1990,12 +2141,10 @@ export default function AgendaEmpleadoPage() {
                                       minute: '2-digit',
                                     })}
                                   </span>
-                                  {sala && (
-                                    <span className="flex items-center gap-1">
-                                      <MapPin className="w-3 h-3" />
-                                      {sala}
-                                    </span>
-                                  )}
+                                  <span className="flex items-center gap-1">
+                                    <MapPin className="w-3 h-3" />
+                                    {sala}
+                                  </span>
                                 </div>
                               </div>
                             </div>

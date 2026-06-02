@@ -6,7 +6,9 @@ from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.db import models
 from django.db.models import ProtectedError
+from django.utils import timezone
 
 from .models import Cliente
 from .serializers import (
@@ -16,6 +18,113 @@ from .serializers import (
     ClienteUpdateSerializer,
 )
 from apps.authentication.pagination import CustomPageNumberPagination
+
+
+TURNOS_RESERVADOS_BAJA = ["pendiente", "confirmado"]
+TURNOS_PENDIENTES_BAJA = ["pendiente", "pendiente_manual"]
+
+
+def build_cliente_deactivation_check(cliente):
+    """Devuelve bloqueos y advertencias para desactivar un cliente."""
+    from apps.turnos.models import LogReasignacion, StreakCoupon
+    from apps.mercadopago.models import PagoMercadoPago
+
+    now = timezone.now()
+    turnos_reservados = cliente.turnos.filter(
+        estado__in=TURNOS_RESERVADOS_BAJA,
+        fecha_hora__gte=now,
+    ).count()
+    turnos_pendientes = cliente.turnos.filter(
+        estado__in=TURNOS_PENDIENTES_BAJA,
+    ).count()
+    turnos_en_proceso = cliente.turnos.filter(estado="en_proceso").count()
+    saldo_billetera = 0
+
+    if hasattr(cliente, "billetera"):
+        saldo_billetera = cliente.billetera.saldo
+
+    pagos_pendientes = PagoMercadoPago.objects.filter(
+        cliente=cliente,
+        estado__in=["pending", "authorized", "in_process", "in_mediation"],
+    ).count()
+    ofertas_reacomodamiento = LogReasignacion.objects.filter(
+        cliente_notificado=cliente,
+        estado_final__isnull=True,
+        expires_at__gt=now,
+    ).count()
+    cupones_racha = StreakCoupon.objects.filter(
+        cliente=cliente,
+        status__in=["pendiente", "reclamado"],
+    ).filter(
+        models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+    ).count()
+
+    checks = [
+        {
+            "key": "turnos_reservados",
+            "label": "Turnos reservados futuros",
+            "count": turnos_reservados,
+            "ok": turnos_reservados == 0,
+            "blocking": True,
+            "message": "Reprogramá o cancelá los turnos reservados primero.",
+        },
+        {
+            "key": "turnos_pendientes",
+            "label": "Turnos pendientes",
+            "count": turnos_pendientes,
+            "ok": turnos_pendientes == 0,
+            "blocking": True,
+            "message": "Resolvé los turnos pendientes primero.",
+        },
+        {
+            "key": "turnos_en_proceso",
+            "label": "Turnos en proceso",
+            "count": turnos_en_proceso,
+            "ok": turnos_en_proceso == 0,
+            "blocking": True,
+            "message": "Finalizá o cancelá los turnos en proceso primero.",
+        },
+        {
+            "key": "saldo_billetera",
+            "label": "Saldo en billetera",
+            "amount": float(saldo_billetera),
+            "ok": saldo_billetera <= 0,
+            "blocking": True,
+            "message": "El cliente tiene saldo disponible en billetera.",
+        },
+        {
+            "key": "pagos_pendientes",
+            "label": "Pagos pendientes o en proceso",
+            "count": pagos_pendientes,
+            "ok": pagos_pendientes == 0,
+            "blocking": True,
+            "message": "Resolvé los pagos pendientes antes de desactivar.",
+        },
+        {
+            "key": "ofertas_reacomodamiento",
+            "label": "Ofertas de reacomodamiento activas",
+            "count": ofertas_reacomodamiento,
+            "ok": ofertas_reacomodamiento == 0,
+            "blocking": True,
+            "message": "Dejá vencer o resolvé las ofertas activas primero.",
+        },
+        {
+            "key": "cupones_racha",
+            "label": "Cupones de racha activos",
+            "count": cupones_racha,
+            "ok": cupones_racha == 0,
+            "blocking": True,
+            "message": "Cancelá o esperá el vencimiento de los cupones activos.",
+        },
+    ]
+
+    blockers = [check for check in checks if check["blocking"] and not check["ok"]]
+    return {
+        "ok": not blockers,
+        "checks": checks,
+        "blockers": blockers,
+        "warnings": [],
+    }
 
 
 class ClienteViewSet(viewsets.ModelViewSet):
@@ -87,6 +196,16 @@ class ClienteViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         user = instance.user
 
+        check = build_cliente_deactivation_check(instance)
+        if instance.is_active and not check["ok"]:
+            return Response(
+                {
+                    "error": "No se puede desactivar el cliente porque tiene dependencias activas.",
+                    "check": check,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             instance.is_active = False
             instance.save()
@@ -155,6 +274,18 @@ class ClienteViewSet(viewsets.ModelViewSet):
         currently_active = cliente.is_active and (
             not cliente.user or cliente.user.is_active
         )
+
+        if currently_active:
+            check = build_cliente_deactivation_check(cliente)
+            if not check["ok"]:
+                return Response(
+                    {
+                        "error": "No se puede desactivar el cliente porque tiene dependencias activas.",
+                        "check": check,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         cliente.is_active = not currently_active
         cliente.save(update_fields=["is_active", "updated_at"])
 
@@ -171,6 +302,12 @@ class ClienteViewSet(viewsets.ModelViewSet):
                 "data": serializer.data,
             }
         )
+
+    @action(detail=True, methods=["get"], url_path="deactivation-check")
+    def deactivation_check(self, request, pk=None):
+        """Verifica si el cliente puede ser desactivado sin romper procesos activos."""
+        cliente = self.get_object()
+        return Response(build_cliente_deactivation_check(cliente))
 
     @action(detail=True, methods=["get"])
     def historial(self, request, pk=None):
@@ -346,10 +483,10 @@ class ClienteViewSet(viewsets.ModelViewSet):
         # Aplicar paginación
         page = self.paginate_queryset(clientes)
         if page is not None:
-            serializer = ClienteListSerializer(page, many=True)
+            serializer = ClienteListSerializer(page, many=True, context={"profesional": profesional})
             return self.get_paginated_response(serializer.data)
 
-        serializer = ClienteListSerializer(clientes, many=True)
+        serializer = ClienteListSerializer(clientes, many=True, context={"profesional": profesional})
         return Response(serializer.data)
 
 
@@ -646,3 +783,80 @@ def active_reasignacion_offer_view(request):
 
     detalles = obtener_detalles_oferta_reasignacion(str(oferta.token))
     return Response(detalles, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def active_fidelizacion_offer_view(request):
+    from decimal import Decimal
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+    from apps.clientes.models import Billetera
+    from apps.emails.models import Notificacion
+    from apps.empleados.models import Empleado
+    from apps.servicios.models import Servicio
+    from apps.turnos.models import Turno
+
+    try:
+        cliente = _get_cliente_from_request(request)
+    except Cliente.DoesNotExist:
+        return Response(
+            {"error": "No se encontró perfil de cliente"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    notificacion = (
+        Notificacion.objects.filter(usuario=cliente.user, tipo="fidelizacion")
+        .order_by("-created_at")
+        .first()
+    )
+    if not notificacion:
+        return Response({"status": "sin_oferta"}, status=status.HTTP_200_OK)
+
+    data = notificacion.data or {}
+    servicio_id = data.get("servicio_id")
+    empleado_id = data.get("empleado_id")
+    if not servicio_id or not empleado_id:
+        return Response({"status": "sin_oferta"}, status=status.HTTP_200_OK)
+
+    servicio = Servicio.objects.filter(pk=servicio_id, is_active=True).first()
+    empleado = Empleado.objects.select_related("user").filter(pk=empleado_id).first()
+    if not servicio or not empleado:
+        return Response({"status": "sin_oferta"}, status=status.HTTP_200_OK)
+
+    if Turno.objects.filter(
+        cliente=cliente,
+        servicio=servicio,
+        empleado=empleado,
+        fecha_hora__gte=timezone.now(),
+        estado__in=["pendiente", "confirmado", "en_proceso"],
+    ).exists():
+        return Response({"status": "sin_oferta"}, status=status.HTTP_200_OK)
+
+    saldo = Decimal("0")
+    try:
+        saldo = Billetera.objects.get(cliente=cliente).saldo
+    except Billetera.DoesNotExist:
+        saldo = Decimal("0")
+
+    beneficio = "saldo" if saldo > 0 else "descuento"
+    fecha_sugerida = data.get("fecha_sugerida") or timezone.now().isoformat()
+    fecha_sugerida_dt = parse_datetime(fecha_sugerida) or timezone.now()
+
+    return Response(
+        {
+            "status": "activa",
+            "beneficio": beneficio,
+            "servicio": {"id": servicio.id, "nombre": servicio.nombre},
+            "empleado": {"id": empleado.id, "nombre": empleado.nombre_completo},
+            "fecha_sugerida": fecha_sugerida,
+            "saldo_billetera": str(saldo),
+            "url": (
+                f"/fidelizacion/confirmar?beneficio={beneficio}&cliente={cliente.id}"
+                f"&servicio={servicio.id}&empleado={empleado.id}"
+                f"&fecha={fecha_sugerida_dt.date().isoformat()}"
+                f"&hora={fecha_sugerida_dt.strftime('%H:%M')}"
+            ),
+        },
+        status=status.HTTP_200_OK,
+    )

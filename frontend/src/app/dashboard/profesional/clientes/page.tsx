@@ -18,7 +18,9 @@ import {
   Star,
   TrendingUp,
   User,
-  Users
+  Users,
+  ChevronDown,
+  DoorOpen
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -43,8 +45,19 @@ interface Cliente {
   total_turnos: number;
   ultimo_turno: string;
   turnos_completados: number;
+  ultimos_turnos?: ClienteTurnoResumen[];
   created_at: string;
   updated_at: string;
+}
+
+interface ClienteTurnoResumen {
+  id: number;
+  fecha_hora: string;
+  estado: string;
+  estado_display: string;
+  servicio_nombre: string;
+  categoria_nombre?: string;
+  sala_nombre?: string;
 }
 
 export default function MisClientesPage() {
@@ -129,6 +142,26 @@ export default function MisClientesPage() {
     if (totalTurnos >= 5) return { label: 'Frecuente', color: 'bg-blue-500' };
     if (totalTurnos >= 3) return { label: 'Regular', color: 'bg-yellow-500' };
     return { label: 'Nuevo', color: 'bg-gray-500' };
+  };
+
+  const getEstadoTurnoStyle = (estado: string) => {
+    switch (estado) {
+      case 'completado':
+        return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+      case 'confirmado':
+        return 'border-blue-200 bg-blue-50 text-blue-800';
+      case 'pendiente':
+      case 'pendiente_manual':
+        return 'border-amber-200 bg-amber-50 text-amber-800';
+      case 'cancelado':
+      case 'no_asistio':
+      case 'expirada':
+        return 'border-red-200 bg-red-50 text-red-800';
+      case 'en_proceso':
+        return 'border-violet-200 bg-violet-50 text-violet-800';
+      default:
+        return 'border-slate-200 bg-slate-50 text-slate-700';
+    }
   };
 
   const stats = getClienteStats();
@@ -268,11 +301,11 @@ export default function MisClientesPage() {
               {clientesFiltrados.map((cliente) => {
                 const frecuencia = getFrecuenciaLabel(cliente.total_turnos || 0);
                 return (
-                  <div
+                  <details
                     key={cliente.id}
-                    className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                    className="group overflow-hidden rounded-lg border bg-white transition-colors open:bg-gray-50"
                   >
-                    <div className="flex items-start justify-between gap-4">
+                    <summary className="flex cursor-pointer list-none items-start justify-between gap-4 p-4 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
                       {/* Info principal */}
                       <div className="flex items-start gap-4 flex-1">
                         {/* Avatar */}
@@ -354,9 +387,56 @@ export default function MisClientesPage() {
                             Cliente hace {cliente.tiempo_como_cliente} días
                           </div>
                         )}
+                        <span className="mt-2 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium text-slate-600 group-open:bg-slate-900 group-open:text-white">
+                          <span className="group-open:hidden">Ver historial</span>
+                          <span className="hidden group-open:inline">Ocultar historial</span>
+                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                        </span>
                       </div>
+                    </summary>
+
+                    <div className="border-t border-slate-200 bg-slate-50/70 p-4">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-900">Últimos turnos con este cliente</p>
+                          <p className="text-sm text-slate-500">Estado, servicio y sala asignada</p>
+                        </div>
+                      </div>
+
+                      {cliente.ultimos_turnos && cliente.ultimos_turnos.length > 0 ? (
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          {cliente.ultimos_turnos.map((turno) => (
+                            <div key={turno.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-900">{turno.servicio_nombre}</p>
+                                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                                    <span className="flex items-center gap-1.5">
+                                      <Calendar className="h-4 w-4" />
+                                      {formatDate(turno.fecha_hora)}
+                                    </span>
+                                    {(turno.sala_nombre || turno.categoria_nombre) && (
+                                      <span className="flex items-center gap-1.5">
+                                        <DoorOpen className="h-4 w-4" />
+                                        {turno.sala_nombre || turno.categoria_nombre}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <Badge variant="outline" className={`${getEstadoTurnoStyle(turno.estado)} shrink-0`}>
+                                  {turno.estado_display || turno.estado}
+                                </Badge>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                          No hay historial detallado disponible para este cliente.
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  </details>
                 );
               })}
             </div>

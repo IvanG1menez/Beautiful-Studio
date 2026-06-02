@@ -260,6 +260,7 @@ class EmpleadoListSerializer(serializers.ModelSerializer):
             "dias_trabajo",
             "comision_porcentaje",
             "is_disponible",
+            "is_active",
             "biografia",
             "nivel_experiencia",
             "created_at",

@@ -7,7 +7,7 @@ import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronDown, ChevronRight, Loader2, Save } from 'lucide-react';
+import { Loader2, Save } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -59,9 +59,11 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
     type: 'success' as 'success' | 'error',
   });
 
-  const [showFidelizacion, setShowFidelizacion] = useState(true);
-  const [showReacomodamiento, setShowReacomodamiento] = useState(true);
-  const [showPoliticaCobro, setShowPoliticaCobro] = useState(false);
+  const [creditRefundEnabled, setCreditRefundEnabled] = useState(
+    Number(initialValues.porcentaje_devolucion_sena || '100') > 0 ||
+    Number(initialValues.porcentaje_devolucion_servicio_completo || '100') > 0,
+  );
+  const [creditDisableDialogOpen, setCreditDisableDialogOpen] = useState(false);
 
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
@@ -96,6 +98,43 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
     setFormData(prev => ({
       ...prev,
       [field]: value,
+    }));
+  };
+
+  const handleCreditRefundToggle = (checked: boolean) => {
+    if (checked) {
+      setCreditRefundEnabled(true);
+      setFormData(prev => ({
+        ...prev,
+        porcentaje_devolucion_sena: '100',
+        porcentaje_devolucion_servicio_completo: '100',
+      }));
+      return;
+    }
+
+    if (mode === 'edit' && initialValues.is_active && creditRefundEnabled) {
+      setCreditDisableDialogOpen(true);
+      return;
+    }
+
+    disableCreditRefund();
+  };
+
+  const disableCreditRefund = () => {
+    setCreditRefundEnabled(false);
+    setFormData(prev => ({
+      ...prev,
+      porcentaje_devolucion_sena: '0',
+      porcentaje_devolucion_servicio_completo: '0',
+    }));
+  };
+
+  const handleReacomodamientoOfferChange = (rawValue: string) => {
+    const digits = rawValue.replace(/\D/g, '');
+    setFormData(prev => ({
+      ...prev,
+      bono_reacomodamiento_senia: digits,
+      bono_reacomodamiento_pago_completo: digits,
     }));
   };
 
@@ -170,7 +209,7 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
         return;
       }
 
-      if (isNaN(horasMinimasCredito) || horasMinimasCredito < 24) {
+      if (creditRefundEnabled && (isNaN(horasMinimasCredito) || horasMinimasCredito < 24)) {
         showNotification(
           'Tiempo mínimo inválido',
           'La devolución de crédito no puede configurarse con menos de 24 horas.',
@@ -180,7 +219,7 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
         return;
       }
 
-      const valorFidelizacion = formData.descuento_fidelizacion_monto === ''
+      const valorClientesInactivos = formData.descuento_fidelizacion_monto === ''
         ? 0
         : parseFloat(formData.descuento_fidelizacion_monto);
       const bonoSenia = formData.bono_reacomodamiento_senia === ''
@@ -190,10 +229,10 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
         ? 0
         : parseFloat(formData.bono_reacomodamiento_pago_completo);
 
-      if (isNaN(valorFidelizacion) || valorFidelizacion < 0) {
+      if (isNaN(valorClientesInactivos) || valorClientesInactivos < 0) {
         showNotification(
-          'Descuento de fidelización inválido',
-          'El descuento de fidelización debe ser un número igual o mayor a 0',
+          'Beneficio para clientes inactivos inválido',
+          'El beneficio para clientes inactivos debe ser un número igual o mayor a 0',
           'error',
         );
         setLoading(false);
@@ -202,8 +241,8 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
 
       if (isNaN(bonoSenia) || bonoSenia < 0 || isNaN(bonoPagoCompleto) || bonoPagoCompleto < 0) {
         showNotification(
-          'Bonos de reacomodamiento inválidos',
-          'Los bonos por tipo de pago deben ser números iguales o mayores a 0.',
+          'Oferta por reacomodamiento inválida',
+          'La oferta por reacomodamiento debe ser un número igual o mayor a 0.',
           'error',
         );
         setLoading(false);
@@ -218,8 +257,8 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
         porcentaje_sena: precio > 0 ? '50.00' : '0.00',
         monto_sena_fijo: montoSenaFijo.toFixed(2),
         horas_minimas_credito_cancelacion: horasMinimasCredito.toString(),
-        porcentaje_devolucion_sena: '100',
-        porcentaje_devolucion_servicio_completo: '100',
+        porcentaje_devolucion_sena: creditRefundEnabled ? '100' : '0',
+        porcentaje_devolucion_servicio_completo: creditRefundEnabled ? '100' : '0',
       };
 
       await onSubmit(payload);
@@ -341,287 +380,129 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+          </CardContent>
+        </Card>
+
+        {/* Configuración general */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Configuración general</CardTitle>
+            <CardDescription>Reglas operativas y comerciales asociadas al servicio</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="horas_minimas_credito_cancelacion">Vigencia mínima para devolver crédito (hs) *</Label>
+                <Label htmlFor="tiempo_espera_respuesta">Minutos de espera para reacomodamiento</Label>
                 <Input
-                  id="horas_minimas_credito_cancelacion"
+                  id="tiempo_espera_respuesta"
                   type="number"
-                  min="24"
-                  step="1"
-                  value={formData.horas_minimas_credito_cancelacion}
-                  onChange={e => handleInputChange('horas_minimas_credito_cancelacion', e.target.value)}
-                  placeholder="24"
-                  required
+                  min="1"
+                  value={formData.tiempo_espera_respuesta}
+                  onChange={e => handleInputChange('tiempo_espera_respuesta', e.target.value)}
+                  placeholder="15"
                 />
-                <p className="text-sm text-muted-foreground">No puede ser menor a 24 horas.</p>
+                <p className="text-sm text-muted-foreground">
+                  Tiempo que espera el sistema antes de pasar la propuesta al siguiente cliente.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="frecuencia_recurrencia_dias">Días sin venir para considerar cliente inactivo</Label>
+                <Input
+                  id="frecuencia_recurrencia_dias"
+                  type="number"
+                  min="0"
+                  value={formData.frecuencia_recurrencia_dias}
+                  onChange={e => handleInputChange('frecuencia_recurrencia_dias', e.target.value)}
+                  placeholder="30"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Si es 0, se usará la configuración global de clientes inactivos.
+                </p>
               </div>
             </div>
 
-            <div className="mt-2 rounded-md border border-dashed border-emerald-300 bg-emerald-50 text-sm text-emerald-900 overflow-hidden">
-              {(() => {
-                const precio = parseFloat(formData.precio || '0') || 0;
-                const montoSena = precio > 0 ? precio / 2 : 0;
-                const horasMinimasCredito = parseInt(formData.horas_minimas_credito_cancelacion || '24', 10) || 24;
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="oferta_reacomodamiento">Oferta por reacomodamiento ($)</Label>
+                <Input
+                  id="oferta_reacomodamiento"
+                  type="text"
+                  inputMode="numeric"
+                  value={formatWithThousands(formData.bono_reacomodamiento_senia)}
+                  onChange={e => handleReacomodamientoOfferChange(e.target.value)}
+                  placeholder="1000"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Monto que se ofrecerá al cliente para aceptar adelantar su turno. Se usa en mails, avisos y pantalla de confirmación.
+                </p>
+              </div>
 
-                return (
-                  <>
-                    <button
-                      type="button"
-                      className="w-full px-4 py-3 flex items-start justify-between gap-3 text-left hover:bg-emerald-100/60 transition-colors"
-                      onClick={() => setShowPoliticaCobro(prev => !prev)}
-                    >
-                      <div>
-                        <p className="font-medium">Política comercial del servicio</p>
-                        <p className="text-xs text-emerald-800">
-                          Seña fija del 50% y devolución del 100% dentro del plazo permitido. Hacé clic para ver el desglose.
-                        </p>
-                      </div>
-                      {showPoliticaCobro ? (
-                        <ChevronDown className="h-4 w-4 mt-0.5" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 mt-0.5" />
-                      )}
-                    </button>
-
-                    {showPoliticaCobro && (
-                      <div className="px-4 pb-3 border-t border-emerald-200 space-y-1">
-                        {precio <= 0 ? (
-                          <>
-                            <p className="pt-2">
-                              Regla aplicada automáticamente: <strong>seña del 50%</strong> y <strong>devolución del 100%</strong>
-                              {' '}si la cancelación ocurre dentro del rango permitido.
-                            </p>
-                            <p>
-                              Ejemplo guía: si el servicio cuesta <strong>$100.000</strong>, la seña será <strong>$50.000</strong>.
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="pt-2">
-                              La seña se define automáticamente en el <strong>50%</strong> del servicio: <strong>${montoSena.toFixed(2)}</strong> sobre{' '}
-                              <strong>${precio.toFixed(2)}</strong>.
-                            </p>
-                            <p>
-                              Si el cliente cancela dentro del rango permitido, la devolución es del <strong>100%</strong>.
-                            </p>
-                            <p>
-                              Esto aplica tanto para la seña como para el pago completo del servicio.
-                            </p>
-                            <p>
-                              El crédito se acredita si la cancelación ocurre con al menos <strong>{Math.max(24, horasMinimasCredito)} horas</strong> de anticipación.
-                            </p>
-                            <p className="pt-1 border-t border-emerald-200">
-                              Ejemplo rápido para explicar al cliente: si el servicio vale <strong>$100.000</strong>, se cobra{' '}
-                              <strong>$50.000</strong> de seña; si cancela en término, se devuelve el <strong>100%</strong> de lo pagado.
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              <div className="space-y-2">
+                <Label htmlFor="descuento_fidelizacion_monto">Beneficio fijo para recuperar cliente ($)</Label>
+                <Input
+                  id="descuento_fidelizacion_monto"
+                  type="text"
+                  inputMode="numeric"
+                  value={formatWithThousands(formData.descuento_fidelizacion_monto)}
+                  onChange={e => handleCurrencyChange('descuento_fidelizacion_monto', e.target.value)}
+                  placeholder="500"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Monto fijo para incentivar que un cliente inactivo vuelva a reservar este servicio.
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>
-        {/* Configuración de Automatización (Fidelización + Reacomodamiento) */}
+
+        {/* Devolución de crédito */}
         <Card>
           <CardHeader>
-            <CardTitle>Configuración de Automatización</CardTitle>
-            <CardDescription>Definí fidelización y reacomodamiento automático para este servicio</CardDescription>
+            <CardTitle>Devolución de crédito por cancelación</CardTitle>
+            <CardDescription>Cuando está activa, devuelve el 100% de lo pagado si el cliente cancela en término</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Sección Fidelización y Retorno de Clientes */}
-            <div className="border rounded-md">
-              <button
-                type="button"
-                className="w-full flex items-center justify-between px-4 py-3 bg-muted/60 hover:bg-muted transition-colors"
-                onClick={() => setShowFidelizacion(prev => !prev)}
-              >
+          <CardContent className="space-y-5">
+            <div className="rounded-md border bg-muted/40 p-4 space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="text-sm font-medium">Fidelización y retorno de clientes</p>
+                  <p className="text-sm font-medium">Habilitar devolución automática de crédito</p>
                   <p className="text-xs text-muted-foreground">
-                    Configurá la frecuencia de retorno y el premio fijo por fidelización
+                    Si está activa, se devuelve el 100% de la seña o del pago completo según corresponda.
                   </p>
                 </div>
-                {showFidelizacion ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-              </button>
-              {showFidelizacion && (
-                <div className="space-y-4 px-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="frecuencia_recurrencia_dias">Frecuencia de retorno sugerida (días)</Label>
-                    <Input
-                      id="frecuencia_recurrencia_dias"
-                      type="number"
-                      min="0"
-                      value={formData.frecuencia_recurrencia_dias}
-                      onChange={e => handleInputChange('frecuencia_recurrencia_dias', e.target.value)}
-                      placeholder="30"
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Este servicio se ofrecerá a clientes que no hayan vuelto en los días definidos en su ficha. Si es 0,
-                      se usará la configuración global.
-                    </p>
-                  </div>
+                <label className="inline-flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={creditRefundEnabled}
+                    onChange={e => handleCreditRefundToggle(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <span className="text-sm">{creditRefundEnabled ? 'Activo' : 'Inactivo'}</span>
+                </label>
+              </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="descuento_fidelizacion_monto">Monto fijo de premio ($)</Label>
-                      <Input
-                        id="descuento_fidelizacion_monto"
-                        type="text"
-                        inputMode="numeric"
-                        value={formatWithThousands(formData.descuento_fidelizacion_monto)}
-                        onChange={e => handleCurrencyChange('descuento_fidelizacion_monto', e.target.value)}
-                        placeholder="500"
-                      />
-                      <p className="text-sm text-muted-foreground">
-                        Definí un monto fijo de premio por fidelización para este servicio.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 rounded-md border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-sm text-purple-900">
-                    {(() => {
-                      const precio = parseFloat(formData.precio || '0') || 0;
-                      const montoPremio = parseFloat(formData.descuento_fidelizacion_monto || '0') || 0;
-                      const precioConDescuento = Math.max(0, precio - montoPremio);
-
-                      if (!precio) {
-                        return <span>Ingresá un precio para ver el valor promocional.</span>;
-                      }
-
-                      if (!montoPremio) {
-                        return (
-                          <span>
-                            Sin descuento de fidelización configurado. El precio se mantiene en{' '}
-                            <strong>${precio.toFixed(2)}</strong>.
-                          </span>
-                        );
-                      }
-
-                      return (
-                        <span>
-                          Con la configuración actual, el precio de fidelización sería{' '}
-                          <strong>${precioConDescuento.toFixed(2)}</strong> (desde ${precio.toFixed(2)}), aplicando un premio fijo de ${montoPremio.toFixed(2)}.
-                        </span>
-                      );
-                    })()}
-                  </div>
+              {creditRefundEnabled && (
+                <div className="space-y-2 border-t pt-4">
+                  <Label htmlFor="horas_minimas_credito_cancelacion">Horas mínimas para devolver crédito *</Label>
+                  <Input
+                    id="horas_minimas_credito_cancelacion"
+                    type="number"
+                    min="24"
+                    step="1"
+                    value={formData.horas_minimas_credito_cancelacion}
+                    onChange={e => handleInputChange('horas_minimas_credito_cancelacion', e.target.value)}
+                    placeholder="24"
+                    required
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    No puede ser menor a 24 horas. Si cancela después de este límite, no se acredita crédito automáticamente.
+                  </p>
                 </div>
               )}
-            </div>
 
-            {/* Sección Reacomodamiento de Turnos */}
-            <div className="border rounded-md">
-              <button
-                type="button"
-                className="w-full flex items-center justify-between px-4 py-3 bg-muted/60 hover:bg-muted transition-colors"
-                onClick={() => setShowReacomodamiento(prev => !prev)}
-              >
-                <div>
-                  <p className="text-sm font-medium">Reacomodamiento de turnos</p>
-                  <p className="text-xs text-muted-foreground">
-                    Todos los servicios participan automáticamente; configurá bonos y espera de respuesta
-                  </p>
-                </div>
-                {showReacomodamiento ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-              </button>
-              {showReacomodamiento && (
-                <div className="space-y-4 px-4 py-4">
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="bono_reacomodamiento_senia">Bono para cliente con seña ($)</Label>
-                        <Input
-                          id="bono_reacomodamiento_senia"
-                          type="text"
-                          inputMode="numeric"
-                          value={formatWithThousands(formData.bono_reacomodamiento_senia)}
-                          onChange={e => handleCurrencyChange('bono_reacomodamiento_senia', e.target.value)}
-                          placeholder="1000"
-                        />
-                        <p className="text-sm text-muted-foreground">
-                          Se aplica cuando el cliente ofertado originalmente pagó seña.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="bono_reacomodamiento_pago_completo">Bono para cliente con pago completo ($)</Label>
-                        <Input
-                          id="bono_reacomodamiento_pago_completo"
-                          type="text"
-                          inputMode="numeric"
-                          value={formatWithThousands(formData.bono_reacomodamiento_pago_completo)}
-                          onChange={e => handleCurrencyChange('bono_reacomodamiento_pago_completo', e.target.value)}
-                          placeholder="2000"
-                        />
-                        <p className="text-sm text-muted-foreground">
-                          Se aplica cuando el cliente ofertado pagó el servicio completo.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="tiempo_espera_respuesta">Minutos de espera de respuesta</Label>
-                        <Input
-                          id="tiempo_espera_respuesta"
-                          type="number"
-                          min="1"
-                          value={formData.tiempo_espera_respuesta}
-                          onChange={e => handleInputChange('tiempo_espera_respuesta', e.target.value)}
-                          placeholder="15"
-                        />
-                        <p className="text-sm text-muted-foreground">
-                          Tiempo antes de pasar la propuesta al siguiente cliente
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 rounded-md border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-sm text-purple-900">
-                      {(() => {
-                        const precio = parseFloat(formData.precio || '0') || 0;
-                        const bonoSenia = parseFloat(formData.bono_reacomodamiento_senia || '0') || 0;
-                        const bonoCompleto = parseFloat(formData.bono_reacomodamiento_pago_completo || '0') || 0;
-
-                        if (!precio) {
-                          return <span>Ingresá un precio y un monto de descuento para ver el valor con reacomodamiento.</span>;
-                        }
-
-                        if (!bonoSenia && !bonoCompleto) {
-                          return (
-                            <span>
-                              Sin bonos por reacomodamiento configurados. El precio se mantiene en{' '}
-                              <strong>${precio.toFixed(2)}</strong>.
-                            </span>
-                          );
-                        }
-
-                        return (
-                          <div className="space-y-1">
-                            <p>
-                              Cliente con seña: <strong>${Math.max(0, precio - bonoSenia).toFixed(2)}</strong>{' '}
-                              (bono ${bonoSenia.toFixed(2)}).
-                            </p>
-                            <p>
-                              Cliente con pago completo: <strong>${Math.max(0, precio - bonoCompleto).toFixed(2)}</strong>{' '}
-                              (bono ${bonoCompleto.toFixed(2)}).
-                            </p>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
+              {!creditRefundEnabled && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  La devolución automática está desactivada. Las cancelaciones no acreditarán crédito en billetera.
                 </div>
               )}
             </div>
@@ -683,6 +564,35 @@ export function ServicioForm({ mode, categorias, initialValues, onSubmit }: Serv
           </Button>
         </div>
       </form>
+
+      <AlertDialog open={creditDisableDialogOpen} onOpenChange={setCreditDisableDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Desactivar devolución de crédito?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A partir del momento en que guardes este cambio, las cancelaciones de este servicio dejarán de devolver crédito automáticamente en la billetera del cliente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreditDisableDialogOpen(false)}
+            >
+              Mantener activa
+            </Button>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                disableCreditRefund();
+                setCreditDisableDialogOpen(false);
+              }}
+            >
+              Desactivar devolución
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={notificationDialogOpen} onOpenChange={setNotificationDialogOpen}>
         <AlertDialogContent>

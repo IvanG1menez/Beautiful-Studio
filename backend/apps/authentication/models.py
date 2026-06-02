@@ -228,11 +228,12 @@ class ConfiguracionGlobal(models.Model):
         help_text="Cantidad de días que dura vigente el crédito en billetera (mínimo 30)",
     )
 
-    max_reprogramaciones_mensuales = models.IntegerField(
-        default=1,
-        validators=[MinValueValidator(1), MaxValueValidator(5)],
-        verbose_name="Numero de reprogramaciones mensuales",
-        help_text="Cantidad maxima de reprogramaciones mensuales por cliente y servicio",
+    dias_rango_reprogramacion = models.IntegerField(
+        default=14,
+        choices=[(7, "7 días"), (14, "14 días")],
+        validators=[MinValueValidator(7), MaxValueValidator(14)],
+        verbose_name="Rango de reprogramación",
+        help_text="Cantidad de días hacia adelante en los que el cliente puede elegir un nuevo turno",
     )
 
     # Parámetros de Reincorporación
@@ -352,7 +353,7 @@ class ConfiguracionGlobal(models.Model):
             defaults={
                 "min_horas_cancelacion_credito": 24,
                 "dias_vencimiento_credito": 90,
-                "max_reprogramaciones_mensuales": 1,
+                "dias_rango_reprogramacion": 14,
                 "margen_fidelizacion_dias": 60,
                 "descuento_fidelizacion_pct": 15.00,
                 "streak_expiration_days": 180,

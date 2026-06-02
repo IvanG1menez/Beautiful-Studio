@@ -682,7 +682,7 @@ export default function ConfirmarReacomodamientoPage() {
             </CardTitle>
             <CardDescription>
               {tienePromo
-                ? '¡Con descuento especial!'
+                ? '¡Con oferta por reacomodamiento!'
                 : tieneCreditoBilletera
                   ? `Recibís $${oferta.turno_nuevo.credito_billetera} en tu billetera virtual si aceptás`
                   : 'Reacomodo de turno'}
@@ -735,10 +735,10 @@ export default function ConfirmarReacomodamientoPage() {
             <div className="flex justify-between text-green-600">
               <span>
                 {tienePromo
-                  ? 'Descuento especial por adelanto'
+                  ? 'Oferta por reacomodamiento'
                   : tieneCreditoBilletera
-                    ? 'Crédito en billetera al aceptar'
-                    : 'Descuento promocional'}
+                    ? 'Oferta por reacomodamiento en billetera'
+                    : 'Oferta por reacomodamiento'}
               </span>
               <span className="font-medium">
                 {tieneCreditoBilletera ? '+' : '-'}{tienePromo ? oferta.turno_nuevo.descuento : tieneCreditoBilletera ? oferta.turno_nuevo.credito_billetera : '0.00'}

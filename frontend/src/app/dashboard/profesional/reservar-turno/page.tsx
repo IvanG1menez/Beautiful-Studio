@@ -176,6 +176,8 @@ export default function ReservarTurnoProfesionalPage() {
   const [isConfirmingPaymentCode, setIsConfirmingPaymentCode] = useState(false);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [cancelPaymentDialogOpen, setCancelPaymentDialogOpen] = useState(false);
+  const [cleanupDialogOpen, setCleanupDialogOpen] = useState(false);
+  const [isCleaningTestData, setIsCleaningTestData] = useState(false);
   const [mpEnv, setMpEnv] = useState('prod');
   const [qrNative, setQrNative] = useState(false);
   const [paymentStatusMessage, setPaymentStatusMessage] = useState('');
@@ -716,7 +718,21 @@ export default function ReservarTurnoProfesionalPage() {
     }
   };
 
-  const confirmarPagoPorCodigo = async () => {
+  const completarReservaConPagoValidado = (turnoId: number, codigoOperacion: string) => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    setIsWaitingPayment(false);
+    setPaymentStatusMessage('Pago confirmado y turno creado.');
+    setQrConfirmation({
+      turnoId,
+      paymentId: codigoOperacion,
+      paymentMethod: 'mercadopago',
+    });
+  };
+
+  const validarPagoPorCodigo = async () => {
     const codigoLimpio = paymentCode.trim();
     if (!preferenceId || !codigoLimpio) {
       setPaymentCodeError('Ingresa el ID de operacion que figura en Mercado Pago.');
@@ -728,24 +744,38 @@ export default function ReservarTurnoProfesionalPage() {
     setError('');
 
     try {
+      const result = await profesionalTurnosApi.validarPagoStaff({
+        preference_id: preferenceId,
+        payment_id: codigoLimpio,
+      });
+      completarReservaConPagoValidado(result.turno_id, codigoLimpio);
+    } catch (e: unknown) {
+      setPaymentCodeError(getErrorMessage(e, 'No se pudo validar el numero de operacion contra Mercado Pago.'));
+    } finally {
+      setIsConfirmingPaymentCode(false);
+    }
+  };
+
+  const forzarPagoPorCodigo = async () => {
+    const codigoLimpio = paymentCode.trim();
+    if (!preferenceId || !codigoLimpio) {
+      setPaymentCodeError('Ingresa una referencia para registrar el cobro manual.');
+      return;
+    }
+
+    setIsConfirmingPaymentCode(true);
+    setPaymentCodeError('');
+    setError('');
+
+    try {
       const result = await profesionalTurnosApi.confirmarPagoStaff({
         preference_id: preferenceId,
         payment_id: codigoLimpio,
-        motivo: 'Cobro presencial confirmado manualmente por profesional',
+        motivo: 'Cobro presencial forzado manualmente por profesional',
       });
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-      setIsWaitingPayment(false);
-      setPaymentStatusMessage('Cobro confirmado y turno creado.');
-      setQrConfirmation({
-        turnoId: result.turno_id,
-        paymentId: codigoLimpio,
-        paymentMethod: 'mercadopago',
-      });
+      completarReservaConPagoValidado(result.turno_id, codigoLimpio);
     } catch (e: unknown) {
-      setPaymentCodeError(getErrorMessage(e, 'No se pudo confirmar el cobro manual.'));
+      setPaymentCodeError(getErrorMessage(e, 'No se pudo forzar el cobro manual.'));
     } finally {
       setIsConfirmingPaymentCode(false);
     }
@@ -800,7 +830,36 @@ export default function ReservarTurnoProfesionalPage() {
     }
   };
 
+  const limpiarDatosTest = async () => {
+    setIsCleaningTestData(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const response = await apiClient.post<{
+        message: string;
+        resumen?: Record<string, number>;
+      }>('/turnos/limpiar-reservas-presenciales-test/', {
+        confirmar: 'LIMPIAR_TEST',
+      });
+      const resumen = response.data.resumen || {};
+      setSuccessMessage(
+        `Datos de test limpiados. Turnos: ${resumen.turnos ?? 0}, clientes: ${resumen.clientes ?? 0}, usuarios: ${resumen.usuarios ?? 0}.`,
+      );
+      setCleanupDialogOpen(false);
+      setFechaSeleccionada(undefined);
+      setHorariosDisponibles([]);
+      setHoraSeleccionada('');
+      setMinutoSeleccionado('');
+      setDisponibilidadCalendario({});
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, 'No se pudieron limpiar los datos de test.'));
+    } finally {
+      setIsCleaningTestData(false);
+    }
+  };
+
   const aceptarConfirmacionQr = () => {
+    const fechaParam = fechaSeleccionada ? `&fecha=${format(fechaSeleccionada, 'yyyy-MM-dd')}` : '';
     setQrDialogOpen(false);
     setPreferenceId('');
     setPaymentLink('');
@@ -809,7 +868,7 @@ export default function ReservarTurnoProfesionalPage() {
     setQrConfirmation(null);
     setQrPaymentApproved(false);
     setSuccessMessage('Turno confirmado correctamente');
-    router.push('/dashboard/profesional/agenda');
+    router.push(`/dashboard/profesional/agenda?turno_finalizado=1${fechaParam}`);
   };
 
   useEffect(() => {
@@ -820,14 +879,23 @@ export default function ReservarTurnoProfesionalPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="border-b bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6 lg:px-8">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Reserva Rapida</h1>
-            <p className="mt-1 text-gray-600">Genera un turno para tu cliente desde el salon.</p>
+        <div className="border-b bg-white">
+          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6 lg:px-8">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Reserva Rapida</h1>
+              <p className="mt-1 text-gray-600">Genera un turno para tu cliente desde el salon.</p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-xs text-slate-400 hover:text-red-600"
+              onClick={() => setCleanupDialogOpen(true)}
+            >
+              Limpiar test
+            </Button>
           </div>
         </div>
-      </div>
 
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         {servicioSeleccionado && (
@@ -1333,16 +1401,25 @@ export default function ReservarTurnoProfesionalPage() {
                     />
                     <Button
                       type="button"
-                      variant="outline"
-                      onClick={confirmarPagoPorCodigo}
+                      onClick={validarPagoPorCodigo}
                       disabled={!paymentCode.trim() || isConfirmingPaymentCode}
                     >
-                      {isConfirmingPaymentCode ? 'Forzando...' : 'Forzar pago'}
+                      {isConfirmingPaymentCode ? 'Validando...' : 'Validar operacion'}
                     </Button>
                   </div>
                   <p className="text-xs text-slate-500">
-                    No cierres esta pantalla hasta cargar el numero real que figura en Mercado Pago. Al confirmarlo se crea el turno y se envian las notificaciones.
+                    Carga el numero real de operacion. El sistema lo valida contra Mercado Pago antes de finalizar la reserva.
                   </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-0 text-xs text-red-600 hover:bg-transparent hover:text-red-700"
+                    onClick={forzarPagoPorCodigo}
+                    disabled={!paymentCode.trim() || isConfirmingPaymentCode}
+                  >
+                    Forzar pago manual (emergencia)
+                  </Button>
                   {paymentCodeError && <p className="text-xs text-red-600">{paymentCodeError}</p>}
                 </div>
               </div>
@@ -1385,6 +1462,30 @@ export default function ReservarTurnoProfesionalPage() {
               <AlertDialogCancel>Seguir esperando</AlertDialogCancel>
               <AlertDialogAction onClick={cancelarTransaccionQr} className="bg-red-600 text-white hover:bg-red-700">
                 Cancelar transaccion
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={cleanupDialogOpen} onOpenChange={setCleanupDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Limpiar datos de test?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta accion borra solo reservas presenciales creadas desde este panel y los clientes/usuarios nuevos creados por ese flujo si no tienen otros turnos. Es solo para testeo.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isCleaningTestData}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault();
+                  void limpiarDatosTest();
+                }}
+                disabled={isCleaningTestData}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {isCleaningTestData ? 'Limpiando...' : 'Limpiar test'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

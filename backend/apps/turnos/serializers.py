@@ -74,9 +74,8 @@ class TurnoListSerializer(serializers.ModelSerializer):
     puede_reprogramar = serializers.SerializerMethodField()
     motivo_no_reprogramable = serializers.SerializerMethodField()
     reprogramacion_bloqueada_codigo = serializers.SerializerMethodField()
-    reprogramaciones_mensuales_usadas = serializers.SerializerMethodField()
-    reprogramaciones_mensuales_max = serializers.SerializerMethodField()
-    reprogramaciones_mensuales_restantes = serializers.SerializerMethodField()
+    reprogramacion_rango_dias = serializers.SerializerMethodField()
+    reprogramacion_fecha_maxima = serializers.SerializerMethodField()
     fue_reprogramado = serializers.SerializerMethodField()
     ultimo_movimiento_reprogramacion = serializers.SerializerMethodField()
     cupon_racha_aplicado = serializers.SerializerMethodField()
@@ -129,9 +128,8 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "puede_reprogramar",
             "motivo_no_reprogramable",
             "reprogramacion_bloqueada_codigo",
-            "reprogramaciones_mensuales_usadas",
-            "reprogramaciones_mensuales_max",
-            "reprogramaciones_mensuales_restantes",
+            "reprogramacion_rango_dias",
+            "reprogramacion_fecha_maxima",
             "fue_reprogramado",
             "ultimo_movimiento_reprogramacion",
             "cupon_racha_aplicado",
@@ -155,23 +153,21 @@ class TurnoListSerializer(serializers.ModelSerializer):
             return {
                 "puede_reprogramar": False,
                 "codigo": f"estado_{obj.estado}",
-                "usadas": 0,
-                "limite": 1,
-                "restantes": 0,
+                "dias_rango": 14,
+                "fecha_maxima": None,
                 "motivo": "Este turno no se puede reprogramar por su estado actual.",
             }
 
         try:
-            from apps.turnos.services.reprogramacion_service import obtener_estado_limite_reprogramacion_cliente_servicio
+            from apps.turnos.services.reprogramacion_service import obtener_estado_rango_reprogramacion
 
-            return obtener_estado_limite_reprogramacion_cliente_servicio(obj)
+            return obtener_estado_rango_reprogramacion(obj)
         except Exception:
             return {
                 "puede_reprogramar": True,
                 "codigo": "disponible",
-                "usadas": 0,
-                "limite": 1,
-                "restantes": 1,
+                "dias_rango": 14,
+                "fecha_maxima": None,
                 "motivo": "",
             }
 
@@ -186,14 +182,12 @@ class TurnoListSerializer(serializers.ModelSerializer):
         estado = self._get_estado_reprogramacion(obj)
         return None if estado["puede_reprogramar"] else estado["codigo"]
 
-    def get_reprogramaciones_mensuales_usadas(self, obj):
-        return self._get_estado_reprogramacion(obj).get("usadas", 0)
+    def get_reprogramacion_rango_dias(self, obj):
+        return self._get_estado_reprogramacion(obj).get("dias_rango", 14)
 
-    def get_reprogramaciones_mensuales_max(self, obj):
-        return self._get_estado_reprogramacion(obj).get("limite", 1)
-
-    def get_reprogramaciones_mensuales_restantes(self, obj):
-        return self._get_estado_reprogramacion(obj).get("restantes", 0)
+    def get_reprogramacion_fecha_maxima(self, obj):
+        fecha_maxima = self._get_estado_reprogramacion(obj).get("fecha_maxima")
+        return fecha_maxima.isoformat() if fecha_maxima else None
 
     def get_reacomodamiento_exitoso(self, obj):
         from .models import LogReasignacion
@@ -495,34 +489,53 @@ class TurnoCreateSerializer(serializers.ModelSerializer):
                     }
                 )
 
-        # Validar horario laboral del empleado
+        # Validar horario laboral del empleado. Debe coincidir con la lógica de
+        # disponibilidad: primero horarios detallados y fallback a campos legacy.
         dia_semana = fecha_hora.weekday()  # 0=Lunes, 6=Domingo
-        dias_trabajo = empleado.dias_trabajo.split(",")
-        dias_map = {"L": 0, "M": 1, "Mi": 2, "J": 3, "V": 4, "S": 5, "D": 6}
-
-        # Convertir días de trabajo a números
-        dias_numericos = []
-        for dia in dias_trabajo:
-            dia = dia.strip()
-            if dia in dias_map:
-                dias_numericos.append(dias_map[dia])
-
-        if dia_semana not in dias_numericos:
-            raise serializers.ValidationError(
-                {"fecha_hora": f"El empleado no trabaja ese día."}
-            )
-
-        # Validar horario
         hora_turno = fecha_hora.time()
-        if (
-            hora_turno < empleado.horario_entrada
-            or hora_turno > empleado.horario_salida
-        ):
-            raise serializers.ValidationError(
-                {
-                    "fecha_hora": f"El horario debe estar entre {empleado.horario_entrada} y {empleado.horario_salida}."
-                }
+        hora_fin_turno = hora_fin.time()
+
+        try:
+            from apps.empleados.models import HorarioEmpleado
+
+            horarios_dia = HorarioEmpleado.objects.filter(
+                empleado=empleado,
+                dia_semana=dia_semana,
+                is_active=True,
+            ).order_by("hora_inicio")
+        except Exception:
+            horarios_dia = []
+
+        if horarios_dia:
+            dentro_de_rango = any(
+                hora_turno >= horario.hora_inicio and hora_fin_turno <= horario.hora_fin
+                for horario in horarios_dia
             )
+            if not dentro_de_rango:
+                raise serializers.ValidationError(
+                    {"fecha_hora": "El horario seleccionado está fuera del horario laboral del empleado."}
+                )
+        else:
+            dias_trabajo = empleado.dias_trabajo.split(",")
+            dias_map = {"L": 0, "M": 1, "Mi": 2, "X": 2, "J": 3, "V": 4, "S": 5, "D": 6}
+
+            dias_numericos = []
+            for dia in dias_trabajo:
+                dia = dia.strip()
+                if dia in dias_map:
+                    dias_numericos.append(dias_map[dia])
+
+            if dia_semana not in dias_numericos:
+                raise serializers.ValidationError(
+                    {"fecha_hora": "El empleado no trabaja ese día."}
+                )
+
+            if hora_turno < empleado.horario_entrada or hora_fin_turno > empleado.horario_salida:
+                raise serializers.ValidationError(
+                    {
+                        "fecha_hora": f"El horario debe estar entre {empleado.horario_entrada} y {empleado.horario_salida}."
+                    }
+                )
 
         try:
             turno_tmp = Turno(servicio=servicio, fecha_hora=fecha_hora, sala=sala)

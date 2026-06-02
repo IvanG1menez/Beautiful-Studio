@@ -9,8 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { getAuthHeaders } from '@/lib/auth-headers';
-import { ChevronLeft, ChevronRight, DoorClosed, Loader2, Pencil, Plus, Scissors, Search, Tag, Trash2 } from 'lucide-react';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
+import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, DoorClosed, Loader2, Pencil, Plus, Power, PowerOff, Scissors, Search, Tag, Trash2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -22,14 +22,21 @@ interface Categoria {
   sala?: number | null;
   sala_nombre?: string;
   sala_capacidad?: number;
+  sala_is_active?: boolean | null;
+  servicios_count?: number;
+  servicios_activos_count?: number;
 }
 
 interface Sala {
   id: number;
   nombre: string;
   capacidad_simultanea: number;
+  is_active: boolean;
   categorias: { id: number; nombre: string }[];
   categorias_count?: number;
+  categorias_activas_count?: number;
+  turnos_count?: number;
+  turnos_futuros_activos_count?: number;
 }
 
 interface Servicio {
@@ -37,8 +44,13 @@ interface Servicio {
   nombre: string;
   categoria: number;
   categoria_nombre: string;
+  categoria_is_active?: boolean;
+  sala_nombre?: string | null;
+  sala_is_active?: boolean | null;
   precio: string;
   descuento_reasignacion?: string;
+  bono_reacomodamiento_senia?: string;
+  bono_reacomodamiento_pago_completo?: string;
   tipo_descuento_adelanto?: 'PORCENTAJE' | 'MONTO_FIJO';
   valor_descuento_adelanto?: string;
   tiempo_espera_respuesta?: number;
@@ -47,6 +59,32 @@ interface Servicio {
   duracion_horas?: string;
   descripcion: string;
   is_active: boolean;
+  turnos_count?: number;
+  turnos_futuros_activos_count?: number;
+  profesionales_asociados_count?: number;
+}
+
+type VerificationEntity = Categoria | Servicio | Sala;
+type VerificationKind = 'categoria' | 'servicio' | 'sala';
+type VerificationAction = 'deactivate' | 'delete';
+
+interface VerificationCheckItem {
+  key: string;
+  label: string;
+  ok: boolean;
+  blocking: boolean;
+  message: string;
+  count?: number;
+}
+
+interface VerificationState {
+  kind: VerificationKind;
+  action: VerificationAction;
+  entity: VerificationEntity;
+  title: string;
+  description: string;
+  checks: VerificationCheckItem[];
+  ok: boolean;
 }
 
 export default function ServiciosAdminPage() {
@@ -70,7 +108,8 @@ export default function ServiciosAdminPage() {
   const [editingSala, setEditingSala] = useState<Sala | null>(null);
   const [salaForm, setSalaForm] = useState({
     nombre: '',
-    capacidad_simultanea: '1'
+    capacidad_simultanea: '1',
+    is_active: true
   });
 
   // Estados para servicios
@@ -78,12 +117,15 @@ export default function ServiciosAdminPage() {
 
   // Estados generales
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('categorias');
+  const [activeTab, setActiveTab] = useState('servicios');
 
   // Estados para búsqueda y filtros
   const [searchCategoria, setSearchCategoria] = useState('');
   const [searchServicio, setSearchServicio] = useState('');
   const [searchSala, setSearchSala] = useState('');
+  const [filterEstadoCategorias, setFilterEstadoCategorias] = useState<'todos' | 'activos' | 'inactivos'>('todos');
+  const [filterEstadoServicios, setFilterEstadoServicios] = useState<'todos' | 'activos' | 'inactivos'>('todos');
+  const [filterEstadoSalas, setFilterEstadoSalas] = useState<'todos' | 'activos' | 'inactivos'>('todos');
   const [expandedServicioId, setExpandedServicioId] = useState<number | null>(null);
 
   // Estados para paginación
@@ -92,14 +134,13 @@ export default function ServiciosAdminPage() {
   const [currentPageSalas, setCurrentPageSalas] = useState(1);
   const itemsPerPage = 5;
 
-  // Estados para modales de confirmación y notificación
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
-  const [confirmMessage, setConfirmMessage] = useState({ title: '', description: '' });
-
   // Estados para modal de notificación (éxito/error)
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState({ title: '', description: '', type: 'success' as 'success' | 'error' });
+  const [verificationDialogOpen, setVerificationDialogOpen] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [verificationSubmitting, setVerificationSubmitting] = useState(false);
+  const [verificationState, setVerificationState] = useState<VerificationState | null>(null);
 
   // Cargar datos iniciales
   const fetchData = async () => {
@@ -148,24 +189,47 @@ export default function ServiciosAdminPage() {
   }, [searchParams]);
 
   // Funciones de filtrado y ordenamiento
+  const matchesEstado = (isActive: boolean, filter: 'todos' | 'activos' | 'inactivos') => {
+    return filter === 'todos' || (filter === 'activos' && isActive) || (filter === 'inactivos' && !isActive);
+  };
+
+  const isServicioDisponible = (servicio: Servicio) => {
+    const categoriaActiva = servicio.categoria_is_active ?? true;
+    const salaActiva = servicio.sala_is_active ?? true;
+    return servicio.is_active && categoriaActiva && salaActiva;
+  };
+
+  const getServicioBloqueo = (servicio: Servicio) => {
+    if (!servicio.is_active) return 'Servicio inactivo';
+    if (servicio.categoria_is_active === false) return 'Categoría inactiva';
+    if (servicio.sala_is_active === false) return 'Sala inactiva';
+    return null;
+  };
+
   const getFilteredCategorias = () => {
     return categorias.filter(cat =>
-      cat.nombre.toLowerCase().includes(searchCategoria.toLowerCase()) ||
-      (cat.descripcion && cat.descripcion.toLowerCase().includes(searchCategoria.toLowerCase()))
+      matchesEstado(cat.is_active, filterEstadoCategorias) && (
+        cat.nombre.toLowerCase().includes(searchCategoria.toLowerCase()) ||
+        (cat.descripcion && cat.descripcion.toLowerCase().includes(searchCategoria.toLowerCase())) ||
+        (cat.sala_nombre && cat.sala_nombre.toLowerCase().includes(searchCategoria.toLowerCase()))
+      )
     );
   };
 
   const getFilteredServicios = () => {
     return servicios.filter(serv =>
-      serv.nombre.toLowerCase().includes(searchServicio.toLowerCase()) ||
-      serv.categoria_nombre.toLowerCase().includes(searchServicio.toLowerCase()) ||
-      (serv.descripcion && serv.descripcion.toLowerCase().includes(searchServicio.toLowerCase()))
+      matchesEstado(serv.is_active, filterEstadoServicios) && (
+        serv.nombre.toLowerCase().includes(searchServicio.toLowerCase()) ||
+        serv.categoria_nombre.toLowerCase().includes(searchServicio.toLowerCase()) ||
+        (serv.sala_nombre && serv.sala_nombre.toLowerCase().includes(searchServicio.toLowerCase())) ||
+        (serv.descripcion && serv.descripcion.toLowerCase().includes(searchServicio.toLowerCase()))
+      )
     );
   };
 
   const getFilteredSalas = () => {
     return salas.filter(sala =>
-      sala.nombre.toLowerCase().includes(searchSala.toLowerCase())
+      matchesEstado(sala.is_active, filterEstadoSalas) && sala.nombre.toLowerCase().includes(searchSala.toLowerCase())
     );
   };
 
@@ -200,24 +264,243 @@ export default function ServiciosAdminPage() {
     return Math.ceil(getFilteredSalas().length / itemsPerPage);
   };
 
-  // Función para mostrar confirmación modal
-  const showConfirmDialog = (title: string, description: string, action: () => void) => {
-    setConfirmMessage({ title, description });
-    setConfirmAction(() => action);
-    setConfirmDialogOpen(true);
-  };
-
-  const handleConfirmAction = () => {
-    if (confirmAction) {
-      confirmAction();
-    }
-    setConfirmDialogOpen(false);
-  };
+  const EstadoFilter = ({
+    value,
+    onChange,
+  }: {
+    value: 'todos' | 'activos' | 'inactivos';
+    onChange: (value: 'todos' | 'activos' | 'inactivos') => void;
+  }) => (
+    <div className="flex rounded-md border bg-white p-1 text-sm">
+      {[
+        { value: 'todos' as const, label: 'Todos' },
+        { value: 'activos' as const, label: 'Activos' },
+        { value: 'inactivos' as const, label: 'Inactivos' },
+      ].map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          size="sm"
+          variant={value === option.value ? 'default' : 'ghost'}
+          className="h-8 px-3"
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  );
 
   // Función para mostrar notificación modal
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
     setNotificationMessage({ title, description, type });
     setNotificationDialogOpen(true);
+  };
+
+  const getErrorMessage = async (response: Response, fallback: string) => {
+    const errorData = await response.json().catch(() => ({}));
+    if (errorData.detail || errorData.error) return errorData.detail || errorData.error;
+    const firstValue = Object.values(errorData)[0];
+    if (Array.isArray(firstValue)) return String(firstValue[0]);
+    if (typeof firstValue === 'string') return firstValue;
+    return fallback;
+  };
+
+  const getEntityName = (entity: VerificationEntity) => entity.nombre;
+
+  const getVerificationEndpoint = (kind: VerificationKind, id: number) => {
+    if (kind === 'categoria') return `/api/servicios/categorias/${id}/`;
+    if (kind === 'sala') return `/api/servicios/salas/${id}/`;
+    return `/api/servicios/${id}/`;
+  };
+
+  const buildVerificationChecks = (
+    kind: VerificationKind,
+    action: VerificationAction,
+    entity: VerificationEntity
+  ): VerificationCheckItem[] => {
+    if (kind === 'categoria') {
+      const categoria = entity as Categoria;
+      const serviciosCount = categoria.servicios_count ?? 0;
+      const serviciosActivosCount = categoria.servicios_activos_count ?? 0;
+      return action === 'deactivate'
+        ? [
+          {
+            key: 'servicios_activos',
+            label: 'Servicios activos asociados',
+            count: serviciosActivosCount,
+            ok: serviciosActivosCount === 0,
+            blocking: true,
+            message: 'Desactivá o reasigná los servicios activos primero.',
+          },
+        ]
+        : [
+          {
+            key: 'servicios_asociados',
+            label: 'Servicios asociados',
+            count: serviciosCount,
+            ok: serviciosCount === 0,
+            blocking: true,
+            message: 'No se puede eliminar una categoría con servicios asociados.',
+          },
+        ];
+    }
+
+    if (kind === 'servicio') {
+      const servicio = entity as Servicio;
+      const turnosCount = servicio.turnos_count ?? 0;
+      const turnosFuturosActivosCount = servicio.turnos_futuros_activos_count ?? 0;
+      const profesionalesCount = servicio.profesionales_asociados_count ?? 0;
+      return action === 'deactivate'
+        ? [
+          {
+            key: 'turnos_futuros_activos',
+            label: 'Turnos futuros activos',
+            count: turnosFuturosActivosCount,
+            ok: turnosFuturosActivosCount === 0,
+            blocking: true,
+            message: 'Reprogramá o cancelá los turnos futuros activos primero.',
+          },
+        ]
+        : [
+          {
+            key: 'turnos_asociados',
+            label: 'Turnos asociados',
+            count: turnosCount,
+            ok: turnosCount === 0,
+            blocking: true,
+            message: 'No se puede eliminar un servicio con turnos o historial asociado.',
+          },
+          {
+            key: 'profesionales_asociados',
+            label: 'Profesionales asignados',
+            count: profesionalesCount,
+            ok: profesionalesCount === 0,
+            blocking: true,
+            message: 'Quitá la asociación con profesionales primero.',
+          },
+        ];
+    }
+
+    const sala = entity as Sala;
+    const categoriasCount = sala.categorias_count ?? sala.categorias?.length ?? 0;
+    const categoriasActivasCount = sala.categorias_activas_count ?? 0;
+    const turnosCount = sala.turnos_count ?? 0;
+    return action === 'deactivate'
+      ? [
+        {
+          key: 'categorias_activas',
+          label: 'Categorías activas asociadas',
+          count: categoriasActivasCount,
+          ok: categoriasActivasCount === 0,
+          blocking: true,
+          message: 'Desactivá o reasigná las categorías activas primero.',
+        },
+      ]
+      : [
+        {
+          key: 'categorias_asociadas',
+          label: 'Categorías asociadas',
+          count: categoriasCount,
+          ok: categoriasCount === 0,
+          blocking: true,
+          message: 'No se puede eliminar una sala con categorías asociadas.',
+        },
+        {
+          key: 'turnos_asociados',
+          label: 'Turnos asociados',
+          count: turnosCount,
+          ok: turnosCount === 0,
+          blocking: true,
+          message: 'No se puede eliminar una sala con turnos asociados.',
+        },
+      ];
+  };
+
+  const openVerificationDialog = async (
+    kind: VerificationKind,
+    action: VerificationAction,
+    entity: VerificationEntity
+  ) => {
+    setVerificationState(null);
+    setVerificationDialogOpen(true);
+    setVerificationLoading(true);
+
+    try {
+      const response = await fetch(getVerificationEndpoint(kind, entity.id), {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorMessage = await getErrorMessage(response, 'No se pudieron cargar los datos para verificar la baja.');
+        showNotification('Error al verificar', errorMessage, 'error');
+        setVerificationDialogOpen(false);
+        return;
+      }
+
+      const freshEntity = await response.json();
+      const checks = buildVerificationChecks(kind, action, freshEntity);
+      const blockers = checks.filter(check => check.blocking && !check.ok);
+      const entityName = getEntityName(freshEntity);
+      const actionText = action === 'deactivate' ? 'desactivar' : 'eliminar definitivamente';
+
+      setVerificationState({
+        kind,
+        action,
+        entity: freshEntity,
+        title: `Verificar ${action === 'deactivate' ? 'desactivación' : 'eliminación'}`,
+        description: `Revisando si "${entityName}" se puede ${actionText} sin romper dependencias.`,
+        checks,
+        ok: blockers.length === 0,
+      });
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+      setVerificationDialogOpen(false);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const executeVerifiedAction = async () => {
+    if (!verificationState || !verificationState.ok) return;
+
+    const { kind, action, entity } = verificationState;
+    const entityName = getEntityName(entity);
+    const endpoint = getVerificationEndpoint(kind, entity.id);
+    const method = action === 'deactivate' ? 'PATCH' : 'DELETE';
+
+    setVerificationSubmitting(true);
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        headers: action === 'deactivate' ? getJsonAuthHeaders() : getAuthHeaders(),
+        body: action === 'deactivate' ? JSON.stringify({ is_active: false }) : undefined,
+      });
+
+      if (response.ok || response.status === 204) {
+        const entityLabel = kind === 'categoria' ? 'Categoría' : kind === 'servicio' ? 'Servicio' : 'Sala';
+        const doneText = action === 'deactivate'
+          ? kind === 'servicio' ? 'desactivado' : 'desactivada'
+          : kind === 'servicio' ? 'eliminado' : 'eliminada';
+        showNotification(
+          action === 'deactivate' ? `${entityLabel} ${doneText}` : `${entityLabel} ${doneText}`,
+          `"${entityName}" fue ${doneText} correctamente.`,
+          'success'
+        );
+        setVerificationDialogOpen(false);
+        setVerificationState(null);
+        fetchData();
+      } else {
+        const errorMessage = await getErrorMessage(response, `No se pudo ${action === 'deactivate' ? 'desactivar' : 'eliminar'} el registro.`);
+        showNotification(action === 'deactivate' ? 'Error al desactivar' : 'No se puede eliminar', errorMessage, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+    } finally {
+      setVerificationSubmitting(false);
+    }
   };
 
   // Funciones para categorías
@@ -239,7 +522,7 @@ export default function ServiciosAdminPage() {
     try {
       const response = await fetch(url, {
         method,
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify(payload)
       });
 
@@ -282,71 +565,63 @@ export default function ServiciosAdminPage() {
     setCategoriaDialogOpen(true);
   };
 
-  const handleDeleteCategoria = async (categoriaId: number, nombreCategoria: string) => {
-    showConfirmDialog(
-      '¿Eliminar categoría?',
-      `Esta acción no se puede deshacer. Se eliminará la categoría "${nombreCategoria}" y todos los servicios asociados quedarán sin categoría.`,
-      async () => {
-        try {
-          const baseUrl = '/api';
-          const response = await fetch(`${baseUrl}/servicios/categorias/${categoriaId}/`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-          });
+  const handleDeactivateCategoria = async (categoria: Categoria) => {
+    openVerificationDialog('categoria', 'deactivate', categoria);
+  };
 
-          if (response.ok || response.status === 204) {
-            showNotification(
-              'Categoría eliminada',
-              `La categoría "${nombreCategoria}" ha sido eliminada correctamente.`,
-              'success'
-            );
-            fetchData();
-          } else {
-            const errorData = await response.json();
-            console.error('Error al eliminar:', errorData);
-            const errorMessage = errorData.detail || errorData.error || 'No se pudo eliminar la categoría';
-            showNotification('Error al eliminar', errorMessage, 'error');
-          }
-        } catch (error) {
-          console.error('Error:', error);
-          showNotification('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', 'error');
-        }
+  const handleDeleteCategoria = async (categoria: Categoria) => {
+    openVerificationDialog('categoria', 'delete', categoria);
+  };
+
+  const handleActivateCategoria = async (categoria: Categoria) => {
+    try {
+      const response = await fetch(`/api/servicios/categorias/${categoria.id}/`, {
+        method: 'PATCH',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ is_active: true })
+      });
+
+      if (response.ok) {
+        showNotification('Categoría reactivada', `La categoría "${categoria.nombre}" volvió a estar activa.`, 'success');
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        showNotification('Error al reactivar', errorData.detail || errorData.error || 'No se pudo reactivar la categoría.', 'error');
       }
-    );
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+    }
   };
 
   // Funciones para servicios
-  const handleDeleteServicio = async (servicioId: number, nombreServicio: string) => {
-    showConfirmDialog(
-      '¿Eliminar servicio?',
-      `Esta acción no se puede deshacer. Se eliminará el servicio "${nombreServicio}".`,
-      async () => {
-        try {
-          const baseUrl = '/api';
-          const response = await fetch(`${baseUrl}/servicios/${servicioId}/`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-          });
+  const handleDeactivateServicio = async (servicio: Servicio) => {
+    openVerificationDialog('servicio', 'deactivate', servicio);
+  };
 
-          if (response.ok || response.status === 204) {
-            showNotification(
-              'Servicio eliminado',
-              `El servicio "${nombreServicio}" ha sido eliminado correctamente.`,
-              'success'
-            );
-            fetchData();
-          } else {
-            const errorData = await response.json();
-            console.error('Error al eliminar:', errorData);
-            const errorMessage = errorData.detail || errorData.error || 'No se pudo eliminar el servicio';
-            showNotification('Error al eliminar', errorMessage, 'error');
-          }
-        } catch (error) {
-          console.error('Error:', error);
-          showNotification('Error de conexión', 'No se pudo conectar con el servidor. Verifica tu conexión a internet.', 'error');
-        }
+  const handleDeleteServicio = async (servicio: Servicio) => {
+    openVerificationDialog('servicio', 'delete', servicio);
+  };
+
+  const handleActivateServicio = async (servicio: Servicio) => {
+    try {
+      const response = await fetch(`/api/servicios/${servicio.id}/`, {
+        method: 'PATCH',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ is_active: true })
+      });
+
+      if (response.ok) {
+        showNotification('Servicio reactivado', `El servicio "${servicio.nombre}" volvió a estar disponible.`, 'success');
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        showNotification('Error al reactivar', errorData.detail || errorData.error || 'No se pudo reactivar el servicio.', 'error');
       }
-    );
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+    }
   };
 
   // Funciones para salas
@@ -372,10 +647,11 @@ export default function ServiciosAdminPage() {
     try {
       const response = await fetch(url, {
         method,
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify({
           nombre: salaForm.nombre,
-          capacidad_simultanea: capacidad
+          capacidad_simultanea: capacidad,
+          is_active: salaForm.is_active
         })
       });
 
@@ -389,7 +665,7 @@ export default function ServiciosAdminPage() {
         );
         setSalaDialogOpen(false);
         setEditingSala(null);
-        setSalaForm({ nombre: '', capacidad_simultanea: '1' });
+        setSalaForm({ nombre: '', capacidad_simultanea: '1', is_active: true });
         fetchData();
       } else {
         const errorData = await response.json();
@@ -406,41 +682,39 @@ export default function ServiciosAdminPage() {
     setEditingSala(sala);
     setSalaForm({
       nombre: sala.nombre,
-      capacidad_simultanea: sala.capacidad_simultanea.toString()
+      capacidad_simultanea: sala.capacidad_simultanea.toString(),
+      is_active: sala.is_active
     });
     setSalaDialogOpen(true);
   };
 
-  const handleDeleteSala = async (salaId: number, nombreSala: string) => {
-    showConfirmDialog(
-      '¿Eliminar sala? ',
-      `Esta acción no se puede deshacer. Se eliminará la sala "${nombreSala}".`,
-      async () => {
-        try {
-          const baseUrl = '/api';
-          const response = await fetch(`${baseUrl}/servicios/salas/${salaId}/`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-          });
+  const handleDeactivateSala = async (sala: Sala) => {
+    openVerificationDialog('sala', 'deactivate', sala);
+  };
 
-          if (response.ok || response.status === 204) {
-            showNotification(
-              'Sala eliminada',
-              `La sala "${nombreSala}" ha sido eliminada correctamente.`,
-              'success'
-            );
-            fetchData();
-          } else {
-            const errorData = await response.json();
-            const errorMessage = errorData.detail || errorData.error || 'No se pudo eliminar la sala.';
-            showNotification('Error al eliminar', errorMessage, 'error');
-          }
-        } catch (error) {
-          console.error('Error:', error);
-          showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
-        }
+  const handleDeleteSala = async (sala: Sala) => {
+    openVerificationDialog('sala', 'delete', sala);
+  };
+
+  const handleActivateSala = async (sala: Sala) => {
+    try {
+      const response = await fetch(`/api/servicios/salas/${sala.id}/`, {
+        method: 'PATCH',
+        headers: getJsonAuthHeaders(),
+        body: JSON.stringify({ is_active: true })
+      });
+
+      if (response.ok) {
+        showNotification('Sala reactivada', `La sala "${sala.nombre}" volvió a estar activa.`, 'success');
+        fetchData();
+      } else {
+        const errorData = await response.json();
+        showNotification('Error al reactivar', errorData.detail || errorData.error || 'No se pudo reactivar la sala.', 'error');
       }
-    );
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor.', 'error');
+    }
   };
 
   if (loading) {
@@ -472,19 +746,19 @@ export default function ServiciosAdminPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Gestión de Servicios</h1>
         <p className="text-gray-600 mt-1">
-          Administra categorías y servicios de tu salón de belleza
+          Administrá la trazabilidad Servicio {'->'} Categoría {'->'} Sala sin perder historial.
         </p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="categorias" className="flex items-center gap-2">
-            <Tag className="w-4 h-4" />
-            Categorías ({getFilteredCategorias().length})
-          </TabsTrigger>
           <TabsTrigger value="servicios" className="flex items-center gap-2">
             <Scissors className="w-4 h-4" />
             Servicios ({getFilteredServicios().length})
+          </TabsTrigger>
+          <TabsTrigger value="categorias" className="flex items-center gap-2">
+            <Tag className="w-4 h-4" />
+            Categorías ({getFilteredCategorias().length})
           </TabsTrigger>
           <TabsTrigger value="salas" className="flex items-center gap-2">
             <DoorClosed className="w-4 h-4" />
@@ -500,7 +774,7 @@ export default function ServiciosAdminPage() {
                 <div>
                   <CardTitle>Categorías de Servicios</CardTitle>
                   <CardDescription>
-                    Gestiona las categorías disponibles para clasificar tus servicios
+                    Agrupan servicios y los vinculan con una sala física. Las inactivas se conservan y pueden reactivarse.
                   </CardDescription>
                 </div>
                 <Dialog open={categoriaDialogOpen} onOpenChange={setCategoriaDialogOpen}>
@@ -552,9 +826,11 @@ export default function ServiciosAdminPage() {
                           className="w-full border rounded-md px-3 py-2 text-sm"
                         >
                           <option value="">Sin sala asignada</option>
-                          {salas.map((sala) => (
+                          {salas
+                            .filter((sala) => sala.is_active || sala.id.toString() === categoriaForm.sala)
+                            .map((sala) => (
                             <option key={sala.id} value={sala.id}>
-                              {sala.nombre} (Capacidad: {sala.capacidad_simultanea})
+                              {sala.nombre} (Capacidad: {sala.capacidad_simultanea}){!sala.is_active ? ' - Inactiva' : ''}
                             </option>
                           ))}
                         </select>
@@ -589,31 +865,49 @@ export default function ServiciosAdminPage() {
               </div>
 
               {/* Barra de búsqueda para categorías */}
-              <div className="relative mt-4">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Buscar categorías..."
-                  value={searchCategoria}
-                  onChange={(e) => {
-                    setSearchCategoria(e.target.value);
-                    setCurrentPageCategorias(1);
-                  }}
-                  className="pl-10"
-                />
+              <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input
+                    placeholder="Buscar por categoría, descripción o sala..."
+                    value={searchCategoria}
+                    onChange={(e) => {
+                      setSearchCategoria(e.target.value);
+                      setCurrentPageCategorias(1);
+                    }}
+                    className="pl-10"
+                  />
+                </div>
+                <EstadoFilter value={filterEstadoCategorias} onChange={(value) => {
+                  setFilterEstadoCategorias(value);
+                  setCurrentPageCategorias(1);
+                }} />
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 {paginatedCategorias.map((categoria) => (
-                  <div key={categoria.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors">
-                    <div>
-                      <h3 className="font-semibold">{categoria.nombre}</h3>
+                  <div key={categoria.id} className="flex flex-col gap-4 p-4 border rounded-lg hover:bg-gray-50 transition-colors md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold">{categoria.nombre}</h3>
+                        <Badge variant={categoria.is_active ? "default" : "secondary"}>
+                          {categoria.is_active ? 'Activa' : 'Inactiva'}
+                        </Badge>
+                        <Badge variant="outline">{categoria.sala_nombre || 'Sin sala'}</Badge>
+                        {categoria.sala_is_active === false && (
+                          <Badge variant="secondary">Sala inactiva</Badge>
+                        )}
+                      </div>
                       {categoria.descripcion && (
                         <p className="text-sm text-gray-600">{categoria.descripcion}</p>
                       )}
-                      <Badge variant={categoria.is_active ? "default" : "secondary"} className="mt-2">
-                        {categoria.is_active ? 'Activa' : 'Inactiva'}
-                      </Badge>
+                      <p className="text-xs text-gray-500">
+                        Trazabilidad: Categoría {'->'} {categoria.sala_nombre || 'Sin sala asignada'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Dependencias: {categoria.servicios_count ?? 0} servicio(s), {categoria.servicios_activos_count ?? 0} activo(s).
+                      </p>
                     </div>
                     <div className="flex space-x-2">
                       <Button
@@ -626,9 +920,25 @@ export default function ServiciosAdminPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDeleteCategoria(categoria.id, categoria.nombre)}
+                        onClick={() => categoria.is_active
+                          ? handleDeactivateCategoria(categoria)
+                          : handleActivateCategoria(categoria)
+                        }
+                        title={categoria.is_active ? 'Desactivar categoría' : 'Reactivar categoría'}
                       >
-                        <Trash2 className="w-4 h-4 text-red-500" />
+                        {categoria.is_active ? (
+                          <PowerOff className="w-4 h-4 text-red-500" />
+                        ) : (
+                          <Power className="w-4 h-4 text-green-600" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteCategoria(categoria)}
+                        title="Eliminar categoría definitivamente"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
                       </Button>
                     </div>
                   </div>
@@ -683,7 +993,7 @@ export default function ServiciosAdminPage() {
                 <div>
                   <CardTitle>Servicios</CardTitle>
                   <CardDescription>
-                    Gestiona todos los servicios disponibles en tu salón
+                    Cada servicio conserva su categoría y sala para saber dónde se presta y por qué está disponible.
                   </CardDescription>
                 </div>
                 <Button onClick={() => router.push('/dashboard/propietario/servicios/nuevo')}>
@@ -693,17 +1003,23 @@ export default function ServiciosAdminPage() {
               </div>
 
               {/* Barra de búsqueda para servicios */}
-              <div className="relative mt-4">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Buscar servicios..."
-                  value={searchServicio}
-                  onChange={(e) => {
-                    setSearchServicio(e.target.value);
-                    setCurrentPageServicios(1);
-                  }}
-                  className="pl-10"
-                />
+              <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input
+                    placeholder="Buscar por servicio, categoría, sala o descripción..."
+                    value={searchServicio}
+                    onChange={(e) => {
+                      setSearchServicio(e.target.value);
+                      setCurrentPageServicios(1);
+                    }}
+                    className="pl-10"
+                  />
+                </div>
+                <EstadoFilter value={filterEstadoServicios} onChange={(value) => {
+                  setFilterEstadoServicios(value);
+                  setCurrentPageServicios(1);
+                }} />
               </div>
             </CardHeader>
             <CardContent>
@@ -731,9 +1047,13 @@ export default function ServiciosAdminPage() {
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <h3 className="font-semibold">{servicio.nombre}</h3>
                           <Badge variant="outline">{servicio.categoria_nombre}</Badge>
-                          <Badge variant={servicio.is_active ? "default" : "secondary"}>
-                            {servicio.is_active ? 'Activo' : 'Inactivo'}
+                          <Badge variant="secondary">{servicio.sala_nombre || 'Sin sala'}</Badge>
+                          <Badge variant={isServicioDisponible(servicio) ? "default" : "secondary"}>
+                            {isServicioDisponible(servicio) ? 'Disponible' : 'No disponible'}
                           </Badge>
+                          {getServicioBloqueo(servicio) && (
+                            <Badge variant="outline">{getServicioBloqueo(servicio)}</Badge>
+                          )}
                         </div>
                         <div className="flex items-center gap-4 text-sm text-gray-500">
                           <span>💰 ${servicio.precio}</span>
@@ -765,16 +1085,34 @@ export default function ServiciosAdminPage() {
                         >
                           <Pencil className="w-4 h-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteServicio(servicio.id, servicio.nombre);
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4 text-red-500" />
-                        </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          servicio.is_active
+                            ? handleDeactivateServicio(servicio)
+                            : handleActivateServicio(servicio);
+                        }}
+                        title={servicio.is_active ? 'Desactivar servicio' : 'Reactivar servicio'}
+                      >
+                        {servicio.is_active ? (
+                          <PowerOff className="w-4 h-4 text-red-500" />
+                        ) : (
+                          <Power className="w-4 h-4 text-green-600" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteServicio(servicio);
+                        }}
+                        title="Eliminar servicio definitivamente"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                      </Button>
                       </div>
                     </div>
 
@@ -784,15 +1122,28 @@ export default function ServiciosAdminPage() {
                           <p className="text-sm text-gray-600 mb-3">{servicio.descripcion}</p>
                         )}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                          <div className="md:col-span-2 lg:col-span-3 rounded-md border bg-gray-50 px-3 py-2">
+                            <span className="font-medium">Trazabilidad:</span>{' '}
+                            {servicio.nombre} {'->'} {servicio.categoria_nombre} {'->'} {servicio.sala_nombre || 'Sin sala asignada'}
+                          </div>
                           <div>
                             <span className="font-medium">Precio:</span> ${servicio.precio}
                           </div>
                           <div>
                             <span className="font-medium">Duración:</span> {servicio.duracion_minutos} min
                           </div>
-                          {servicio.descuento_reasignacion && (
+                          <div>
+                            <span className="font-medium">Turnos históricos:</span> {servicio.turnos_count ?? 0}
+                          </div>
+                          <div>
+                            <span className="font-medium">Turnos futuros activos:</span> {servicio.turnos_futuros_activos_count ?? 0}
+                          </div>
+                          <div>
+                            <span className="font-medium">Profesionales asignados:</span> {servicio.profesionales_asociados_count ?? 0}
+                          </div>
+                          {servicio.bono_reacomodamiento_senia && (
                             <div>
-                              <span className="font-medium">Descuento reasignación:</span> ${servicio.descuento_reasignacion}
+                              <span className="font-medium">Oferta por reacomodamiento:</span> ${servicio.bono_reacomodamiento_senia}
                             </div>
                           )}
                           {servicio.tipo_descuento_adelanto && servicio.valor_descuento_adelanto && (
@@ -878,7 +1229,7 @@ export default function ServiciosAdminPage() {
                 <div>
                   <CardTitle>Salas</CardTitle>
                   <CardDescription>
-                    Gestiona las salas físicas y su capacidad simultánea
+                    Administrá espacios físicos, capacidad y categorías asociadas. Las salas inactivas pueden reactivarse.
                   </CardDescription>
                 </div>
                 <Dialog open={salaDialogOpen} onOpenChange={setSalaDialogOpen}>
@@ -886,7 +1237,7 @@ export default function ServiciosAdminPage() {
                     <Button
                       onClick={() => {
                         setEditingSala(null);
-                        setSalaForm({ nombre: '', capacidad_simultanea: '1' });
+                        setSalaForm({ nombre: '', capacidad_simultanea: '1', is_active: true });
                       }}
                     >
                       <Plus className="w-4 h-4 mr-2" />
@@ -927,6 +1278,19 @@ export default function ServiciosAdminPage() {
                           required
                         />
                       </div>
+                      <div className="flex items-center space-x-2 rounded-md border bg-gray-50 p-3">
+                        <input
+                          type="checkbox"
+                          id="sala-active"
+                          checked={salaForm.is_active}
+                          onChange={(e) => setSalaForm({ ...salaForm, is_active: e.target.checked })}
+                          className="w-4 h-4"
+                        />
+                        <div>
+                          <Label htmlFor="sala-active" className="cursor-pointer">Sala activa</Label>
+                          <p className="text-xs text-gray-500">Una sala inactiva no debería usarse para nuevos servicios.</p>
+                        </div>
+                      </div>
                       <div className="flex justify-end space-x-2">
                         <Button type="button" variant="outline" onClick={() => setSalaDialogOpen(false)}>
                           Cancelar
@@ -940,17 +1304,23 @@ export default function ServiciosAdminPage() {
                 </Dialog>
               </div>
 
-              <div className="relative mt-4">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Buscar salas..."
-                  value={searchSala}
-                  onChange={(e) => {
-                    setSearchSala(e.target.value);
-                    setCurrentPageSalas(1);
-                  }}
-                  className="pl-10"
-                />
+              <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input
+                    placeholder="Buscar salas..."
+                    value={searchSala}
+                    onChange={(e) => {
+                      setSearchSala(e.target.value);
+                      setCurrentPageSalas(1);
+                    }}
+                    className="pl-10"
+                  />
+                </div>
+                <EstadoFilter value={filterEstadoSalas} onChange={(value) => {
+                  setFilterEstadoSalas(value);
+                  setCurrentPageSalas(1);
+                }} />
               </div>
             </CardHeader>
             <CardContent>
@@ -958,16 +1328,21 @@ export default function ServiciosAdminPage() {
                 <div className="hidden md:grid grid-cols-12 gap-4 text-xs uppercase text-gray-500">
                   <div className="col-span-4">Nombre</div>
                   <div className="col-span-2">Capacidad</div>
-                  <div className="col-span-4">Categorías asociadas</div>
+                  <div className="col-span-4">Trazabilidad</div>
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {paginatedSalas.map((sala) => (
                   <div
                     key={sala.id}
-                    className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-4 border rounded-lg"
+                    className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center p-4 border rounded-lg hover:bg-gray-50 transition-colors"
                   >
                     <div className="md:col-span-4">
-                      <p className="font-semibold">{sala.nombre}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">{sala.nombre}</p>
+                        <Badge variant={sala.is_active ? 'default' : 'secondary'}>
+                          {sala.is_active ? 'Activa' : 'Inactiva'}
+                        </Badge>
+                      </div>
                     </div>
                     <div className="md:col-span-2 text-sm">
                       {sala.capacidad_simultanea} puestos
@@ -984,6 +1359,12 @@ export default function ServiciosAdminPage() {
                       ) : (
                         <span className="text-gray-500">Sin categorías</span>
                       )}
+                      <p className="mt-2 text-xs text-gray-500">
+                        Sala {'->'} Categorías {'->'} Servicios asociados
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Dependencias: {sala.categorias_count ?? sala.categorias.length} categoría(s), {sala.categorias_activas_count ?? 0} activa(s), {sala.turnos_count ?? 0} turno(s).
+                      </p>
                     </div>
                     <div className="md:col-span-2 flex md:justify-end gap-2">
                       <Button
@@ -996,9 +1377,22 @@ export default function ServiciosAdminPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDeleteSala(sala.id, sala.nombre)}
+                        onClick={() => sala.is_active ? handleDeactivateSala(sala) : handleActivateSala(sala)}
+                        title={sala.is_active ? 'Desactivar sala' : 'Reactivar sala'}
                       >
-                        <Trash2 className="w-4 h-4 text-red-500" />
+                        {sala.is_active ? (
+                          <PowerOff className="w-4 h-4 text-red-500" />
+                        ) : (
+                          <Power className="w-4 h-4 text-green-600" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteSala(sala)}
+                        title="Eliminar sala definitivamente"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
                       </Button>
                     </div>
                   </div>
@@ -1047,19 +1441,67 @@ export default function ServiciosAdminPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Modal de confirmación centralizado */}
-      <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+      {/* Modal de verificación de baja/eliminación */}
+      <AlertDialog open={verificationDialogOpen} onOpenChange={setVerificationDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{confirmMessage.title}</AlertDialogTitle>
+            <AlertDialogTitle>{verificationState?.title || 'Verificando datos'}</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmMessage.description}
+              {verificationState?.description || 'Cargando datos actualizados para validar la acción.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {verificationLoading ? (
+            <div className="flex items-center gap-3 rounded-lg border bg-gray-50 p-4 text-sm text-gray-700">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Cargando datos y verificando reglas de baja...
+            </div>
+          ) : verificationState ? (
+            <div className="space-y-3">
+              {verificationState.checks.map((check) => (
+                <div
+                  key={check.key}
+                  className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${check.ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}
+                >
+                  <div className="flex items-start gap-2">
+                    {check.ok ? (
+                      <CheckCircle className="mt-0.5 h-4 w-4 text-green-600" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 h-4 w-4 text-red-600" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{check.label}</p>
+                      {!check.ok && <p className="text-xs text-gray-600">{check.message}</p>}
+                    </div>
+                  </div>
+                  <Badge variant={check.ok ? 'outline' : 'destructive'}>{check.count ?? (check.ok ? 'OK' : 'Revisar')}</Badge>
+                </div>
+              ))}
+              <div className={`rounded-lg border p-3 text-sm ${verificationState.ok ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                {verificationState.ok
+                  ? `Todo está OK. Podés confirmar la ${verificationState.action === 'deactivate' ? 'desactivación' : 'eliminación definitiva'}.`
+                  : 'No se puede continuar todavía. Resolvé los bloqueos indicados primero.'}
+              </div>
+            </div>
+          ) : null}
+
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmAction} className="bg-red-600 hover:bg-red-700">
-              Eliminar
+            <AlertDialogCancel disabled={verificationSubmitting}>Cerrar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={executeVerifiedAction}
+              disabled={verificationLoading || verificationSubmitting || !verificationState?.ok}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {verificationSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Procesando...
+                </>
+              ) : verificationState?.action === 'delete' ? (
+                'Confirmar eliminación'
+              ) : (
+                'Confirmar desactivación'
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getJsonAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -35,7 +35,6 @@ export default function NuevoClientePage() {
     fecha_nacimiento: '',
     direccion: '',
     preferencias: '',
-    is_vip: false
   });
 
   const showNotification = (title: string, description: string, type: 'success' | 'error') => {
@@ -82,13 +81,12 @@ export default function NuevoClientePage() {
         dni: formData.dni,
         fecha_nacimiento: formData.fecha_nacimiento || null,
         direccion: formData.direccion,
-        preferencias: formData.preferencias,
-        is_vip: formData.is_vip
+        preferencias: formData.preferencias
       };
 
       const response = await fetch('/api/clientes/', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify(dataToSend)
       });
 
@@ -141,7 +139,7 @@ export default function NuevoClientePage() {
     }
   };
 
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = (field: string, value: string | boolean | null) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -297,19 +295,6 @@ export default function NuevoClientePage() {
                 </p>
               </div>
 
-              {/* Cliente VIP */}
-              <div className="space-y-2 flex items-center pt-8">
-                <input
-                  type="checkbox"
-                  id="is_vip"
-                  checked={formData.is_vip}
-                  onChange={(e) => handleInputChange('is_vip', e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <Label htmlFor="is_vip" className="ml-2 cursor-pointer">
-                  Marcar como cliente VIP
-                </Label>
-              </div>
             </div>
 
             {/* Dirección */}

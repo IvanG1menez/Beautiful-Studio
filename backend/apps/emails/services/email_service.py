@@ -734,19 +734,27 @@ class EmailService:
                 from decimal import Decimal
 
                 config_global = ConfiguracionGlobal.get_config()
-                descuento_pct = (
+                precio_original = Decimal(servicio.precio)
+                descuento_monto = Decimal(str(getattr(servicio, "descuento_fidelizacion_monto", None) or 0))
+                descuento_pct = Decimal(str(
                     servicio.descuento_fidelizacion_pct
                     or config_global.descuento_fidelizacion_pct
                     or 0
-                )
-                precio_original = Decimal(servicio.precio)
-                precio_con_descuento = precio_original * (
-                    Decimal("1.0") - Decimal(descuento_pct) / Decimal("100")
-                )
+                ))
+                if descuento_monto > 0:
+                    precio_con_descuento = max(Decimal("0"), precio_original - descuento_monto)
+                    beneficio_texto = f"${float(descuento_monto):.2f} de descuento"
+                else:
+                    precio_con_descuento = precio_original * (
+                        Decimal("1.0") - descuento_pct / Decimal("100")
+                    )
+                    beneficio_texto = f"{float(descuento_pct):.0f}% de descuento"
+                senia_promocional = (precio_con_descuento / Decimal("2")).quantize(Decimal("0.01"))
             except Exception:
-                descuento_pct = 0
                 precio_original = servicio.precio
                 precio_con_descuento = precio_original
+                senia_promocional = precio_original
+                beneficio_texto = "un beneficio especial"
 
             nombre_cliente = cliente.user.first_name or getattr(
                 cliente, "nombre_completo", "Cliente"
@@ -761,7 +769,7 @@ class EmailService:
                 <p>
                     Hace un tiempo que no nos visitás. Para agradecerte por haber
                     confiado en nosotros, queremos ofrecerte un
-                    <strong>{descuento_pct:.0f}% de descuento</strong> en tu próximo
+                    <strong>{beneficio_texto}</strong> en tu próximo
                     servicio habitual.
                 </p>
 
@@ -783,13 +791,17 @@ class EmailService:
                         <span class="info-value">${float(precio_original):.2f}</span>
                     </div>
                     <div class="info-row">
-                        <span class="info-label">Precio con beneficio:</span>
+                        <span class="info-label">Total con beneficio:</span>
                         <span class="info-value">${float(precio_con_descuento):.2f}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Seña para reservar:</span>
+                        <span class="info-value">${float(senia_promocional):.2f}</span>
                     </div>
                 </div>
 
                 <p style="margin-top: 16px;">
-                    Podés aprovechar este beneficio reservando desde el siguiente enlace:
+                    Podés aprovechar este beneficio reservando desde el siguiente enlace. Mercado Pago cobrará la seña para confirmar el turno.
                 </p>
 
                 <div style="text-align: center;">
@@ -1601,7 +1613,7 @@ class EmailService:
 
                     <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
                     <p>Se liberó un turno para el mismo servicio y podemos reacomodarte a una fecha más cercana.</p>
-                    <p><strong>Como ya abonaste el 100% del servicio, si aceptás te acreditamos ${monto_credito_billetera} en tu billetera virtual.</strong></p>
+                    <p><strong>Oferta por reacomodamiento: si aceptás, te acreditamos ${monto_credito_billetera} en tu billetera virtual.</strong></p>
 
                     <div class="info-box">
                         <div class="info-row">
@@ -1633,7 +1645,7 @@ class EmailService:
                             <span class="info-value" style="font-size: 1.2em; color: #667eea;"><strong>${monto_final}</strong></span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">Crédito en billetera si aceptás:</span>
+                            <span class="info-label">Oferta por reacomodamiento en billetera:</span>
                             <span class="info-value" style="color: #48bb78;"><strong>+${monto_credito_billetera}</strong></span>
                         </div>
                     </div>
@@ -1659,7 +1671,7 @@ class EmailService:
                     <h2 style="color: #7d4586; margin-bottom: 20px;">¡Se liberó un turno antes de tu fecha!</h2>
 
                     <p>Hola <strong>{turno_ofrecido.cliente.user.first_name or turno_ofrecido.cliente.user.username}</strong>,</p>
-                    <p>Se liberó un turno para el mismo servicio y podemos adelantarte con un descuento especial.</p>
+                    <p>Se liberó un turno para el mismo servicio y podemos adelantarte con una oferta por reacomodamiento.</p>
 
                     <div class="info-box">
                         <div class="info-row">
@@ -1683,7 +1695,7 @@ class EmailService:
                             <span class="info-value">${turno_cancelado.servicio.precio}</span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">Descuento especial:</span>
+                            <span class="info-label">Oferta por reacomodamiento:</span>
                             <span class="info-value" style="color: #48bb78;">-${monto_descuento}</span>
                         </div>
                         <div class="info-row">
@@ -1739,7 +1751,11 @@ class EmailService:
 
     @staticmethod
     def enviar_email_recuperacion_password(
-        email: str, token: str, usuario_nombre: str = ""
+        email: str,
+        token: str,
+        usuario_nombre: str = "",
+        es_creacion_cuenta: bool = False,
+        validez_horas: int = 1,
     ) -> bool:
         """
         Envía un email con el enlace para recuperar la contraseña
@@ -1762,24 +1778,37 @@ class EmailService:
             reset_url = f"{frontend_url}/reset-password?token={token}"
 
             saludo = f"Hola <strong>{usuario_nombre}</strong>," if usuario_nombre else "Hola,"
+            titulo = "Creá tu contraseña" if es_creacion_cuenta else "Recuperar contraseña"
+            asunto = "Creá tu contraseña - Beautiful Studio" if es_creacion_cuenta else "Recuperar contraseña - Beautiful Studio"
+            contexto = "Crear contraseña - Beautiful Studio" if es_creacion_cuenta else "Recuperar contraseña - Beautiful Studio"
+            intro = (
+                "Tu cuenta fue creada por el salón al registrar tu turno en <strong>Beautiful Studio</strong>."
+                if es_creacion_cuenta
+                else "Recibimos una solicitud para restablecer la contraseña de tu cuenta en <strong>Beautiful Studio</strong>."
+            )
+            accion = (
+                "Usá el siguiente botón para crear tu contraseña y poder ingresar al sistema:"
+                if es_creacion_cuenta
+                else "Usá el siguiente botón para crear una nueva contraseña:"
+            )
+            boton = "Crear contraseña" if es_creacion_cuenta else "Restablecer contraseña"
             contenido = f"""
-                {EmailService._email_context('usuario', 'Recuperar contraseña - Beautiful Studio')}
-                <h2 style="color: #7d4586; margin-bottom: 20px;">Restablecé tu contraseña</h2>
+                {EmailService._email_context('usuario', contexto)}
+                <h2 style="color: #7d4586; margin-bottom: 20px;">{titulo}</h2>
 
                 <p>{saludo}</p>
                 <p style="margin-top: 14px;">
-                    Recibimos una solicitud para restablecer la contraseña de tu cuenta en
-                    <strong>Beautiful Studio</strong>.
+                    {intro}
                 </p>
 
-                <p style="margin-top: 14px;">Usá el siguiente botón para crear una nueva contraseña:</p>
+                <p style="margin-top: 14px;">{accion}</p>
 
                 <div style="text-align: center;">
-                    <a href="{reset_url}" class="button">Restablecer contraseña</a>
+                    <a href="{reset_url}" class="button">{boton}</a>
                 </div>
 
                 <div class="alert alert-warning">
-                    <strong>Importante:</strong> este enlace es válido por 1 hora, se puede usar una sola vez
+                    <strong>Importante:</strong> este enlace es válido por {validez_horas} horas, se puede usar una sola vez
                     y podés ignorar este email si no solicitaste el cambio.
                 </div>
 
@@ -1790,8 +1819,8 @@ class EmailService:
             """
 
             html_message = EmailService._get_base_template().format(
-                titulo="Recuperar contraseña",
-                header_titulo="Recuperar contraseña",
+                titulo=titulo,
+                header_titulo=titulo,
                 contenido=contenido,
             )
 
@@ -1803,7 +1832,7 @@ class EmailService:
             )
 
             send_mail(
-                subject="Recuperar contraseña - Beautiful Studio",
+                subject=asunto,
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[email_dest],

@@ -30,6 +30,7 @@ class ServicioAdmin(SimpleHistoryAdmin):
 
 @admin.register(Sala)
 class SalaAdmin(SimpleHistoryAdmin):
-    list_display = ("nombre", "capacidad_simultanea")
+    list_display = ("nombre", "capacidad_simultanea", "is_active")
+    list_filter = ("is_active",)
     search_fields = ("nombre",)
     ordering = ("nombre",)

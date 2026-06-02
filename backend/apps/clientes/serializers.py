@@ -44,6 +44,7 @@ class ClienteListSerializer(serializers.ModelSerializer):
     tiempo_como_cliente = serializers.IntegerField(read_only=True)
     saldo_billetera = serializers.SerializerMethodField()
     tiene_billetera = serializers.SerializerMethodField()
+    ultimos_turnos = serializers.SerializerMethodField()
 
     # Campos anotados (desde la query)
     total_turnos = serializers.IntegerField(read_only=True, default=0)
@@ -75,6 +76,7 @@ class ClienteListSerializer(serializers.ModelSerializer):
             "total_turnos",
             "ultimo_turno",
             "turnos_completados",
+            "ultimos_turnos",
             "created_at",
             "updated_at",
         ]
@@ -100,6 +102,37 @@ class ClienteListSerializer(serializers.ModelSerializer):
             return obj.billetera is not None
         except:
             return False
+
+    def get_ultimos_turnos(self, obj):
+        """Últimos turnos del cliente con el profesional actual."""
+        profesional = self.context.get("profesional")
+        if not profesional:
+            return []
+
+        turnos = (
+            obj.turnos.filter(empleado=profesional)
+            .select_related("servicio", "servicio__categoria", "servicio__categoria__sala", "sala")
+            .order_by("-fecha_hora")[:5]
+        )
+
+        return [
+            {
+                "id": turno.id,
+                "fecha_hora": turno.fecha_hora,
+                "estado": turno.estado,
+                "estado_display": turno.get_estado_display(),
+                "servicio_nombre": turno.servicio.nombre if turno.servicio_id else "Servicio",
+                "categoria_nombre": turno.servicio.categoria.nombre if turno.servicio_id and turno.servicio.categoria_id else "",
+                "sala_nombre": (
+                    turno.sala.nombre
+                    if turno.sala_id
+                    else turno.servicio.categoria.sala.nombre
+                    if turno.servicio_id and turno.servicio.categoria_id and turno.servicio.categoria.sala_id
+                    else ""
+                ),
+            }
+            for turno in turnos
+        ]
 
 
 class ClienteDetailSerializer(serializers.ModelSerializer):

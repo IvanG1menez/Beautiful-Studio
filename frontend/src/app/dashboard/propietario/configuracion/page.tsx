@@ -36,8 +36,7 @@ interface ConfiguracionGlobal {
   habilitar_recordatorios_email: boolean;
   dias_recordatorio_antes_turno: number;
   dias_vencimiento_credito: number;
-  horas_vencimiento_solicitud_reprogramacion: number;
-  max_reprogramaciones_mensuales: number;
+  dias_rango_reprogramacion: number;
   streak_goal_count: number;
   streak_bonus_amount: string | number;
   streak_coupon_expiration_days: number;
@@ -81,11 +80,9 @@ export default function ConfiguracionGlobalPage() {
         setConfig({
           ...data,
           dias_vencimiento_credito: Math.max(30, Number(data.dias_vencimiento_credito ?? 90)),
-          horas_vencimiento_solicitud_reprogramacion: Math.max(
-            1,
-            Number(data.horas_vencimiento_solicitud_reprogramacion ?? 48)
-          ),
-          max_reprogramaciones_mensuales: Math.min(5, Math.max(1, Number(data.max_reprogramaciones_mensuales ?? 1))),
+          dias_rango_reprogramacion: [7, 14].includes(Number(data.dias_rango_reprogramacion))
+            ? Number(data.dias_rango_reprogramacion)
+            : 14,
           streak_goal_count: Math.max(1, Number(data.streak_goal_count ?? 5)),
           streak_bonus_amount: data.streak_bonus_amount ?? '0.00',
           streak_coupon_expiration_days: Math.max(1, Number(data.streak_coupon_expiration_days ?? 90)),
@@ -205,15 +202,9 @@ export default function ConfiguracionGlobalPage() {
       return;
     }
 
-    if ((config.horas_vencimiento_solicitud_reprogramacion ?? 48) < 1) {
-      setError('El vencimiento de solicitudes de reprogramación debe ser de al menos 1 hora.');
-      toast.error('El vencimiento de solicitudes de reprogramación debe ser de al menos 1 hora');
-      return;
-    }
-
-    if ((config.max_reprogramaciones_mensuales ?? 1) < 1 || (config.max_reprogramaciones_mensuales ?? 1) > 5) {
-      setError('El número de reprogramaciones mensuales debe estar entre 1 y 5.');
-      toast.error('El número de reprogramaciones mensuales debe estar entre 1 y 5');
+    if (![7, 14].includes(config.dias_rango_reprogramacion ?? 14)) {
+      setError('El rango de reprogramación debe ser de 7 o 14 días.');
+      toast.error('El rango de reprogramación debe ser de 7 o 14 días');
       return;
     }
 
@@ -230,7 +221,7 @@ export default function ConfiguracionGlobalPage() {
     }
 
     const confirmed = window.confirm(
-      'Vas a modificar el número de reprogramaciones mensuales. Este cambio aplica a todos los servicios cargados. ¿Querés continuar?'
+      'Vas a modificar el rango permitido para reprogramar turnos. Este cambio aplica a todos los servicios cargados. ¿Querés continuar?'
     );
     if (!confirmed) return;
 
@@ -480,54 +471,34 @@ export default function ConfiguracionGlobalPage() {
                 </div>
                 <div className="space-y-1">
                   <CardTitle>Reprogramaciones</CardTitle>
-                  <CardDescription>Límites y vencimientos para solicitudes flexibles.</CardDescription>
+                  <CardDescription>Rango permitido para mover turnos.</CardDescription>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="rounded-2xl bg-amber-50 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Permitidas</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Rango actual</p>
                   <p className="mt-1 text-3xl font-bold text-amber-950">
-                    {config.max_reprogramaciones_mensuales ?? 1} por mes
+                    {config.dias_rango_reprogramacion ?? 14} días
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="horas_vencimiento_solicitud_reprogramacion">
-                    Vencimiento de solicitudes flexibles
-                  </Label>
-                  <Input
-                    id="horas_vencimiento_solicitud_reprogramacion"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={config.horas_vencimiento_solicitud_reprogramacion ?? 48}
-                    onChange={(e) => handleNumberChange('horas_vencimiento_solicitud_reprogramacion', e.target.value)}
-                    className="h-11"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Horas disponibles para resolver una solicitud. Recomendado: 48.
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="max_reprogramaciones_mensuales">
-                    Reprogramaciones mensuales
+                  <Label htmlFor="dias_rango_reprogramacion">
+                    Hasta cuándo se puede mover un turno
                   </Label>
                   <Select
-                    value={String(config.max_reprogramaciones_mensuales ?? 1)}
-                    onValueChange={(value) => handleNumberChange('max_reprogramaciones_mensuales', value)}
+                    value={String(config.dias_rango_reprogramacion ?? 14)}
+                    onValueChange={(value) => handleNumberChange('dias_rango_reprogramacion', value)}
                   >
-                    <SelectTrigger id="max_reprogramaciones_mensuales" className="h-11">
-                      <SelectValue placeholder="Seleccioná un número" />
+                    <SelectTrigger id="dias_rango_reprogramacion" className="h-11">
+                      <SelectValue placeholder="Seleccioná un rango" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[1, 2, 3, 4, 5].map((value) => (
-                        <SelectItem key={value} value={String(value)}>
-                          {value}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="7">Durante los próximos 7 días</SelectItem>
+                      <SelectItem value="14">Durante los próximos 14 días</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Este cambio aplica a todos los servicios cargados.
+                    El cliente puede reprogramar cuantas veces quiera, pero solo dentro de este rango.
                   </p>
                 </div>
               </CardContent>

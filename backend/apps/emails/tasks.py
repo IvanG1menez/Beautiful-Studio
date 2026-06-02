@@ -392,6 +392,15 @@ def enviar_emails_fidelizacion_clientes(dias_por_defecto: int = 30):
             ).exists():
                 continue
 
+            if Turno.objects.filter(
+                cliente=cliente,
+                servicio=servicio,
+                empleado=empleado,
+                fecha_hora__gte=ahora,
+                estado__in=["pendiente", "confirmado", "en_proceso"],
+            ).exists():
+                continue
+
             # Buscar próximo horario disponible; si no hay, no enviamos email
             fecha_sugerida = _buscar_proximo_horario_disponible(empleado, servicio)
             if not fecha_sugerida:

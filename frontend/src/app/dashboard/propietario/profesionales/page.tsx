@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { empleadosService } from '@/services/empleados';
 import { Empleado } from '@/types';
-import { ChevronLeft, ChevronRight, Edit, Filter, Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Edit, Filter, Loader2, Plus, Search, UserCheck, UserX } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -21,6 +21,23 @@ const DIAS_MAP: { [key: string]: string } = {
   'S': 'Sab',
   'D': 'Dom'
 };
+
+interface DeactivationCheckItem {
+  key: string;
+  label: string;
+  ok: boolean;
+  blocking: boolean;
+  message: string;
+  count?: number;
+  amount?: number;
+}
+
+interface DeactivationCheckResult {
+  ok: boolean;
+  checks: DeactivationCheckItem[];
+  blockers: DeactivationCheckItem[];
+  warnings: { key: string; label: string; count?: number; message: string }[];
+}
 
 export default function ProfesionalesPage() {
   const router = useRouter();
@@ -35,6 +52,8 @@ export default function ProfesionalesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [empleadoToDelete, setEmpleadoToDelete] = useState<Empleado | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deactivationLoading, setDeactivationLoading] = useState(false);
+  const [deactivationCheck, setDeactivationCheck] = useState<DeactivationCheckResult | null>(null);
   const [expandedEmpleadoId, setExpandedEmpleadoId] = useState<number | null>(null);
   const itemsPerPage = 10;
 
@@ -152,17 +171,44 @@ export default function ProfesionalesPage() {
   const endIndex = startIndex + itemsPerPage;
   const paginatedEmpleados = filteredEmpleados.slice(startIndex, endIndex);
 
-  const handleDeleteClick = (empleado: Empleado) => {
+  const handleDeleteClick = async (empleado: Empleado) => {
+    if (empleado.is_active === false) {
+      setDeleting(true);
+      try {
+        await empleadosService.toggleActive(empleado.id);
+        await loadEmpleados();
+      } catch (err: any) {
+        console.error('Error reactivating empleado:', err);
+        setError(err.message || 'Error al reactivar el profesional');
+      } finally {
+        setDeleting(false);
+      }
+      return;
+    }
+
     setEmpleadoToDelete(empleado);
+    setDeactivationCheck(null);
     setDeleteDialogOpen(true);
+    setDeactivationLoading(true);
+
+    try {
+      const check = await empleadosService.deactivationCheck(empleado.id);
+      setDeactivationCheck(check);
+    } catch (err: any) {
+      console.error('Error checking empleado deactivation:', err);
+      setError(err.message || 'No se pudo verificar si el profesional puede desactivarse');
+      setDeleteDialogOpen(false);
+    } finally {
+      setDeactivationLoading(false);
+    }
   };
 
   const handleDeleteConfirm = async () => {
-    if (!empleadoToDelete) return;
+    if (!empleadoToDelete || !deactivationCheck?.ok) return;
 
     setDeleting(true);
     try {
-      await empleadosService.delete(empleadoToDelete.id);
+      await empleadosService.toggleActive(empleadoToDelete.id);
 
       // Recargar la lista de empleados
       await loadEmpleados();
@@ -171,10 +217,16 @@ export default function ProfesionalesPage() {
       setEmpleadoToDelete(null);
     } catch (err: any) {
       console.error('Error deleting empleado:', err);
-      setError(err.message || 'Error al eliminar el profesional');
+      setError(err.message || 'Error al desactivar el profesional');
     } finally {
       setDeleting(false);
     }
+  };
+
+  const formatCheckValue = (check: DeactivationCheckItem) => {
+    if (typeof check.amount === 'number') return `$${check.amount.toFixed(2)}`;
+    if (typeof check.count === 'number') return check.count.toString();
+    return check.ok ? 'OK' : 'Revisar';
   };
 
   const handlePageChange = (newPage: number) => {
@@ -312,6 +364,9 @@ export default function ProfesionalesPage() {
                         <h3 className="font-semibold text-lg">
                           {empleado.first_name + ' ' + empleado.last_name || 'Sin nombre'}
                         </h3>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${empleado.is_active === false ? 'bg-gray-100 text-gray-700' : 'bg-blue-100 text-blue-800'}`}>
+                          {empleado.is_active === false ? 'Inactivo' : 'Activo'}
+                        </span>
                       </div>
                       {empleado.servicios && empleado.servicios.length > 0 ? (
                         <div className="mt-1 text-sm text-gray-700">
@@ -363,8 +418,14 @@ export default function ProfesionalesPage() {
                           handleDeleteClick(empleado);
                         }}
                         className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                        disabled={deleting}
+                        title={empleado.is_active === false ? 'Reactivar profesional' : 'Desactivar profesional'}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        {empleado.is_active === false ? (
+                          <UserCheck className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <UserX className="w-4 h-4" />
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -457,30 +518,73 @@ export default function ProfesionalesPage() {
         )}
       </Card>
 
-      {/* Dialog de confirmación de eliminación */}
+      {/* Dialog de verificación de baja */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar profesional?</AlertDialogTitle>
+            <AlertDialogTitle>Verificar baja de profesional</AlertDialogTitle>
             <AlertDialogDescription>
-              ¿Estás seguro de que deseas eliminar a <strong>{empleadoToDelete?.first_name} {empleadoToDelete?.last_name}</strong>?
-              Esta acción no se puede deshacer.
+              Revisando si <strong>{empleadoToDelete?.first_name} {empleadoToDelete?.last_name}</strong> puede ser desactivado sin dejar procesos abiertos.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {deactivationLoading ? (
+            <div className="flex items-center gap-3 rounded-lg border bg-gray-50 p-4 text-sm text-gray-700">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Cargando datos y verificando reglas de baja...
+            </div>
+          ) : deactivationCheck ? (
+            <div className="space-y-3">
+              {deactivationCheck.checks.map((check) => (
+                <div
+                  key={check.key}
+                  className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${check.ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}
+                >
+                  <div className="flex items-start gap-2">
+                    {check.ok ? (
+                      <CheckCircle className="mt-0.5 h-4 w-4 text-green-600" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 h-4 w-4 text-red-600" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{check.label}</p>
+                      {!check.ok && <p className="text-xs text-gray-600">{check.message}</p>}
+                    </div>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${check.ok ? 'bg-white text-green-700 border border-green-200' : 'bg-red-600 text-white'}`}>
+                    {formatCheckValue(check)}
+                  </span>
+                </div>
+              ))}
+              {deactivationCheck.warnings.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {deactivationCheck.warnings.map((warning) => (
+                    <p key={warning.key}>{warning.label}: {warning.count ?? 0}. {warning.message}</p>
+                  ))}
+                </div>
+              )}
+              <div className={`rounded-lg border p-3 text-sm ${deactivationCheck.ok ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                {deactivationCheck.ok
+                  ? 'Todo está OK. Podés confirmar la desactivación del profesional.'
+                  : 'No se puede desactivar todavía. Resolvé los bloqueos indicados primero.'}
+              </div>
+            </div>
+          ) : null}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteConfirm}
-              disabled={deleting}
+              disabled={deleting || deactivationLoading || !deactivationCheck?.ok}
               className="bg-red-600 hover:bg-red-700"
             >
               {deleting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Eliminando...
+                  Desactivando...
                 </>
               ) : (
-                'Eliminar'
+                'Confirmar desactivación'
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

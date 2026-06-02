@@ -30,6 +30,7 @@ import { formatCurrency } from '@/lib/utils';
 import apiClient from '@/services/api';
 import { empleadosService } from '@/services/empleados';
 import { ApiResponse, Empleado, Servicio } from '@/types';
+import { PrintReportButton } from '../reportes/_components/PrintReportButton';
 import {
   AlertCircle,
   CalendarDays,
@@ -80,10 +81,17 @@ const CANAL_RESERVA_LABELS: Record<string, string> = {
 
 const METODO_PAGO_LABELS: Record<string, string> = {
   mercadopago: 'Mercado Pago',
-  mercadopago_qr: 'MP QR en salón',
+  mercadopago_qr: 'Mercado Pago',
   efectivo: 'Efectivo / Caja',
-  transferencia: 'Transferencia',
-  mixto: 'Mixto',
+};
+
+const ESTADO_LABELS: Record<string, string> = {
+  pendiente: 'Pendientes',
+  confirmado: 'Confirmados',
+  en_proceso: 'En proceso',
+  completado: 'Completados',
+  cancelado: 'Cancelados',
+  no_asistio: 'No asistió',
 };
 
 export default function TurnosPropietarioPage() {
@@ -106,6 +114,7 @@ export default function TurnosPropietarioPage() {
   const [selectedCanal, setSelectedCanal] = useState<string>('todos');
   const [selectedMetodoPago, setSelectedMetodoPago] = useState<string>('todos');
   const [selectedRegistrado, setSelectedRegistrado] = useState<string>('todos');
+  const [selectedEstado, setSelectedEstado] = useState<string>('todos');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
@@ -134,14 +143,6 @@ export default function TurnosPropietarioPage() {
     user,
     authLoading,
     currentPage,
-    searchQuery,
-    selectedEmpleadoId,
-    selectedServicioId,
-    selectedCanal,
-    selectedMetodoPago,
-    selectedRegistrado,
-    fechaDesde,
-    fechaHasta,
   ]);
 
   const cargarDatosIniciales = async () => {
@@ -167,13 +168,13 @@ export default function TurnosPropietarioPage() {
     }
   };
 
-  const cargarTurnos = async () => {
+  const cargarTurnos = async (page = currentPage) => {
     try {
       setLoading(true);
       setError(null);
 
       const params: Record<string, string | number | boolean> = {
-        page: currentPage,
+        page,
         page_size: PAGE_SIZE,
       };
 
@@ -194,13 +195,15 @@ export default function TurnosPropietarioPage() {
       }
 
       if (selectedMetodoPago !== 'todos') {
-        params.metodo_pago = selectedMetodoPago;
+        params.metodo_pago_grupo = selectedMetodoPago;
       }
 
       if (selectedRegistrado === 'registrado') {
         params.es_cliente_registrado = true;
-      } else if (selectedRegistrado === 'walkin') {
-        params.es_cliente_registrado = false;
+      }
+
+      if (selectedEstado !== 'todos') {
+        params.estado = selectedEstado;
       }
 
       if (fechaDesde) {
@@ -232,9 +235,16 @@ export default function TurnosPropietarioPage() {
     setSelectedCanal('todos');
     setSelectedMetodoPago('todos');
     setSelectedRegistrado('todos');
+    setSelectedEstado('todos');
     setFechaDesde('');
     setFechaHasta('');
     setCurrentPage(1);
+    setTimeout(() => void cargarTurnos(1), 0);
+  };
+
+  const handleSearch = () => {
+    setCurrentPage(1);
+    void cargarTurnos(1);
   };
 
   const getClienteNombre = (turno: TurnoOwnerRow) => {
@@ -242,13 +252,13 @@ export default function TurnosPropietarioPage() {
       return turno.cliente_nombre;
     }
     if (!turno.es_cliente_registrado && turno.walkin_nombre) {
-      return `${turno.walkin_nombre} (walk-in)`;
+      return turno.walkin_nombre;
     }
     return 'Sin datos';
   };
 
   const getClienteEtiqueta = (turno: TurnoOwnerRow) => {
-    return turno.es_cliente_registrado ? 'Registrado' : 'Walk-in';
+    return turno.es_cliente_registrado ? 'Registrado' : 'No registrado';
   };
 
   const getCanalLabel = (canal: string | null) => {
@@ -283,6 +293,30 @@ export default function TurnosPropietarioPage() {
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
+  const totalMonto = turnos.reduce(
+    (acc, turno) => acc + Number(turno.precio_final || turno.servicio_precio || 0),
+    0
+  );
+  const totalSenias = turnos.reduce((acc, turno) => acc + Number(turno.senia_pagada || 0), 0);
+  const estadoChart = Object.entries(
+    turnos.reduce<Record<string, number>>((acc, turno) => {
+      acc[turno.estado] = (acc[turno.estado] || 0) + 1;
+      return acc;
+    }, {})
+  ).map(([estado, count]) => ({ label: ESTADO_LABELS[estado] || estado, count }));
+  const pagoChart = Object.entries(
+    turnos.reduce<Record<string, number>>((acc, turno) => {
+      const label = getMetodoPagoLabel(turno.metodo_pago);
+      acc[label] = (acc[label] || 0) + 1;
+      return acc;
+    }, {})
+  ).map(([label, count]) => ({ label, count }));
+  const chartMax = Math.max(
+    1,
+    ...estadoChart.map((item) => item.count),
+    ...pagoChart.map((item) => item.count)
+  );
+
   if (authLoading || !user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -301,7 +335,7 @@ export default function TurnosPropietarioPage() {
             Turnos
           </h1>
           <p className="text-gray-600 mt-1 max-w-2xl">
-            Vista consolidada de todos los turnos del salón, con filtros por profesional, servicio, canal y método de pago.
+            Vista consolidada de todos los turnos del salón, incluyendo pendientes, confirmados, completados y cancelados.
           </p>
         </div>
 
@@ -318,6 +352,7 @@ export default function TurnosPropietarioPage() {
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Actualizar
         </Button>
+        <PrintReportButton />
       </div>
 
       {error && (
@@ -333,7 +368,7 @@ export default function TurnosPropietarioPage() {
             <div>
               <CardTitle>Filtros</CardTitle>
               <CardDescription>
-                Combina filtros para analizar turnos por profesional, servicio, canal de reserva y método de pago.
+                Configurá los filtros y presioná Buscar para actualizar el listado.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -359,6 +394,11 @@ export default function TurnosPropietarioPage() {
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   setCurrentPage(1);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSearch();
+                  }
                 }}
               />
             </div>
@@ -408,6 +448,30 @@ export default function TurnosPropietarioPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-1">
+              <span className="text-xs font-medium text-gray-500">Estado del turno</span>
+              <Select
+                value={selectedEstado}
+                onValueChange={(value) => {
+                  setSelectedEstado(value);
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  <SelectItem value="pendiente">Pendientes</SelectItem>
+                  <SelectItem value="confirmado">Confirmados</SelectItem>
+                  <SelectItem value="en_proceso">En proceso</SelectItem>
+                  <SelectItem value="completado">Completados</SelectItem>
+                  <SelectItem value="cancelado">Cancelados</SelectItem>
+                  <SelectItem value="no_asistio">No asistió</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -446,11 +510,8 @@ export default function TurnosPropietarioPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
-                  <SelectItem value="mercadopago">Mercado Pago</SelectItem>
-                  <SelectItem value="mercadopago_qr">MP QR en salón</SelectItem>
-                  <SelectItem value="efectivo">Efectivo / Caja</SelectItem>
-                  <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="mixto">Mixto</SelectItem>
+                  <SelectItem value="mercado_pago">Mercado Pago</SelectItem>
+                  <SelectItem value="efectivo">Efectivo</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -470,7 +531,6 @@ export default function TurnosPropietarioPage() {
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
                   <SelectItem value="registrado">Registrados</SelectItem>
-                  <SelectItem value="walkin">Walk-in</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -500,8 +560,97 @@ export default function TurnosPropietarioPage() {
               </div>
             </div>
           </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              onClick={handleSearch}
+              disabled={loading}
+              className="flex items-center gap-2"
+            >
+              <Search className="w-4 h-4" />
+              Buscar turnos
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4 print:grid-cols-4">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">Turnos encontrados</p>
+            <p className="mt-2 text-3xl font-bold text-gray-900">{totalCount}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">En esta página</p>
+            <p className="mt-2 text-3xl font-bold text-gray-900">{turnos.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">Señas registradas</p>
+            <p className="mt-2 text-3xl font-bold text-blue-700">{formatCurrency(totalSenias)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-gray-500">Valor de turnos</p>
+            <p className="mt-2 text-3xl font-bold text-emerald-700">{formatCurrency(totalMonto)}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 print:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Distribución por estado</CardTitle>
+            <CardDescription>Historial filtrado agrupado por estado actual del turno.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {estadoChart.length === 0 ? (
+              <p className="text-sm text-gray-500">Sin datos para graficar.</p>
+            ) : (
+              estadoChart.map((item) => (
+                <div key={item.label} className="space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span>{item.label}</span>
+                    <span className="font-medium">{item.count}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className="h-2 rounded-full bg-blue-600" style={{ width: `${(item.count / chartMax) * 100}%` }} />
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Distribución por método de pago</CardTitle>
+            <CardDescription>Resumen visual de Mercado Pago, efectivo y turnos sin pago informado.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {pagoChart.length === 0 ? (
+              <p className="text-sm text-gray-500">Sin datos para graficar.</p>
+            ) : (
+              pagoChart.map((item) => (
+                <div key={item.label} className="space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span>{item.label}</span>
+                    <span className="font-medium">{item.count}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${(item.count / chartMax) * 100}%` }} />
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">

@@ -60,11 +60,15 @@ export default function DashboardPropietarioLayout({
   const isReportesActive =
     pathname?.startsWith("/dashboard/propietario/reportes/finanzas") ||
     pathname?.startsWith("/dashboard/propietario/reportes/servicios") ||
+    pathname?.startsWith("/dashboard/propietario/reportes/clientes") ||
+    pathname?.startsWith("/dashboard/propietario/reportes/salas") ||
+    pathname?.startsWith("/dashboard/propietario/reportes/profesionales") ||
     pathname?.startsWith("/dashboard/propietario/turnos");
 
   const isAuditoriaActive =
     pathname?.startsWith("/dashboard/propietario/historial") ||
-    pathname?.startsWith("/dashboard/propietario/reportes/billetera");
+    pathname?.startsWith("/dashboard/propietario/reportes/billetera") ||
+    pathname?.startsWith("/dashboard/propietario/auditoria/automatizaciones");
   const auditoriaSeccion = searchParams?.get("seccion") || "modelos";
 
   const menuItems = [
@@ -122,6 +126,24 @@ export default function DashboardPropietarioLayout({
           href: "/dashboard/propietario/reportes/servicios",
           active: pathname === "/dashboard/propietario/reportes/servicios",
         },
+        {
+          label: "Clientes",
+          icon: Users,
+          href: "/dashboard/propietario/reportes/clientes",
+          active: pathname === "/dashboard/propietario/reportes/clientes",
+        },
+        {
+          label: "Salas",
+          icon: FileText,
+          href: "/dashboard/propietario/reportes/salas",
+          active: pathname === "/dashboard/propietario/reportes/salas",
+        },
+        {
+          label: "Profesionales",
+          icon: Scissors,
+          href: "/dashboard/propietario/reportes/profesionales",
+          active: pathname === "/dashboard/propietario/reportes/profesionales",
+        },
       ],
     },
     {
@@ -146,10 +168,8 @@ export default function DashboardPropietarioLayout({
         {
           label: "Automatizaciones",
           icon: Settings,
-          href: "/dashboard/propietario/historial?seccion=fidelizacion",
-          active:
-            pathname?.startsWith("/dashboard/propietario/historial") &&
-            auditoriaSeccion !== "modelos",
+          href: "/dashboard/propietario/auditoria/automatizaciones",
+          active: pathname?.startsWith("/dashboard/propietario/auditoria/automatizaciones"),
         },
       ],
     },

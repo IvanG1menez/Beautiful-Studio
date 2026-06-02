@@ -287,7 +287,7 @@ def reportes_billetera(request):
                 "entidad_key": "usuarios_credito",
                 "actor": actor,
                 "actor_email": actor_email,
-                "detalle": f"Saldo: ${mov.saldo_anterior} → ${mov.saldo_nuevo}",
+                "detalle": f"Saldo: ${mov.saldo_anterior} -> ${mov.saldo_nuevo}",
                 "accion": "Inserción",
                 "accion_key": "insercion",
             }
@@ -470,7 +470,7 @@ def reportes_billetera(request):
             return float(monto) if monto is not None else float("-inf")
 
         registros = sorted(registros, key=monto_key, reverse=reverse)
-    else:  # status
+    else:
         registros = sorted(
             registros,
             key=lambda item: (item.get("status") or "").lower(),
@@ -526,3 +526,322 @@ def reportes_billetera(request):
             "registros": list(page_obj),
         }
     )
+
+
+def _parse_report_dates(request, default_days=90):
+    fecha_desde_str = request.query_params.get("fecha_desde")
+    fecha_hasta_str = request.query_params.get("fecha_hasta")
+
+    try:
+        fecha_hasta = (
+            datetime.strptime(fecha_hasta_str, "%Y-%m-%d").date()
+            if fecha_hasta_str
+            else datetime.now().date()
+        )
+        fecha_desde = (
+            datetime.strptime(fecha_desde_str, "%Y-%m-%d").date()
+            if fecha_desde_str
+            else fecha_hasta - timedelta(days=default_days)
+        )
+    except ValueError:
+        return None, None, Response({"error": "Formato de fecha inválido. Use YYYY-MM-DD."}, status=400)
+
+    return fecha_desde, fecha_hasta, None
+
+
+def _format_turno_summary(turno):
+    if not turno:
+        return None
+    return {
+        "id": turno.id,
+        "fecha_hora": turno.fecha_hora.isoformat() if turno.fecha_hora else None,
+        "estado": turno.get_estado_display(),
+        "cliente": turno.cliente.nombre_completo if turno.cliente else "Sin cliente",
+        "profesional": turno.empleado.nombre_completo if turno.empleado else "Sin profesional",
+        "servicio": turno.servicio.nombre if turno.servicio else "Sin servicio",
+        "sala": turno.sala.nombre if turno.sala else "Sin sala",
+        "metodo_pago": turno.get_metodo_pago_display() if turno.metodo_pago else "Sin pago",
+        "precio_final": float(turno.precio_final or 0),
+    }
+
+
+def _apply_turno_common_filters(qs, request):
+    estado = request.query_params.get("estado")
+    cliente_id = request.query_params.get("cliente")
+    sala_id = request.query_params.get("sala")
+    profesional_id = request.query_params.get("profesional")
+    search = (request.query_params.get("search") or "").strip()
+
+    if estado and estado != "todos":
+        qs = qs.filter(estado=estado)
+    if cliente_id and cliente_id != "todos":
+        qs = qs.filter(cliente_id=cliente_id)
+    if sala_id and sala_id != "todos":
+        qs = qs.filter(sala_id=sala_id)
+    if profesional_id and profesional_id != "todos":
+        qs = qs.filter(empleado_id=profesional_id)
+    if search:
+        qs = qs.filter(
+            Q(cliente__user__first_name__icontains=search)
+            | Q(cliente__user__last_name__icontains=search)
+            | Q(cliente__user__email__icontains=search)
+            | Q(empleado__user__first_name__icontains=search)
+            | Q(empleado__user__last_name__icontains=search)
+            | Q(servicio__nombre__icontains=search)
+            | Q(sala__nombre__icontains=search)
+        )
+    return qs
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def reportes_automatizaciones(request):
+    """Auditoría detallada de procesos automáticos (PA)."""
+    if request.user.role not in ["propietario", "superusuario"]:
+        return Response({"error": "No tienes permisos para ver este reporte"}, status=403)
+
+    from apps.emails.models import Notificacion
+    from apps.turnos.models import LogReasignacion, StreakCoupon, StreakRewardEvent
+
+    fecha_desde, fecha_hasta, error = _parse_report_dates(request, default_days=30)
+    if error:
+        return error
+
+    pa = request.query_params.get("pa", "todos")
+    cliente_id = request.query_params.get("cliente")
+    search = (request.query_params.get("search") or "").strip().lower()
+    desde_dt = datetime.combine(fecha_desde, time.min)
+    hasta_dt = datetime.combine(fecha_hasta, time.max)
+    registros = []
+
+    if pa in ["todos", "pa1"]:
+        qs = Notificacion.objects.filter(
+            tipo="fidelizacion",
+            created_at__gte=desde_dt,
+            created_at__lte=hasta_dt,
+        ).select_related("usuario")
+        if cliente_id and cliente_id != "todos":
+            qs = qs.filter(usuario__cliente_profile__id=cliente_id)
+        for item in qs[:500]:
+            data = item.data or {}
+            registros.append({
+                "id": f"pa1-{item.id}",
+                "pa": "PA1",
+                "proceso": "Fidelización",
+                "fecha": item.created_at.isoformat(),
+                "cliente": item.usuario.full_name,
+                "cliente_email": item.usuario.email,
+                "estado": "Leída" if item.leida else "Enviada",
+                "detalle": item.titulo,
+                "datos": {
+                    "mensaje": item.mensaje,
+                    "tipo_email": data.get("tipo_email"),
+                    "servicio_id": data.get("servicio_id"),
+                    "fecha_sugerida": data.get("fecha_sugerida"),
+                    "fecha_ultimo_turno": data.get("fecha_ultimo_turno"),
+                },
+            })
+
+    if pa in ["todos", "pa2"]:
+        qs = LogReasignacion.objects.filter(
+            fecha_envio__gte=desde_dt,
+            fecha_envio__lte=hasta_dt,
+        ).select_related("cliente_notificado__user", "turno_cancelado__servicio", "turno_ofrecido")
+        if cliente_id and cliente_id != "todos":
+            qs = qs.filter(cliente_notificado_id=cliente_id)
+        for item in qs[:500]:
+            registros.append({
+                "id": f"pa2-{item.id}",
+                "pa": "PA2",
+                "proceso": "Reacomodamiento",
+                "fecha": item.fecha_envio.isoformat(),
+                "cliente": item.cliente_notificado.nombre_completo,
+                "cliente_email": item.cliente_notificado.email,
+                "estado": item.estado_final or "pendiente",
+                "detalle": f"Cancelado #{item.turno_cancelado_id} / Ofrecido #{item.turno_ofrecido_id or '-'}",
+                "datos": {
+                    "monto_descuento": str(item.monto_descuento),
+                    "regla_descuento_aplicada": item.regla_descuento_aplicada,
+                    "expira": item.expires_at.isoformat() if item.expires_at else None,
+                    "estado_anterior": item.estado_anterior,
+                    "estado_posterior": item.estado_posterior,
+                },
+            })
+
+    if pa in ["todos", "pa3"]:
+        qs = StreakRewardEvent.objects.filter(
+            created_at__gte=desde_dt,
+            created_at__lte=hasta_dt,
+        ).select_related("cliente__user", "turno")
+        if cliente_id and cliente_id != "todos":
+            qs = qs.filter(cliente_id=cliente_id)
+        for item in qs[:500]:
+            registros.append({
+                "id": f"pa3-event-{item.id}",
+                "pa": "PA3",
+                "proceso": "Racha y cupón",
+                "fecha": item.created_at.isoformat(),
+                "cliente": item.cliente.nombre_completo,
+                "cliente_email": item.cliente.email,
+                "estado": item.get_status_display(),
+                "detalle": f"Hito {item.milestone_number} en turno #{item.turno_id}",
+                "datos": {
+                    "racha_anterior": item.streak_before,
+                    "racha_posterior": item.streak_after,
+                    "bono": str(item.bonus_amount),
+                    "descuento_aplicado": str(item.applied_discount_amount),
+                    "motivo": item.reason,
+                    "valor_anterior": item.valor_anterior,
+                    "valor_posterior": item.valor_posterior,
+                },
+            })
+
+        coupons = StreakCoupon.objects.filter(
+            created_at__gte=desde_dt,
+            created_at__lte=hasta_dt,
+        ).select_related("cliente__user", "used_turno")
+        if cliente_id and cliente_id != "todos":
+            coupons = coupons.filter(cliente_id=cliente_id)
+        for item in coupons[:500]:
+            registros.append({
+                "id": f"pa3-coupon-{item.id}",
+                "pa": "PA3",
+                "proceso": "Cupón de racha",
+                "fecha": item.created_at.isoformat(),
+                "cliente": item.cliente.nombre_completo,
+                "cliente_email": item.cliente.email,
+                "estado": item.get_status_display(),
+                "detalle": item.code or f"Cupón hito {item.milestone_number}",
+                "datos": {
+                    "hito": item.milestone_number,
+                    "descuento": str(item.discount_amount),
+                    "reclamado": item.claimed_at.isoformat() if item.claimed_at else None,
+                    "usado": item.used_at.isoformat() if item.used_at else None,
+                    "turno_usado": item.used_turno_id,
+                    "vence": item.expires_at.isoformat() if item.expires_at else None,
+                },
+            })
+
+    if search:
+        registros = [
+            item for item in registros
+            if search in item["cliente"].lower()
+            or search in (item["cliente_email"] or "").lower()
+            or search in item["proceso"].lower()
+            or search in item["detalle"].lower()
+        ]
+
+    registros = sorted(registros, key=lambda item: item["fecha"], reverse=True)
+    return Response({
+        "fecha_desde": fecha_desde.isoformat(),
+        "fecha_hasta": fecha_hasta.isoformat(),
+        "resumen": {
+            "total": len(registros),
+            "pa1": len([r for r in registros if r["pa"] == "PA1"]),
+            "pa2": len([r for r in registros if r["pa"] == "PA2"]),
+            "pa3": len([r for r in registros if r["pa"] == "PA3"]),
+        },
+        "registros": registros[:300],
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def reportes_clientes(request):
+    if request.user.role not in ["propietario", "superusuario"]:
+        return Response({"error": "No tienes permisos para ver este reporte"}, status=403)
+    from apps.clientes.models import Cliente
+
+    fecha_desde, fecha_hasta, error = _parse_report_dates(request)
+    if error:
+        return error
+    qs = Turno.objects.filter(fecha_hora__date__gte=fecha_desde, fecha_hora__date__lte=fecha_hasta).select_related("cliente__user", "empleado__user", "servicio", "sala")
+    qs = _apply_turno_common_filters(qs, request)
+    clientes = Cliente.objects.select_related("user").filter(id__in=qs.values("cliente_id").distinct())
+    rows = []
+    for cliente in clientes[:300]:
+        cqs = qs.filter(cliente=cliente)
+        ultimo = cqs.order_by("-fecha_hora").first()
+        rows.append({
+            "id": cliente.id,
+            "nombre": cliente.nombre_completo,
+            "email": cliente.email,
+            "activo": cliente.is_active and cliente.user.is_active,
+            "total_turnos": cqs.count(),
+            "completados": cqs.filter(estado="completado").count(),
+            "cancelados": cqs.filter(estado="cancelado").count(),
+            "ingresos": float(cqs.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+            "ultimo_turno": _format_turno_summary(ultimo),
+        })
+    rows = sorted(rows, key=lambda item: item["ultimo_turno"]["fecha_hora"] if item["ultimo_turno"] else "", reverse=True)
+    return Response({"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta, "resumen": {"clientes": len(rows), "turnos": qs.count()}, "registros": rows})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def reportes_salas(request):
+    if request.user.role not in ["propietario", "superusuario"]:
+        return Response({"error": "No tienes permisos para ver este reporte"}, status=403)
+    from apps.servicios.models import Sala
+
+    fecha_desde, fecha_hasta, error = _parse_report_dates(request)
+    if error:
+        return error
+    qs = Turno.objects.filter(fecha_hora__date__gte=fecha_desde, fecha_hora__date__lte=fecha_hasta).select_related("cliente__user", "empleado__user", "servicio", "sala")
+    qs = _apply_turno_common_filters(qs, request)
+    salas = Sala.objects.filter(id__in=qs.values("sala_id").distinct())
+    rows = []
+    for sala in salas[:300]:
+        sqs = qs.filter(sala=sala)
+        ultimo_agendado = sqs.order_by("-created_at").first()
+        ultimo_turno = sqs.order_by("-fecha_hora").first()
+        rows.append({
+            "id": sala.id,
+            "nombre": sala.nombre,
+            "activa": sala.is_active,
+            "capacidad_simultanea": sala.capacidad_simultanea,
+            "total_turnos": sqs.count(),
+            "reservados_activos": sqs.filter(estado__in=["pendiente", "confirmado", "en_proceso"]).count(),
+            "completados": sqs.filter(estado="completado").count(),
+            "ingresos": float(sqs.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+            "ultimo_turno_agendado": _format_turno_summary(ultimo_agendado),
+            "ultimo_turno_en_sala": _format_turno_summary(ultimo_turno),
+        })
+    rows = sorted(rows, key=lambda item: item["total_turnos"], reverse=True)
+    return Response({"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta, "resumen": {"salas": len(rows), "turnos": qs.count()}, "registros": rows})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def reportes_profesionales(request):
+    if request.user.role not in ["propietario", "superusuario"]:
+        return Response({"error": "No tienes permisos para ver este reporte"}, status=403)
+    from apps.empleados.models import Empleado
+    from apps.turnos.models import LogReasignacion
+
+    fecha_desde, fecha_hasta, error = _parse_report_dates(request)
+    if error:
+        return error
+    qs = Turno.objects.filter(fecha_hora__date__gte=fecha_desde, fecha_hora__date__lte=fecha_hasta).select_related("cliente__user", "empleado__user", "servicio", "sala")
+    qs = _apply_turno_common_filters(qs, request)
+    profesionales = Empleado.objects.select_related("user").filter(id__in=qs.values("empleado_id").distinct())
+    rows = []
+    for profesional in profesionales[:300]:
+        pqs = qs.filter(empleado=profesional)
+        ultimo = pqs.order_by("-fecha_hora").first()
+        ultima_oferta = LogReasignacion.objects.filter(turno_ofrecido__empleado=profesional).order_by("-fecha_envio").first()
+        rows.append({
+            "id": profesional.id,
+            "nombre": profesional.nombre_completo,
+            "email": profesional.email,
+            "activo": profesional.is_active and profesional.user.is_active,
+            "disponible": profesional.is_disponible,
+            "total_turnos": pqs.count(),
+            "completados": pqs.filter(estado="completado").count(),
+            "cancelados": pqs.filter(estado="cancelado").count(),
+            "ingresos": float(pqs.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+            "ultimo_turno": _format_turno_summary(ultimo),
+            "ultimo_turno_ofrecido": _format_turno_summary(ultima_oferta.turno_ofrecido if ultima_oferta else None),
+        })
+    rows = sorted(rows, key=lambda item: item["total_turnos"], reverse=True)
+    return Response({"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta, "resumen": {"profesionales": len(rows), "turnos": qs.count()}, "registros": rows})

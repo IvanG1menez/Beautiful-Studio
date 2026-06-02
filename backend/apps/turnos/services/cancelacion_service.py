@@ -47,9 +47,28 @@ def cancelar_turno_para_cliente(turno, usuario, motivo):
 
         precio_base = Decimal(turno.precio_final or turno.servicio.precio or 0)
         senia_pagada = Decimal(turno.senia_pagada or 0)
-        pago_completo = turno.resolver_tipo_pago() == "PAGO_COMPLETO"
+        tipo_pago = turno.resolver_tipo_pago()
+        porcentaje_senia = Decimal(
+            str(getattr(turno.servicio, "porcentaje_devolucion_sena", 100) or 0)
+        )
+        porcentaje_pago_completo = Decimal(
+            str(
+                getattr(
+                    turno.servicio,
+                    "porcentaje_devolucion_servicio_completo",
+                    100,
+                )
+                or 0
+            )
+        )
 
-        monto_credito = precio_base / Decimal("2") if pago_completo else senia_pagada
+        if tipo_pago == "PAGO_COMPLETO":
+            monto_credito = precio_base * porcentaje_pago_completo / Decimal("100")
+        elif tipo_pago == "SENIA":
+            monto_credito = senia_pagada * porcentaje_senia / Decimal("100")
+        else:
+            monto_credito = Decimal("0.00")
+
         monto_credito = monto_credito.quantize(Decimal("0.01"))
 
         if monto_credito > 0:

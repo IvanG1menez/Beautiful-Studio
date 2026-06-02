@@ -9,6 +9,7 @@ import { getAuthHeaders } from '@/lib/auth-headers';
 import { Calendar, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { PrintReportButton } from '../_components/PrintReportButton';
 
 interface ReporteData {
   fecha_desde: string;
@@ -84,9 +85,12 @@ export default function ReportesServiciosPage() {
   return (
     <div className="container mx-auto p-6 space-y-6 bg-background">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">📊 Rendimiento de Servicios</h1>
-        <p className="text-muted-foreground mt-1">Análisis detallado de servicios y empleados</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">📊 Rendimiento de Servicios</h1>
+          <p className="text-muted-foreground mt-1">Análisis detallado de servicios y empleados</p>
+        </div>
+        <PrintReportButton />
       </div>
 
       {/* Filtros de fecha */}
@@ -151,7 +155,7 @@ export default function ReportesServiciosPage() {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" tickFormatter={(value) => formatCurrency(value)} />
                     <YAxis type="category" dataKey="servicio_nombre" width={90} />
-                    <Tooltip formatter={(value: any) => formatCurrency(value)} />
+                    <Tooltip formatter={(value: number | string) => formatCurrency(Number(value))} />
                     <Legend />
                     <Bar dataKey="total" fill="#8b5cf6" name="Ingresos" radius={[0, 8, 8, 0]} />
                   </BarChart>

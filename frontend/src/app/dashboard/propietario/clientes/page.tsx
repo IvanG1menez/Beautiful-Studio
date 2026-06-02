@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { formatCurrency } from '@/lib/utils';
-import { ArrowUpDown, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, Star, User, UserCheck, UserX, Users, Wallet, X } from 'lucide-react';
+import { AlertTriangle, ArrowUpDown, CheckCircle, ChevronLeft, ChevronRight, Filter, Loader2, Pencil, Plus, Search, User, UserCheck, UserX, Users, Wallet, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -25,7 +25,6 @@ interface Cliente {
   direccion?: string;
   preferencias?: string;
   fecha_primera_visita?: string;
-  is_vip: boolean;
   nombre_completo: string;
   edad?: number;
   tiempo_como_cliente?: number;
@@ -33,6 +32,23 @@ interface Cliente {
   tiene_billetera?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+interface DeactivationCheckItem {
+  key: string;
+  label: string;
+  ok: boolean;
+  blocking: boolean;
+  message: string;
+  count?: number;
+  amount?: number;
+}
+
+interface DeactivationCheckResult {
+  ok: boolean;
+  checks: DeactivationCheckItem[];
+  blockers: DeactivationCheckItem[];
+  warnings: { key: string; label: string; count?: number; message: string }[];
 }
 
 export default function ClientesAdminPage() {
@@ -44,7 +60,6 @@ export default function ClientesAdminPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Estados para filtros
-  const [filterVIP, setFilterVIP] = useState<string>('todos');
   const [filterActivo, setFilterActivo] = useState<string>('todos');
   const [sortBy, setSortBy] = useState<'nombre' | 'fecha' | 'edad'>('fecha');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -68,6 +83,11 @@ export default function ClientesAdminPage() {
     description: '',
     type: 'success' as 'success' | 'error'
   });
+  const [deactivationDialogOpen, setDeactivationDialogOpen] = useState(false);
+  const [deactivationLoading, setDeactivationLoading] = useState(false);
+  const [deactivationSubmitting, setDeactivationSubmitting] = useState(false);
+  const [deactivationCheck, setDeactivationCheck] = useState<DeactivationCheckResult | null>(null);
+  const [clienteToDeactivate, setClienteToDeactivate] = useState<Cliente | null>(null);
 
   // Cargar TODOS los clientes (sin paginación del backend)
   const fetchClientes = async () => {
@@ -115,7 +135,7 @@ export default function ClientesAdminPage() {
       console.log('  - Página actual:', currentPage);
       console.log('  - Total páginas:', getTotalPages());
     }
-  }, [clientes.length, searchQuery, filterVIP, filterActivo, sortBy, sortOrder, currentPage]);
+  }, [clientes.length, searchQuery, filterActivo, sortBy, sortOrder, currentPage]);
 
   // Funciones de filtrado y ordenamiento
   const getFilteredAndSortedClientes = () => {
@@ -128,15 +148,11 @@ export default function ClientesAdminPage() {
         (cliente.user_dni && cliente.user_dni.includes(searchQuery)) ||
         (cliente.username && cliente.username.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      const matchesVIP = filterVIP === 'todos' ||
-        (filterVIP === 'vip' && cliente.is_vip) ||
-        (filterVIP === 'no_vip' && !cliente.is_vip);
-
       const matchesActivo = filterActivo === 'todos' ||
         (filterActivo === 'activo' && cliente.is_active) ||
         (filterActivo === 'inactivo' && !cliente.is_active);
 
-      return matchesSearch && matchesVIP && matchesActivo;
+      return matchesSearch && matchesActivo;
     });
 
     // Luego ordenar
@@ -162,7 +178,6 @@ export default function ClientesAdminPage() {
   // Limpiar filtros
   const clearFilters = () => {
     setSearchQuery('');
-    setFilterVIP('todos');
     setFilterActivo('todos');
     setSortBy('fecha');
     setSortOrder('desc');
@@ -171,7 +186,7 @@ export default function ClientesAdminPage() {
 
   // Verificar si hay filtros activos
   const hasActiveFilters = () => {
-    return searchQuery !== '' || filterVIP !== 'todos' || filterActivo !== 'todos' ||
+    return searchQuery !== '' || filterActivo !== 'todos' ||
       sortBy !== 'fecha' || sortOrder !== 'desc';
   };
 
@@ -214,6 +229,72 @@ export default function ClientesAdminPage() {
     setNotificationDialogOpen(true);
   };
 
+  const formatCheckValue = (check: DeactivationCheckItem) => {
+    if (typeof check.amount === 'number') return formatCurrency(check.amount);
+    if (typeof check.count === 'number') return check.count.toString();
+    return check.ok ? 'OK' : 'Revisar';
+  };
+
+  const openClienteDeactivationCheck = async (cliente: Cliente) => {
+    setClienteToDeactivate(cliente);
+    setDeactivationCheck(null);
+    setDeactivationDialogOpen(true);
+    setDeactivationLoading(true);
+
+    try {
+      const response = await fetch(`/api/clientes/${cliente.id}/deactivation-check/`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (response.ok) {
+        setDeactivationCheck(await response.json());
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        showNotification('Error al verificar cliente', errorData.error || errorData.detail || 'No se pudo verificar si el cliente puede desactivarse.', 'error');
+        setDeactivationDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor', 'error');
+      setDeactivationDialogOpen(false);
+    } finally {
+      setDeactivationLoading(false);
+    }
+  };
+
+  const confirmClienteDeactivation = async () => {
+    if (!clienteToDeactivate || !deactivationCheck?.ok) return;
+
+    setDeactivationSubmitting(true);
+    try {
+      const response = await fetch(`/api/clientes/${clienteToDeactivate.id}/toggle_active/`, {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+
+      if (response.ok) {
+        showNotification(
+          'Cliente desactivado',
+          `El cliente "${clienteToDeactivate.nombre_completo}" fue desactivado correctamente.`,
+          'success'
+        );
+        setDeactivationDialogOpen(false);
+        setClienteToDeactivate(null);
+        fetchClientes();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || errorData.detail || 'No se pudo desactivar el cliente';
+        if (errorData.check) setDeactivationCheck(errorData.check);
+        showNotification('No se puede desactivar', errorMessage, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      showNotification('Error de conexión', 'No se pudo conectar con el servidor', 'error');
+    } finally {
+      setDeactivationSubmitting(false);
+    }
+  };
+
   // Activar/desactivar cliente sin eliminar su historial asociado.
   const handleToggleActiveCliente = async (
     clienteId: number,
@@ -221,6 +302,14 @@ export default function ClientesAdminPage() {
     isActive: boolean
   ) => {
     const nextAction = isActive ? 'desactivar' : 'reactivar';
+
+    if (isActive) {
+      const cliente = clientes.find(item => item.id === clienteId);
+      if (cliente) {
+        openClienteDeactivationCheck(cliente);
+        return;
+      }
+    }
 
     showConfirmDialog(
       isActive ? '¿Desactivar cliente?' : '¿Reactivar cliente?',
@@ -259,30 +348,6 @@ export default function ClientesAdminPage() {
       isActive ? 'Desactivar' : 'Reactivar',
       isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
     );
-  };
-
-  // Toggle VIP
-  const handleToggleVIP = async (clienteId: number, nombreCliente: string, currentVipStatus: boolean) => {
-    try {
-      const response = await fetch(`/api/clientes/${clienteId}/toggle_vip/`, {
-        method: 'POST',
-        headers: getAuthHeaders()
-      });
-
-      if (response.ok) {
-        showNotification(
-          'Estado VIP actualizado',
-          `${nombreCliente} ${!currentVipStatus ? 'ahora es cliente VIP' : 'ya no es cliente VIP'}`,
-          'success'
-        );
-        fetchClientes();
-      } else {
-        showNotification('Error', 'No se pudo actualizar el estado VIP', 'error');
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      showNotification('Error de conexión', 'No se pudo conectar con el servidor', 'error');
-    }
   };
 
   // Calcular edad legible
@@ -363,7 +428,7 @@ export default function ClientesAdminPage() {
               Filtros
               {hasActiveFilters() && (
                 <Badge variant="destructive" className="ml-2 px-1.5 py-0.5 text-xs">
-                  {[searchQuery !== '', filterVIP !== 'todos', filterActivo !== 'todos'].filter(Boolean).length}
+                  {[searchQuery !== '', filterActivo !== 'todos'].filter(Boolean).length}
                 </Badge>
               )}
             </Button>
@@ -382,25 +447,7 @@ export default function ClientesAdminPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Filtro por VIP */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Estado VIP</label>
-                  <Select value={filterVIP} onValueChange={(value) => {
-                    setFilterVIP(value);
-                    setCurrentPage(1);
-                  }}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todos">Todos</SelectItem>
-                      <SelectItem value="vip">Solo VIP</SelectItem>
-                      <SelectItem value="no_vip">No VIP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Filtro por estado activo */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Estado</label>
@@ -483,12 +530,6 @@ export default function ClientesAdminPage() {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <User className="w-4 h-4 text-gray-500" />
                       <h3 className="font-semibold text-lg">{cliente.nombre_completo}</h3>
-                      {cliente.is_vip && (
-                        <Badge variant="default" className="bg-yellow-500 hover:bg-yellow-600">
-                          <Star className="w-3 h-3 mr-1" />
-                          VIP
-                        </Badge>
-                      )}
                       <Badge variant={cliente.is_active ? "default" : "secondary"}>
                         {cliente.is_active ? 'Activo' : 'Inactivo'}
                       </Badge>
@@ -503,17 +544,6 @@ export default function ClientesAdminPage() {
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-2 ml-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleVIP(cliente.id, cliente.nombre_completo, cliente.is_vip);
-                      }}
-                      title={cliente.is_vip ? 'Quitar VIP' : 'Marcar como VIP'}
-                    >
-                      <Star className={`w-4 h-4 ${cliente.is_vip ? 'fill-yellow-500 text-yellow-500' : ''}`} />
-                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -653,6 +683,72 @@ export default function ClientesAdminPage() {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmAction} className={confirmActionStyle}>
               {confirmActionLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal de verificación de baja */}
+      <AlertDialog open={deactivationDialogOpen} onOpenChange={setDeactivationDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Verificar baja de cliente</AlertDialogTitle>
+            <AlertDialogDescription>
+              {clienteToDeactivate
+                ? `Revisando si "${clienteToDeactivate.nombre_completo}" puede ser desactivado sin dejar procesos abiertos.`
+                : 'Revisando dependencias del cliente.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {deactivationLoading ? (
+            <div className="flex items-center gap-3 rounded-lg border bg-gray-50 p-4 text-sm text-gray-700">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Cargando datos y verificando reglas de baja...
+            </div>
+          ) : deactivationCheck ? (
+            <div className="space-y-3">
+              {deactivationCheck.checks.map((check) => (
+                <div
+                  key={check.key}
+                  className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${check.ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}
+                >
+                  <div className="flex items-start gap-2">
+                    {check.ok ? (
+                      <CheckCircle className="mt-0.5 h-4 w-4 text-green-600" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 h-4 w-4 text-red-600" />
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{check.label}</p>
+                      {!check.ok && <p className="text-xs text-gray-600">{check.message}</p>}
+                    </div>
+                  </div>
+                  <Badge variant={check.ok ? 'outline' : 'destructive'}>{formatCheckValue(check)}</Badge>
+                </div>
+              ))}
+              <div className={`rounded-lg border p-3 text-sm ${deactivationCheck.ok ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                {deactivationCheck.ok
+                  ? 'Todo está OK. Podés confirmar la desactivación del cliente.'
+                  : 'No se puede desactivar todavía. Resolvé los bloqueos indicados primero.'}
+              </div>
+            </div>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deactivationSubmitting}>Cerrar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmClienteDeactivation}
+              disabled={deactivationLoading || deactivationSubmitting || !deactivationCheck?.ok}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deactivationSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Desactivando...
+                </>
+              ) : (
+                'Confirmar desactivación'
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

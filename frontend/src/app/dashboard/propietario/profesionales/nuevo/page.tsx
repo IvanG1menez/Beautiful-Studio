@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
-import { getAuthHeaders } from '@/lib/auth-headers';
+import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { ArrowLeft, ExternalLink, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -247,7 +247,7 @@ export default function NuevoProfesionalPage() {
       const baseUrl = '/api';
       const response = await fetch(`${baseUrl}/empleados/`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify(dataToSend)
       });
 
@@ -260,7 +260,7 @@ export default function NuevoProfesionalPage() {
           `${baseUrl}/empleados/${empleadoId}/servicios/`,
           {
             method: 'POST',
-            headers: getAuthHeaders(),
+            headers: getJsonAuthHeaders(),
             body: JSON.stringify({
               servicio: Number(formData.especialidades),
               nivel_experiencia: 3,
@@ -282,7 +282,11 @@ export default function NuevoProfesionalPage() {
         }
 
         // Guardar horarios detallados
-        const horariosArray: any[] = [];
+        const horariosArray: Array<{
+          dia_semana: number;
+          hora_inicio: string;
+          hora_fin: string;
+        }> = [];
         Object.entries(horarios).forEach(([diaStr, config]) => {
           const dia = parseInt(diaStr);
           if (config.activo && config.rangos.length > 0) {
@@ -304,7 +308,7 @@ export default function NuevoProfesionalPage() {
             `${baseUrl}/empleados/${empleadoId}/horarios/bulk/`,
             {
               method: 'POST',
-              headers: getAuthHeaders(),
+              headers: getJsonAuthHeaders(),
               body: JSON.stringify({ horarios: horariosArray })
             }
           );
@@ -359,7 +363,7 @@ export default function NuevoProfesionalPage() {
     }
   };
 
-  const handleInputChange = (field: string, value: any) => {
+  const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({
       ...prev,
       [field]: value

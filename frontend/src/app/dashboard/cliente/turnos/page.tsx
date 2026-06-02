@@ -283,7 +283,7 @@ export default function TurnosClientePage() {
     try {
       const response = await fetch(`/api/turnos/${turnoACancelar.id}/`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers: getJsonAuthHeaders(),
         body: JSON.stringify({ motivo }),
       });
 
@@ -1362,7 +1362,10 @@ export default function TurnosClientePage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={cancelLoading}>No, mantener turno</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleConfirmAction}
+              onClick={(event) => {
+                event.preventDefault();
+                handleConfirmAction();
+              }}
               className="bg-red-600 hover:bg-red-700"
               disabled={cancelLoading || !motivoCancelacionValido}
             >

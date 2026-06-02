@@ -262,7 +262,7 @@ class ConfiguracionGlobalSerializer(serializers.ModelSerializer):
             "id",
             "min_horas_cancelacion_credito",
             "dias_vencimiento_credito",
-            "max_reprogramaciones_mensuales",
+            "dias_rango_reprogramacion",
             "margen_fidelizacion_dias",
             "descuento_fidelizacion_pct",
             "streak_expiration_days",

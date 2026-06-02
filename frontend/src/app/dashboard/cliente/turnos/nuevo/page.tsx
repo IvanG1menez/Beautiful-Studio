@@ -160,9 +160,20 @@ export default function NuevoTurnoPage() {
   const [empleadoIdFromQuery, setEmpleadoIdFromQuery] = useState<number | null>(null);
   const [horaFromQuery, setHoraFromQuery] = useState<string | null>(null);
   const [beneficioFromQuery, setBeneficioFromQuery] = useState<string | null>(null);
+  const [fidelizacionSlotOcupado, setFidelizacionSlotOcupado] = useState(false);
 
   // Base URL de la API
   const API_BASE_URL = '/api';
+
+  const parseMoney = (value?: string | number | null) => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === 'number') return value;
+    const normalized = value
+      .replace(/\s/g, '')
+      .replace(/\.(?=\d{3}(\D|$))/g, '')
+      .replace(',', '.');
+    return Number(normalized) || 0;
+  };
 
   // Detectar si venimos desde un enlace de fidelización y leer parámetros
   useEffect(() => {
@@ -320,13 +331,13 @@ export default function NuevoTurnoPage() {
   const getPrecioServicioConFidelizacion = () => {
     if (!servicioSeleccionado) return 0;
 
-    let precioServicio = parseFloat(servicioSeleccionado.precio || '0') || 0;
+    let precioServicio = parseMoney(servicioSeleccionado.precio);
 
     // Solo aplicar descuento cuando el turno viene desde un enlace
     // de fidelización y el beneficio es por descuento.
     if (isFromFidelizacion && beneficioFromQuery === 'descuento') {
-      const monto = parseFloat(servicioSeleccionado.descuento_fidelizacion_monto || '0') || 0;
-      const pct = parseFloat(servicioSeleccionado.descuento_fidelizacion_pct || '0') || 0;
+      const monto = parseMoney(servicioSeleccionado.descuento_fidelizacion_monto);
+      const pct = parseMoney(servicioSeleccionado.descuento_fidelizacion_pct);
 
       if (monto > 0) {
         precioServicio = Math.max(0, precioServicio - monto);
@@ -496,6 +507,9 @@ export default function NuevoTurnoPage() {
 
     if (horariosDisponibles.includes(horaFromQuery)) {
       setHorarioSeleccionado(horaFromQuery);
+      setFidelizacionSlotOcupado(false);
+    } else {
+      setFidelizacionSlotOcupado(true);
     }
   }, [isFromFidelizacion, horaFromQuery, horariosDisponibles, horarioSeleccionado]);
 
@@ -1321,6 +1335,20 @@ export default function NuevoTurnoPage() {
             <div>
               <h3 className="font-semibold text-red-900">Error</h3>
               <p className="text-red-700">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {fidelizacionSlotOcupado && (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600" />
+              <div>
+                <h3 className="font-semibold">La oferta ya fue aceptada</h3>
+                <p className="text-sm">
+                  Te redirigimos a la sección de horarios para que puedas elegir otro turno disponible con este beneficio.
+                </p>
+              </div>
             </div>
           </div>
         )}

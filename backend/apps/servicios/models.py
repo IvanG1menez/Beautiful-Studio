@@ -11,6 +11,7 @@ class Sala(models.Model):
     capacidad_simultanea = models.PositiveIntegerField(
         default=1, verbose_name="Capacidad simultánea"
     )
+    is_active = models.BooleanField(default=True, verbose_name="Activo")
     history = HistoricalRecords()
 
     class Meta:

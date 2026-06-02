@@ -84,6 +84,8 @@ def _enviar_link_crear_password_cliente(cliente, request=None, origen: str = "")
         email=user_obj.email,
         token=reset_token.token,
         usuario_nombre=user_obj.first_name or "",
+        es_creacion_cuenta=True,
+        validez_horas=24,
     )
     _registrar_auditoria_staff(
         request,
@@ -248,6 +250,14 @@ class TurnoViewSet(viewsets.ModelViewSet):
             if fecha_hasta:
                 # Filtrar turnos hasta el final del día
                 queryset = queryset.filter(fecha_hora__date__lte=fecha_hasta)
+
+            metodo_pago_grupo = self.request.query_params.get("metodo_pago_grupo")
+            if metodo_pago_grupo == "mercado_pago":
+                queryset = queryset.filter(
+                    metodo_pago__in=["mercadopago", "mercadopago_qr"]
+                )
+            elif metodo_pago_grupo == "efectivo":
+                queryset = queryset.filter(metodo_pago="efectivo")
 
         return queryset
 
@@ -687,6 +697,140 @@ class TurnoViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=False, methods=["post"], url_path="limpiar-reservas-presenciales-test")
+    def limpiar_reservas_presenciales_test(self, request):
+        """Limpia datos de test creados desde reserva presencial profesional."""
+
+        user = request.user
+        if not (
+            user.is_staff or user.role in ["propietario", "superusuario", "profesional"]
+        ):
+            return Response(
+                {"error": "No tiene permisos para limpiar datos de test"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if request.data.get("confirmar") != "LIMPIAR_TEST":
+            return Response(
+                {"error": "Confirmación inválida para limpieza de test."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.contrib.auth import get_user_model
+        from django.db import transaction
+        from django.db.models import Q
+
+        from apps.authentication.models import AuditoriaAcciones
+        from apps.clientes.models import Cliente
+        from apps.emails.models import Notificacion, NotificacionConfig, PasswordResetToken
+        from apps.mercadopago.models import (
+            OrdenMercadoPagoPresencial,
+            PagoMercadoPago,
+            PreferenciaMercadoPagoCancelada,
+        )
+        from apps.turnos.models import (
+            HistorialTurno,
+            LogReasignacion,
+            StreakAuditLog,
+            StreakRewardEvent,
+        )
+
+        User = get_user_model()
+        target_turnos = Turno.objects.filter(
+            canal_reserva="panel_profesional",
+            metodo_pago__in=["efectivo", "mercadopago_qr", "mercadopago_manual"],
+        )
+        turno_ids = list(target_turnos.values_list("id", flat=True))
+        walkin_cliente_ids = list(
+            target_turnos.filter(es_cliente_registrado=False)
+            .values_list("cliente_id", flat=True)
+            .distinct()
+        )
+
+        clientes_borrables_ids = []
+        for cliente_id in walkin_cliente_ids:
+            tiene_otros_turnos = Turno.objects.filter(cliente_id=cliente_id).exclude(
+                id__in=turno_ids
+            ).exists()
+            if not tiene_otros_turnos:
+                clientes_borrables_ids.append(cliente_id)
+
+        user_ids_borrables = list(
+            Cliente.objects.filter(id__in=clientes_borrables_ids).values_list("user_id", flat=True)
+        )
+        ordenes_qr = OrdenMercadoPagoPresencial.objects.filter(
+            reference_id__startswith="staff-qr-",
+            payload__canal_reserva="panel_profesional",
+        )
+        qr_reference_ids = list(ordenes_qr.values_list("reference_id", flat=True))
+        pagos_qs = PagoMercadoPago.objects.filter(
+            Q(turno_id__in=turno_ids) | Q(preference_id__in=qr_reference_ids)
+        )
+        preference_ids = list(pagos_qs.values_list("preference_id", flat=True)) + qr_reference_ids
+
+        with transaction.atomic():
+            token_qs = PasswordResetToken.objects.filter(user_id__in=user_ids_borrables)
+            token_ids = list(token_qs.values_list("id", flat=True))
+
+            resumen = {
+                "reasignaciones": LogReasignacion.objects.filter(
+                    Q(turno_cancelado_id__in=turno_ids)
+                    | Q(turno_ofrecido_id__in=turno_ids)
+                    | Q(cliente_notificado_id__in=clientes_borrables_ids)
+                ).count(),
+                "historial_turnos": HistorialTurno.objects.filter(turno_id__in=turno_ids).count(),
+                "pagos_mp": pagos_qs.count(),
+                "ordenes_qr": ordenes_qr.count(),
+                "turnos": len(turno_ids),
+                "clientes": len(clientes_borrables_ids),
+                "usuarios": len(user_ids_borrables),
+                "tokens_password": token_qs.count(),
+            }
+
+            LogReasignacion.objects.filter(
+                Q(turno_cancelado_id__in=turno_ids)
+                | Q(turno_ofrecido_id__in=turno_ids)
+                | Q(cliente_notificado_id__in=clientes_borrables_ids)
+            ).delete()
+            StreakRewardEvent.objects.filter(
+                Q(turno_id__in=turno_ids) | Q(cliente_id__in=clientes_borrables_ids)
+            ).delete()
+            StreakAuditLog.objects.filter(
+                Q(turno_id__in=turno_ids) | Q(cliente_id__in=clientes_borrables_ids)
+            ).delete()
+            HistorialTurno.objects.filter(turno_id__in=turno_ids).delete()
+            pagos_qs.delete()
+            PreferenciaMercadoPagoCancelada.objects.filter(preference_id__in=preference_ids).delete()
+            ordenes_qr.delete()
+
+            try:
+                Turno.history.model.objects.filter(id__in=turno_ids).delete()
+                Cliente.history.model.objects.filter(id__in=clientes_borrables_ids).delete()
+            except Exception as exc:
+                logger.warning("No se pudo limpiar simple_history en test cleanup: %s", exc)
+
+            Turno.objects.filter(id__in=turno_ids).delete()
+            token_qs.delete()
+            Notificacion.objects.filter(usuario_id__in=user_ids_borrables).delete()
+            NotificacionConfig.objects.filter(user_id__in=user_ids_borrables).delete()
+            AuditoriaAcciones.objects.filter(
+                Q(modelo_afectado="Cliente", objeto_id__in=clientes_borrables_ids)
+                | Q(modelo_afectado="PasswordResetToken", objeto_id__in=token_ids)
+                | Q(usuario_id__in=user_ids_borrables)
+            ).delete()
+            Cliente.objects.filter(id__in=clientes_borrables_ids).delete()
+            User.objects.filter(id__in=user_ids_borrables).delete()
+
+            _registrar_auditoria_staff(
+                request,
+                "eliminar",
+                "Turno",
+                None,
+                {"evento": "limpieza_test_reserva_presencial", "resumen": resumen},
+            )
+
+        return Response({"message": "Datos de test limpiados", "resumen": resumen})
 
     @action(detail=False, methods=["get"], url_path="empleado/(?P<empleado_id>[^/.]+)")
     def turnos_empleado(self, request, empleado_id=None):

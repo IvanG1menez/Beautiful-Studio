@@ -55,6 +55,36 @@ export const empleadosService = {
     return await del(`/empleados/${id}/`);
   },
 
+  deactivationCheck: async (id: number): Promise<{
+    ok: boolean;
+    checks: {
+      key: string;
+      label: string;
+      ok: boolean;
+      blocking: boolean;
+      message: string;
+      count?: number;
+      amount?: number;
+    }[];
+    blockers: {
+      key: string;
+      label: string;
+      ok: boolean;
+      blocking: boolean;
+      message: string;
+      count?: number;
+      amount?: number;
+    }[];
+    warnings: { key: string; label: string; count?: number; message: string }[];
+  }> => {
+    return await get(`/empleados/${id}/deactivation-check/`);
+  },
+
+  toggleActive: async (id: number): Promise<Empleado> => {
+    const response = await post<{ data: Empleado }>(`/empleados/${id}/toggle-active/`, {});
+    return response.data;
+  },
+
   // Cambiar disponibilidad
   toggleAvailability: async (id: number, isDisponible: boolean): Promise<Empleado> => {
     return await patch<Empleado>(`/empleados/${id}/`, { is_disponible: isDisponible });

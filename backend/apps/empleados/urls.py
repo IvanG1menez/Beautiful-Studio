@@ -12,6 +12,16 @@ urlpatterns = [
         name="empleado-stats",
     ),
     path(
+        "<int:empleado_id>/deactivation-check/",
+        views.empleado_deactivation_check,
+        name="empleado-deactivation-check",
+    ),
+    path(
+        "<int:empleado_id>/toggle-active/",
+        views.empleado_toggle_active,
+        name="empleado-toggle-active",
+    ),
+    path(
         "<int:empleado_id>/dias-trabajo/",
         views.dias_trabajo_empleado,
         name="dias-trabajo-empleado",

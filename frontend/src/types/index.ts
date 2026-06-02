@@ -119,6 +119,7 @@ export interface Empleado {
   dias_trabajo: string;
   comision_porcentaje: string;
   is_disponible: boolean;
+  is_active?: boolean;
   biografia?: string;
   created_at: string;
   updated_at: string;
@@ -196,6 +197,8 @@ export interface Turno {
   puede_reprogramar?: boolean;
   motivo_no_reprogramable?: string;
   reprogramacion_bloqueada_codigo?: string | null;
+  reprogramacion_rango_dias?: number;
+  reprogramacion_fecha_maxima?: string | null;
   created_at: string;
   updated_at: string;
   fecha_hora_fin?: string;

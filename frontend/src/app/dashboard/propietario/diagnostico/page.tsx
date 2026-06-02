@@ -326,7 +326,7 @@ export default function DiagnosticoPage() {
   };
 
   const handleLimpiarDatos = async () => {
-    const confirmed = window.confirm('Esto elimina turnos, billeteras, logs y notificaciones generados para diagnóstico. Los usuarios demo quedan creados. ¿Continuar?');
+    const confirmed = window.confirm('Esto elimina turnos, billeteras, pagos, logs y notificaciones generados para pruebas. Los usuarios demo quedan creados. ¿Continuar?');
     if (!confirmed) return;
 
     setLoadingLimpieza(true);
@@ -412,9 +412,9 @@ export default function DiagnosticoPage() {
   return (
     <div className="container mx-auto py-6 max-w-7xl">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold">Herramientas de Diagnóstico</h1>
+        <h1 className="text-3xl font-bold">Sección de pruebas</h1>
         <p className="text-muted-foreground">
-          Ejecuta manualmente los procesos automáticos para testing y diagnóstico
+          Prepará y ejecutá manualmente los procesos automáticos con datos reproducibles
         </p>
       </div>
 
@@ -422,7 +422,7 @@ export default function DiagnosticoPage() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Importante</AlertTitle>
         <AlertDescription>
-          Estas herramientas son solo para testing y diagnóstico. Los cambios que realices aquí son reales
+          Estas herramientas son solo para pruebas. Los cambios que realices aquí son reales
           y afectarán la base de datos (cancelaciones, créditos, emails enviados).
         </AlertDescription>
       </Alert>
@@ -431,7 +431,7 @@ export default function DiagnosticoPage() {
         <CardHeader>
           <CardTitle>Preparación de pruebas</CardTitle>
           <CardDescription>
-            Prepará cada escenario por separado para evitar cruces. El botón rojo limpia los datos generados por todos los escenarios.
+            Prepará cada escenario por separado para evitar cruces. El botón rojo limpia los datos generados por todas las pruebas.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -527,7 +527,7 @@ export default function DiagnosticoPage() {
                 <div className="mt-2 grid gap-2 text-sm md:grid-cols-3">
                   {resultadoPreparacion.optimizacion && (
                     <div>
-                      <strong>Reacomodamiento:</strong> Juan Perez turno #{resultadoPreparacion.optimizacion.turno_cancelar_id}. Primero Manuel #{resultadoPreparacion.optimizacion.candidato_lejano_id}; si rechaza, Agustin #{resultadoPreparacion.optimizacion.candidato_medio_id}.
+                      <strong>Reacomodamiento:</strong> Juan Perez queda listo para cancelar con seña paga en el turno #{resultadoPreparacion.optimizacion.turno_cancelar_id}. Primero recibe Manuel #{resultadoPreparacion.optimizacion.candidato_lejano_id} con seña paga; si expira/rechaza, sigue Agustin #{resultadoPreparacion.optimizacion.candidato_medio_id} con pago completo y crédito a billetera al aceptar.
                     </div>
                   )}
                   {resultadoPreparacion.fidelizacion && (

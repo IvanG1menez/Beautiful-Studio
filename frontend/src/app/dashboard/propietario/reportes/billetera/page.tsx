@@ -23,6 +23,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { PrintReportButton } from '../_components/PrintReportButton';
 
 interface SelectOption {
   value: string;
@@ -194,7 +195,9 @@ export default function ReportesBilleteraPage() {
       const response = await fetch(url, { headers: getAuthHeaders() });
 
       if (!response.ok) {
-        throw new Error('No se pudo cargar la auditoría');
+        const errorData = await response.json().catch(() => null);
+        const detail = errorData?.error || errorData?.detail || 'No se pudo cargar la auditoría';
+        throw new Error(detail);
       }
 
       const result: ReporteAuditoriaData = await response.json();
@@ -407,6 +410,7 @@ export default function ReportesBilleteraPage() {
                 <Download className="mr-2 h-4 w-4" />
                 Exportar CSV
               </Button>
+              <PrintReportButton />
             </div>
           </div>
         </CardHeader>

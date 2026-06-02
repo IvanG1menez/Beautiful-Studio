@@ -42,6 +42,26 @@ urlpatterns = [
         views_reportes.reportes_billetera,
         name="reportes-billetera",
     ),
+    path(
+        "reportes/automatizaciones/",
+        views_reportes.reportes_automatizaciones,
+        name="reportes-automatizaciones",
+    ),
+    path(
+        "reportes/clientes/",
+        views_reportes.reportes_clientes,
+        name="reportes-clientes",
+    ),
+    path(
+        "reportes/salas/",
+        views_reportes.reportes_salas,
+        name="reportes-salas",
+    ),
+    path(
+        "reportes/profesionales/",
+        views_reportes.reportes_profesionales,
+        name="reportes-profesionales",
+    ),
     # Oportunidades de Agenda
     path(
         "oportunidades/",

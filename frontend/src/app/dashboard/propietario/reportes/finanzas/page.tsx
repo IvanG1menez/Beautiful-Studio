@@ -9,6 +9,7 @@ import { getAuthHeaders } from '@/lib/auth-headers';
 import { ArrowDownRight, ArrowUpRight, Calendar, DollarSign, TrendingUp, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { PrintReportButton } from '../_components/PrintReportButton';
 
 interface ResumenFinanciero {
   total_ingresos: number;
@@ -41,8 +42,8 @@ interface ReporteData {
   resumen: ResumenFinanciero;
   ingresos_mensuales: IngresoMensual[];
   balance_turnos: BalanceTurnos;
-  top_servicios: any[];
-  rendimiento_empleados: any[];
+  top_servicios: Array<{ servicio_id: number; servicio_nombre: string; total: number; cantidad: number }>;
+  rendimiento_empleados: Array<{ empleado_id: number; empleado_nombre: string; total: number; cantidad: number }>;
 }
 
 const COLORS = {
@@ -122,9 +123,12 @@ export default function ReportesFinanzasPage() {
   return (
     <div className="container mx-auto p-6 space-y-6 bg-background">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">📊 Resumen Financiero</h1>
-        <p className="text-muted-foreground mt-1">Análisis de ingresos y rendimiento del negocio</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">📊 Resumen Financiero</h1>
+          <p className="text-muted-foreground mt-1">Análisis de ingresos y rendimiento del negocio</p>
+        </div>
+        <PrintReportButton />
       </div>
 
       {/* Filtros de fecha */}
@@ -275,8 +279,8 @@ export default function ReportesFinanzasPage() {
                         style={{ fontSize: '12px' }}
                       />
                       <Tooltip
-                        formatter={(value: any) => formatCurrency(value)}
-                        labelFormatter={formatMonth}
+                        formatter={(value: number | string) => formatCurrency(Number(value))}
+                        labelFormatter={(label) => formatMonth(String(label))}
                       />
                       <Legend />
                       <Bar dataKey="total" fill="#3b82f6" name="Ingresos" radius={[8, 8, 0, 0]} />
@@ -314,7 +318,7 @@ export default function ReportesFinanzasPage() {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value: any) => `${value} turnos`} />
+                      <Tooltip formatter={(value: number | string) => `${value} turnos`} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
