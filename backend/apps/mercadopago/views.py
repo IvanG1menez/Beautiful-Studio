@@ -40,7 +40,7 @@ from apps.clientes.models import Cliente
 from apps.servicios.models import Servicio
 from apps.empleados.models import Empleado
 from apps.authentication.models import AuditoriaAcciones
-from apps.emails.models import PasswordResetToken
+from apps.emails.models import PasswordResetToken, PromotionOffer
 from apps.emails.services import EmailService
 from .models import OrdenMercadoPagoPresencial, PagoMercadoPago, PreferenciaMercadoPagoCancelada
 from .serializers import (
@@ -59,6 +59,7 @@ from apps.turnos.services.reprogramacion_service import (
     reprogramar_turno,
     validar_rango_reprogramacion,
 )
+from apps.turnos.services.pagos_service import registrar_movimiento_pago_turno
 
 logger = logging.getLogger(__name__)
 
@@ -621,6 +622,15 @@ class CrearPreferenciaSinTurnoView(APIView):
                 canal_reserva="fidelizacion" if es_oferta_fidelizacion else "web_cliente",
                 metodo_pago="mercadopago_qr" if data.get("usar_qr") else "mercadopago",
             )
+            if creditos_aplicados > 0:
+                registrar_movimiento_pago_turno(
+                    turno=turno,
+                    monto=creditos_aplicados,
+                    metodo="billetera",
+                    tipo=tipo_pago.lower() if tipo_pago == "SENIA" else "pago_completo",
+                    descripcion="Reserva cubierta con crédito de billetera",
+                    origen="web_cliente",
+                )
             if streak_coupon:
                 _mark_streak_coupon_used(streak_coupon.id, turno)
             logger.info(
@@ -2219,6 +2229,32 @@ class WebhookMercadoPagoView(APIView):
                     turno_wh.senia_pagada = max(Decimal("0"), senia_total)
                     turno_wh.save(update_fields=["senia_pagada"])
 
+            promotion_offer_token = turno_payload.get("promotion_offer_token")
+            if promotion_offer_token:
+                promotion_offer = PromotionOffer.objects.select_for_update().filter(
+                    token=promotion_offer_token
+                ).first()
+                if promotion_offer is not None:
+                    promotion_offer.status = PromotionOffer.Status.ACCEPTED
+                    promotion_offer.accepted_at = promotion_offer.accepted_at or timezone.now()
+                    promotion_offer.turno = turno_wh
+                    promotion_offer.payment_preference_id = mp_preference_id
+                    promotion_offer.save(
+                        update_fields=[
+                            "status",
+                            "accepted_at",
+                            "turno",
+                            "payment_preference_id",
+                            "updated_at",
+                        ]
+                    )
+                    PromotionOffer.objects.filter(
+                        campaign_id=promotion_offer.campaign_id,
+                        status=PromotionOffer.Status.SENT,
+                    ).exclude(pk=promotion_offer.pk).update(
+                        status=PromotionOffer.Status.TAKEN_BY_OTHER
+                    )
+
             _mark_streak_coupon_used(turno_payload.get("streak_coupon_id"), turno_wh)
 
             pago_por_preference = PagoMercadoPago.objects.filter(
@@ -2230,6 +2266,15 @@ class WebhookMercadoPagoView(APIView):
                     pago_por_preference.payment_id = str(payment_id)
                     pago_por_preference.save(
                         update_fields=["estado", "payment_id", "actualizado_en"]
+                    )
+                    registrar_movimiento_pago_turno(
+                        turno=turno_wh,
+                        monto=monto_cobrado,
+                        metodo=metodo_pago,
+                        tipo="senia" if tipo_pago == "SENIA" else "pago_completo",
+                        referencia=str(payment_id),
+                        descripcion=f"Pago Mercado Pago turno #{turno_wh.pk}",
+                        origen=canal_reserva or "webhook_mp",
                     )
                     from apps.turnos.signals import _enviar_notificaciones_nuevo_turno
 
@@ -2252,6 +2297,25 @@ class WebhookMercadoPagoView(APIView):
                 descripcion=f"Turno #{turno_wh.pk} — {servicio_wh.nombre}",
                 estado="approved",
             )
+            registrar_movimiento_pago_turno(
+                turno=turno_wh,
+                monto=monto_cobrado,
+                metodo=metodo_pago,
+                tipo="senia" if tipo_pago == "SENIA" else "pago_completo",
+                referencia=str(payment_id),
+                descripcion=pago_wh.descripcion,
+                origen=canal_reserva or "webhook_mp",
+            )
+            if creditos_wh > 0:
+                registrar_movimiento_pago_turno(
+                    turno=turno_wh,
+                    monto=creditos_wh,
+                    metodo="billetera",
+                    tipo="senia" if tipo_pago == "SENIA" else "pago_completo",
+                    referencia=f"billetera-{mp_preference_id}",
+                    descripcion=f"Crédito de billetera aplicado al turno #{turno_wh.pk}",
+                    origen=canal_reserva or "webhook_mp",
+                )
 
             if turno_corregido_cliente:
                 from apps.turnos.signals import _enviar_notificaciones_nuevo_turno
@@ -2357,6 +2421,17 @@ class WebhookMercadoPagoView(APIView):
                     "tipo_pago",
                     "updated_at",
                 ]
+            )
+
+            registrar_movimiento_pago_turno(
+                turno=turno,
+                monto=monto_cobrado,
+                metodo=metodo_pago_turno if metodo_payload != "mercadopago_manual" else "mercadopago_manual",
+                tipo="saldo",
+                referencia=str(payment_id),
+                descripcion=f"Cobro de saldo del turno #{turno.pk}",
+                origen="pago_saldo_turno",
+                registrado_por=staff_user,
             )
 
             if staff_user is not None:
@@ -2475,6 +2550,16 @@ class WebhookMercadoPagoView(APIView):
                     "estado",
                     "actualizado_en",
                 ]
+            )
+
+            registrar_movimiento_pago_turno(
+                turno=turno,
+                monto=monto_cobrado,
+                metodo=turno.metodo_pago or "mercadopago",
+                tipo="senia" if tipo_pago == "SENIA" else "pago_completo",
+                referencia=str(payment_id),
+                descripcion=f"Pago de reprogramación turno #{turno.pk}",
+                origen="reprogramacion_turno",
             )
 
         logger.info(

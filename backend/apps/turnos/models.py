@@ -352,6 +352,12 @@ class HistorialTurno(models.Model):
     observaciones = models.TextField(
         blank=True, null=True, verbose_name="Observaciones"
     )
+    origen = models.CharField(
+        max_length=40,
+        blank=True,
+        default="panel",
+        verbose_name="Origen del cambio",
+    )
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha del cambio"
     )
@@ -364,6 +370,81 @@ class HistorialTurno(models.Model):
     def __str__(self):
         fecha_formato = self.created_at.strftime("%d/%m/%Y %H:%M")
         return f"{self.turno} - {self.accion} - {fecha_formato}"
+
+
+class MovimientoPagoTurno(models.Model):
+    """Movimiento comercial de pago aplicado a un turno.
+
+    Este registro es independiente del proveedor de cobro. Un turno puede tener
+    pagos mixtos: seña por Mercado Pago y saldo en efectivo, o viceversa.
+    """
+
+    METODO_CHOICES = [
+        ("mercadopago", "Mercado Pago"),
+        ("mercadopago_qr", "Mercado Pago QR"),
+        ("mercadopago_manual", "Mercado Pago manual"),
+        ("efectivo", "Efectivo"),
+        ("transferencia", "Transferencia"),
+        ("billetera", "Billetera"),
+        ("mixto", "Mixto"),
+        ("manual", "Manual"),
+    ]
+
+    TIPO_CHOICES = [
+        ("senia", "Seña"),
+        ("saldo", "Saldo"),
+        ("pago_completo", "Pago completo"),
+        ("ajuste", "Ajuste"),
+    ]
+
+    ESTADO_CHOICES = [
+        ("aprobado", "Aprobado"),
+        ("pendiente", "Pendiente"),
+        ("cancelado", "Cancelado"),
+    ]
+
+    turno = models.ForeignKey(
+        Turno,
+        on_delete=models.CASCADE,
+        related_name="movimientos_pago",
+        verbose_name="Turno",
+    )
+    cliente = models.ForeignKey(
+        "clientes.Cliente",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_pago_turnos",
+        verbose_name="Cliente",
+    )
+    monto = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Monto")
+    metodo = models.CharField(max_length=30, choices=METODO_CHOICES)
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="aprobado")
+    referencia = models.CharField(max_length=255, blank=True, default="")
+    descripcion = models.CharField(max_length=255, blank=True, default="")
+    origen = models.CharField(max_length=40, blank=True, default="")
+    registrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="movimientos_pago_registrados",
+    )
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Movimiento de Pago de Turno"
+        verbose_name_plural = "Movimientos de Pago de Turnos"
+        ordering = ["creado_en", "id"]
+        indexes = [
+            models.Index(fields=["turno", "estado", "creado_en"]),
+            models.Index(fields=["referencia"]),
+        ]
+
+    def __str__(self):
+        return f"Turno #{self.turno_id} - {self.get_metodo_display()} - ${self.monto}"
 
 
 class LogReasignacion(models.Model):

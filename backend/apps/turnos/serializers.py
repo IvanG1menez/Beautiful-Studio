@@ -69,6 +69,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
     monto_pendiente_original = serializers.SerializerMethodField()
     descuento_aplicado = serializers.SerializerMethodField()
     pagado_completo = serializers.SerializerMethodField()
+    tiene_comprobante_pago = serializers.SerializerMethodField()
     elegible_credito_cancelacion = serializers.SerializerMethodField()
     monto_credito_cancelacion = serializers.SerializerMethodField()
     puede_reprogramar = serializers.SerializerMethodField()
@@ -123,6 +124,7 @@ class TurnoListSerializer(serializers.ModelSerializer):
             "puede_cancelar",
             "tiene_pago_mp",
             "pagado_completo",
+            "tiene_comprobante_pago",
             "elegible_credito_cancelacion",
             "monto_credito_cancelacion",
             "puede_reprogramar",
@@ -296,6 +298,14 @@ class TurnoListSerializer(serializers.ModelSerializer):
         try:
             pendiente = self.get_monto_pendiente(obj)
             return pendiente <= Decimal("0.00")
+        except Exception:
+            return False
+
+    def get_tiene_comprobante_pago(self, obj: Turno) -> bool:
+        try:
+            if obj.movimientos_pago.filter(estado="aprobado").exists():
+                return True
+            return obj.pagos_mercadopago.filter(estado="approved").exists()
         except Exception:
             return False
 
@@ -669,6 +679,7 @@ class HistorialTurnoSerializer(serializers.ModelSerializer):
             "estado_anterior",
             "estado_nuevo",
             "observaciones",
+            "origen",
             "created_at",
         ]
         read_only_fields = ["created_at"]

@@ -792,7 +792,7 @@ def active_fidelizacion_offer_view(request):
     from django.utils import timezone
     from django.utils.dateparse import parse_datetime
     from apps.clientes.models import Billetera
-    from apps.emails.models import Notificacion
+    from apps.emails.models import Notificacion, PromotionOffer
     from apps.empleados.models import Empleado
     from apps.servicios.models import Servicio
     from apps.turnos.models import Turno
@@ -803,6 +803,31 @@ def active_fidelizacion_offer_view(request):
         return Response(
             {"error": "No se encontró perfil de cliente"},
             status=status.HTTP_404_NOT_FOUND,
+        )
+
+    offer = (
+        PromotionOffer.objects.select_related("servicio", "empleado__user")
+        .filter(
+            cliente=cliente,
+            status__in=[PromotionOffer.Status.SENT, PromotionOffer.Status.PAYMENT_PENDING],
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if offer:
+        saldo = Decimal(str(offer.saldo_snapshot or 0))
+        return Response(
+            {
+                "status": "activa",
+                "beneficio": "saldo" if offer.beneficio == PromotionOffer.Benefit.WALLET else "descuento",
+                "servicio": {"id": offer.servicio.id, "nombre": offer.servicio.nombre},
+                "empleado": {"id": offer.empleado.id, "nombre": offer.empleado.nombre_completo},
+                "fecha_sugerida": offer.fecha_hora.isoformat(),
+                "saldo_billetera": str(saldo),
+                "url": f"/promociones/confirmar?token={offer.token}",
+            },
+            status=status.HTTP_200_OK,
         )
 
     notificacion = (

@@ -20,6 +20,7 @@ interface TurnoSummary {
   servicio: string;
   sala: string;
   metodo_pago: string;
+  canal_reserva?: string;
   precio_final: number;
 }
 
@@ -39,6 +40,7 @@ interface ReportRow {
   ultimo_turno_agendado?: TurnoSummary | null;
   ultimo_turno_en_sala?: TurnoSummary | null;
   ultimo_turno_ofrecido?: TurnoSummary | null;
+  telegram_vinculado?: boolean;
 }
 
 interface ReportData {
@@ -128,6 +130,7 @@ export function OperationalReportPage({ title, description, endpoint, entityLabe
           <div className="flex flex-wrap gap-2 pt-1">
             <Badge variant="outline">{turno.estado}</Badge>
             <Badge variant="secondary">{turno.metodo_pago}</Badge>
+            {turno.canal_reserva && <Badge variant="outline">{turno.canal_reserva}</Badge>}
             <Badge>{formatCurrency(turno.precio_final)}</Badge>
           </div>
         </div>
@@ -237,6 +240,7 @@ export function OperationalReportPage({ title, description, endpoint, entityLabe
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {row.activo !== undefined && <Badge variant={row.activo ? 'default' : 'secondary'}>{row.activo ? 'Activo' : 'Inactivo'}</Badge>}
+                    {row.telegram_vinculado && <Badge className="bg-sky-600 hover:bg-sky-600">Telegram vinculado</Badge>}
                     {row.disponible !== undefined && <Badge variant="outline">{row.disponible ? 'Disponible' : 'No disponible'}</Badge>}
                     {row.capacidad_simultanea !== undefined && <Badge variant="outline">Capacidad {row.capacidad_simultanea}</Badge>}
                   </div>

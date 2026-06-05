@@ -6,6 +6,7 @@ from django.utils import timezone
 from .models import (
     Turno,
     HistorialTurno,
+    MovimientoPagoTurno,
     LogReasignacion,
     ClienteStreakStats,
     StreakCoupon,
@@ -27,6 +28,27 @@ class HistorialTurnoInline(admin.TabularInline):
         "estado_nuevo",
         "observaciones",
         "created_at",
+    ]
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+class MovimientoPagoTurnoInline(admin.TabularInline):
+    model = MovimientoPagoTurno
+    extra = 0
+    readonly_fields = [
+        "cliente",
+        "monto",
+        "metodo",
+        "tipo",
+        "estado",
+        "referencia",
+        "descripcion",
+        "origen",
+        "registrado_por",
+        "creado_en",
     ]
     can_delete = False
 
@@ -121,7 +143,7 @@ class TurnoAdmin(SimpleHistoryAdmin):
         ),
     )
 
-    inlines = [HistorialTurnoInline]
+    inlines = [MovimientoPagoTurnoInline, HistorialTurnoInline]
 
     date_hierarchy = "fecha_hora"
 
@@ -542,6 +564,31 @@ class HistorialTurnoAdmin(admin.ModelAdmin):
 
     created_at_formateado.short_description = "Fecha del Cambio"
     created_at_formateado.admin_order_field = "created_at"
+
+
+@admin.register(MovimientoPagoTurno)
+class MovimientoPagoTurnoAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "turno",
+        "cliente",
+        "monto",
+        "metodo",
+        "tipo",
+        "estado",
+        "referencia",
+        "creado_en",
+    ]
+    list_filter = ["metodo", "tipo", "estado", "origen", "creado_en"]
+    search_fields = [
+        "turno__id",
+        "cliente__user__first_name",
+        "cliente__user__last_name",
+        "cliente__user__email",
+        "referencia",
+        "descripcion",
+    ]
+    readonly_fields = ["creado_en", "actualizado_en"]
 
     def get_queryset(self, request):
         """Optimizar consultas"""

@@ -76,6 +76,7 @@ interface HistorialRecord {
   usuario: HistoryUser;
   fecha: string;
   cambio_razon: string;
+  origen: string;
   datos: Record<string, unknown>;
 }
 
@@ -453,6 +454,20 @@ export default function HistorialPage() {
     return <Badge variant="outline">{estado}</Badge>;
   };
 
+  const getOrigenBadge = (origen?: string | null) => {
+    const normalized = (origen || 'panel').toLowerCase();
+    if (normalized === 'telegram') {
+      return <Badge className="bg-sky-600 hover:bg-sky-600">Telegram</Badge>;
+    }
+    if (normalized.includes('web')) {
+      return <Badge variant="outline">Web cliente</Badge>;
+    }
+    if (normalized.includes('sistema') || normalized.includes('system')) {
+      return <Badge variant="secondary">Sistema</Badge>;
+    }
+    return <Badge variant="outline">Panel</Badge>;
+  };
+
   const formatearFecha = (fecha: string | null) => {
     if (!fecha) {
       return '-';
@@ -630,6 +645,7 @@ export default function HistorialPage() {
                       <TableHead>ID</TableHead>
                       <TableHead>Acción</TableHead>
                       <TableHead>Usuario</TableHead>
+                      <TableHead>Canal</TableHead>
                       <TableHead>Razón del cambio</TableHead>
                       <TableHead className="text-right">Detalle</TableHead>
                     </TableRow>
@@ -637,7 +653,7 @@ export default function HistorialPage() {
                   <TableBody>
                     {modelos.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="py-8 text-center">
+                        <TableCell colSpan={8} className="py-8 text-center">
                           <AlertCircle className="mx-auto mb-2 h-12 w-12 text-gray-400" />
                           <p className="text-gray-500">No se encontraron cambios manuales</p>
                         </TableCell>
@@ -648,6 +664,7 @@ export default function HistorialPage() {
                           <TableCell className="font-mono text-sm">
                             {formatearFecha(record.fecha)}
                           </TableCell>
+                          <TableCell>{getOrigenBadge(record.origen)}</TableCell>
                           <TableCell>
                             <Badge variant="outline">{record.modelo}</Badge>
                           </TableCell>
@@ -908,6 +925,10 @@ export default function HistorialPage() {
                     <p className="text-xs text-muted-foreground">
                       {detalleSeleccionado.usuario.email}
                     </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase text-muted-foreground">Canal</p>
+                    <div className="mt-1">{getOrigenBadge(detalleSeleccionado.origen)}</div>
                   </div>
                   <div className="md:col-span-2">
                     <p className="text-xs uppercase text-muted-foreground">Motivo</p>

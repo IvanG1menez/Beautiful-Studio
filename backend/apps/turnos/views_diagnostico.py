@@ -11,6 +11,8 @@ from django.utils import timezone
 from django.db.models import Max, Count
 from django.conf import settings
 from decimal import Decimal
+from datetime import timedelta
+import uuid
 import logging
 
 from .models import Turno, HistorialTurno, LogReasignacion
@@ -21,7 +23,7 @@ from apps.turnos.services.reacomodamiento_service import iniciar_reacomodamiento
 
 from apps.turnos.services.reasignacion_service import expirar_oferta_reasignacion
 from apps.emails.services.email_service import EmailService
-from apps.emails.models import Notificacion
+from apps.emails.models import Notificacion, PromotionOffer
 from apps.empleados.models import EmpleadoServicio
 from apps.emails.tasks import _buscar_proximo_horario_disponible
 
@@ -517,6 +519,7 @@ def diagnostico_fidelizacion_clientes(request):
     resultados = []
     emails_enviados = 0
     emails_fallidos = 0
+    campaign_ids = {}
 
     descuento_pct = float(config_global.descuento_fidelizacion_pct)
 
@@ -662,25 +665,26 @@ def diagnostico_fidelizacion_clientes(request):
                                 except Billetera.DoesNotExist:
                                     tiene_saldo = False
 
-                                # Construir URL de reserva específica para fidelización
-                                # sin login automático por token.
-                                # Igual que en la tarea Celery, agregamos el
-                                # parámetro "beneficio" para que el frontend
-                                # redirija correctamente al flujo de descuento
-                                # o al wizard normal.
-                                beneficio = "saldo" if tiene_saldo else "descuento"
+                                beneficio = "wallet" if tiene_saldo else "discount"
 
                                 base_url = (
                                     getattr(settings, "FRONTEND_URL", None)
                                     or getattr(settings, "BACKEND_URL", None)
                                     or "http://localhost:3000"
                                 )
-                                url_reserva = (
-                                    f"{base_url}/fidelizacion/confirmar?beneficio={beneficio}&cliente={cliente.id}"
-                                    f"&servicio={servicio.id}&empleado={empleado.id}"
-                                    f"&fecha={fecha_sugerida.date().isoformat()}"
-                                    f"&hora={fecha_sugerida.strftime('%H:%M')}"
+                                campaign_key = (servicio.id, empleado.id, fecha_sugerida.isoformat())
+                                campaign_id = campaign_ids.setdefault(campaign_key, uuid.uuid4())
+                                offer = PromotionOffer.objects.create(
+                                    campaign_id=campaign_id,
+                                    cliente=cliente,
+                                    servicio=servicio,
+                                    empleado=empleado,
+                                    fecha_hora=fecha_sugerida,
+                                    beneficio=beneficio,
+                                    saldo_snapshot=saldo,
+                                    expires_at=timezone.now() + timedelta(hours=48),
                                 )
+                                url_reserva = f"{base_url}/promociones/confirmar?token={offer.token}"
 
                                 logger.info(
                                     "[DIAGNÓSTICO FIDELIZACIÓN] candidato id=%s, email=%s, tiene_saldo=%s, url=%s",

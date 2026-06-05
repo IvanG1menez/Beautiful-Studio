@@ -801,7 +801,7 @@ class EmailService:
                 </div>
 
                 <p style="margin-top: 16px;">
-                    Podés aprovechar este beneficio reservando desde el siguiente enlace. Mercado Pago cobrará la seña para confirmar el turno.
+                    Podés aprovechar este beneficio desde el siguiente enlace. Si aceptás la oferta, el turno queda pendiente y lo pagás el día de la visita.
                 </p>
 
                 <div style="text-align: center;">
@@ -1145,20 +1145,30 @@ class EmailService:
                     contenido=contenido_propietario,
                 )
 
-                # En DEBUG, enviar a Mailtrap
-                if settings.DEBUG:
+                from apps.emails.models import NotificacionConfig
+
+                emails_propietarios = []
+                for propietario in propietarios:
+                    config_prop, _ = NotificacionConfig.objects.get_or_create(user=propietario)
+                    if config_prop.email_cancelacion_turno and propietario.email:
+                        emails_propietarios.append(propietario.email)
+
+                if not emails_propietarios:
+                    emails_dest = []
+                elif settings.DEBUG:
                     emails_dest = ["gimenezivanb@gmail.com"]
                 else:
-                    emails_dest = [p.email for p in propietarios]
+                    emails_dest = emails_propietarios
 
-                send_mail(
-                    subject=f"Turno cancelado - {turno.empleado.user.get_full_name()}",
-                    message=strip_tags(html_message_prop),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=emails_dest,
-                    html_message=html_message_prop,
-                    fail_silently=False,
-                )
+                if emails_dest:
+                    send_mail(
+                        subject=f"Turno cancelado - {turno.empleado.user.get_full_name()}",
+                        message=strip_tags(html_message_prop),
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=emails_dest,
+                        html_message=html_message_prop,
+                        fail_silently=False,
+                    )
 
             logger.info(f"Emails de cancelación enviados para turno {turno.id}")
             return True
@@ -1560,6 +1570,145 @@ class EmailService:
             return False
 
     @staticmethod
+    def enviar_emails_reacomodamiento_confirmado(
+        *,
+        turno_nuevo,
+        turno_anterior,
+        monto_descuento=0,
+        monto_credito_billetera=0,
+    ) -> bool:
+        """Envía el resumen final cuando un cliente acepta un reacomodamiento."""
+        try:
+            from decimal import Decimal
+            from apps.emails.models import NotificacionConfig
+            from apps.users.models import User
+
+            descuento = Decimal(str(monto_descuento or 0))
+            credito = Decimal(str(monto_credito_billetera or 0))
+            hubo_beneficio = descuento > 0 or credito > 0
+
+            cliente = turno_nuevo.cliente
+            profesional_user = turno_nuevo.empleado.user
+            cliente_user = cliente.user
+            cliente_nombre = cliente.nombre_completo
+            servicio_nombre = turno_nuevo.servicio.nombre
+            fecha_anterior = timezone.localtime(turno_anterior.fecha_hora).strftime("%d/%m/%Y %H:%M")
+            fecha_nueva = timezone.localtime(turno_nuevo.fecha_hora).strftime("%d/%m/%Y %H:%M")
+
+            enviados = 0
+
+            if cliente_user and cliente_user.email:
+                contenido_cliente = f"""
+                    {EmailService._email_context('cliente', 'Tu turno fue reacomodado correctamente')}
+                    <h2 style="color: #7d4586; margin-bottom: 20px;">Tu turno fue reacomodado</h2>
+
+                    <p>Hola <strong>{cliente_user.first_name or cliente_user.username}</strong>,</p>
+                    <p>Aceptaste la propuesta de reacomodamiento y tu turno quedó confirmado en el nuevo horario.</p>
+
+                    <div class="info-box">
+                        <div class="info-row"><span class="info-label">Servicio:</span><span class="info-value">{servicio_nombre}</span></div>
+                        <div class="info-row"><span class="info-label">Profesional:</span><span class="info-value">{profesional_user.get_full_name()}</span></div>
+                        <div class="info-row"><span class="info-label">Turno anterior:</span><span class="info-value">{fecha_anterior}</span></div>
+                        <div class="info-row"><span class="info-label">Nuevo turno:</span><span class="info-value">{fecha_nueva}</span></div>
+                        {f'<div class="info-row"><span class="info-label">Descuento aplicado:</span><span class="info-value">${descuento}</span></div>' if descuento > 0 else ''}
+                        {f'<div class="info-row"><span class="info-label">Crédito en billetera:</span><span class="info-value">${credito}</span></div>' if credito > 0 else ''}
+                    </div>
+
+                    <div class="alert alert-success">Tu turno anterior quedó cancelado automáticamente para evitar duplicados.</div>
+                """
+                html_cliente = EmailService._get_base_template().format(
+                    titulo="Turno reacomodado",
+                    header_titulo="Turno reacomodado",
+                    contenido=contenido_cliente,
+                )
+                send_mail(
+                    subject="Tu turno fue reacomodado correctamente",
+                    message=strip_tags(html_cliente),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[EmailService._get_email_destinatario(cliente_user.email)],
+                    html_message=html_cliente,
+                    fail_silently=False,
+                )
+                enviados += 1
+
+            if profesional_user and profesional_user.email:
+                contenido_profesional = f"""
+                    {EmailService._email_context('profesional', f'{cliente_nombre} reacomodó su turno')}
+                    <h2 style="color: #7d4586; margin-bottom: 20px;">{cliente_nombre} reacomodó su turno</h2>
+
+                    <p>Hola <strong>{profesional_user.get_full_name()}</strong>,</p>
+                    <p>El cliente aceptó una propuesta de reacomodamiento. Este es el resumen final, no hace falta revisar estados intermedios.</p>
+
+                    <div class="info-box">
+                        <div class="info-row"><span class="info-label">Cliente:</span><span class="info-value">{cliente_nombre}</span></div>
+                        <div class="info-row"><span class="info-label">Servicio:</span><span class="info-value">{servicio_nombre}</span></div>
+                        <div class="info-row"><span class="info-label">Turno anterior del cliente:</span><span class="info-value">{fecha_anterior}</span></div>
+                        <div class="info-row"><span class="info-label">Nuevo turno en tu agenda:</span><span class="info-value">{fecha_nueva}</span></div>
+                    </div>
+                """
+                html_prof = EmailService._get_base_template().format(
+                    titulo="Reacomodamiento confirmado",
+                    header_titulo="Agenda actualizada",
+                    contenido=contenido_profesional,
+                )
+                send_mail(
+                    subject=f"{cliente_nombre} reacomodó su turno",
+                    message=strip_tags(html_prof),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[EmailService._get_email_destinatario(profesional_user.email)],
+                    html_message=html_prof,
+                    fail_silently=False,
+                )
+                enviados += 1
+
+            if hubo_beneficio:
+                propietarios = User.objects.filter(role="propietario", email__isnull=False)
+                emails_propietarios = []
+                for propietario in propietarios:
+                    config, _ = NotificacionConfig.objects.get_or_create(user=propietario)
+                    if config.email_reporte_diario and propietario.email:
+                        emails_propietarios.append(propietario.email)
+
+                if emails_propietarios:
+                    contenido_propietario = f"""
+                        {EmailService._email_context('propietario', 'Reacomodamiento confirmado')}
+                        <h2 style="color: #7d4586; margin-bottom: 20px;">Reacomodamiento confirmado</h2>
+
+                        <p>Un cliente aceptó reacomodar su turno con beneficio económico aplicado.</p>
+
+                        <div class="info-box">
+                            <div class="info-row"><span class="info-label">Cliente:</span><span class="info-value">{cliente_nombre}</span></div>
+                            <div class="info-row"><span class="info-label">Profesional:</span><span class="info-value">{profesional_user.get_full_name()}</span></div>
+                            <div class="info-row"><span class="info-label">Servicio:</span><span class="info-value">{servicio_nombre}</span></div>
+                            <div class="info-row"><span class="info-label">Turno anterior:</span><span class="info-value">{fecha_anterior}</span></div>
+                            <div class="info-row"><span class="info-label">Nuevo turno:</span><span class="info-value">{fecha_nueva}</span></div>
+                            {f'<div class="info-row"><span class="info-label">Descuento aplicado:</span><span class="info-value">${descuento}</span></div>' if descuento > 0 else ''}
+                            {f'<div class="info-row"><span class="info-label">Crédito en billetera:</span><span class="info-value">${credito}</span></div>' if credito > 0 else ''}
+                        </div>
+                    """
+                    html_prop = EmailService._get_base_template().format(
+                        titulo="Reacomodamiento confirmado",
+                        header_titulo="Reacomodamiento confirmado",
+                        contenido=contenido_propietario,
+                    )
+                    destinatarios = [EmailService._get_email_destinatario(email) for email in emails_propietarios]
+                    send_mail(
+                        subject="Reacomodamiento confirmado",
+                        message=strip_tags(html_prop),
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=destinatarios,
+                        html_message=html_prop,
+                        fail_silently=False,
+                    )
+                    enviados += len(destinatarios)
+
+            logger.info("Emails de reacomodamiento confirmado enviados: %s", enviados)
+            return enviados > 0
+        except Exception as e:
+            logger.error("Error enviando emails de reacomodamiento confirmado: %s", str(e))
+            return False
+
+    @staticmethod
     def enviar_email_oferta_reasignacion(
         turno_cancelado,
         turno_ofrecido,
@@ -1587,9 +1736,21 @@ class EmailService:
                 else "http://localhost:3000"
             )
 
+            promotion_offer = None
+            try:
+                from apps.emails.models import PromotionOffer
+
+                promotion_offer = PromotionOffer.objects.filter(
+                    reasignacion_log=log_reasignacion,
+                    process_type=PromotionOffer.ProcessType.REACOMODAMIENTO,
+                ).first()
+            except Exception:
+                promotion_offer = None
+
             # Link a la página de confirmación del frontend
             confirmar_url = (
-                f"{base_url}/reacomodamiento/confirmar?token={log_reasignacion.token}"
+                f"{base_url}/reacomodamiento/confirmar?token="
+                f"{promotion_offer.token if promotion_offer else log_reasignacion.token}"
             )
 
             # Fechas en zona horaria local para evitar desfases de GMT

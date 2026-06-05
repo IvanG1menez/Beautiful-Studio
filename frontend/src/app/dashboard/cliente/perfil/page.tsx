@@ -602,9 +602,9 @@ export default function PerfilClientePage() {
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <Label className="text-sm font-medium">Cancelación de turno</Label>
+                    <Label className="text-sm font-medium">Cancelaciones reales</Label>
                     <p className="text-xs text-gray-500">
-                      Notificaciones si un turno se cancela o rechaza.
+                      Notificaciones si un turno se cancela. Los reacomodamientos se informan con un único resumen final.
                     </p>
                   </div>
                   <Switch
@@ -615,9 +615,9 @@ export default function PerfilClientePage() {
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <Label className="text-sm font-medium">Cambios en tus turnos</Label>
+                    <Label className="text-sm font-medium">Cambios importantes de turno</Label>
                     <p className="text-xs text-gray-500">
-                      Avisos cuando se reprograma o cambia el estado de un turno.
+                      Reprogramaciones manuales o reacomodamientos confirmados que cambian tu reserva.
                     </p>
                   </div>
                   <Switch

@@ -796,9 +796,9 @@ export default function PerfilEmpleadoPage() {
 
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                      <Label className="text-sm font-medium">Cancelación de turno</Label>
+                      <Label className="text-sm font-medium">Cancelaciones reales</Label>
                       <p className="text-xs text-gray-500">
-                        Avisos cuando un cliente cancela un turno asignado a vos.
+                        Avisos cuando un cliente cancela un turno asignado a vos. Los cambios internos de reacomodamiento no generan avisos separados.
                       </p>
                     </div>
                     <Switch
@@ -809,9 +809,9 @@ export default function PerfilEmpleadoPage() {
 
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                      <Label className="text-sm font-medium">Cambios en tus turnos</Label>
+                      <Label className="text-sm font-medium">Cambios importantes de agenda</Label>
                       <p className="text-xs text-gray-500">
-                        Notificaciones cuando se reprograma o cambia el estado de un turno.
+                        Reprogramaciones manuales o reacomodamientos confirmados que modifican tu agenda.
                       </p>
                     </div>
                     <Switch
@@ -821,7 +821,7 @@ export default function PerfilEmpleadoPage() {
                   </div>
 
                   <p className="text-xs text-gray-500">
-                    Más adelante vamos a conectar estas preferencias con el sistema de notificaciones del estudio.
+                    Los procesos automáticos se resumen en un único aviso final para evitar ruido por estados intermedios.
                   </p>
                 </div>
               </CardContent>

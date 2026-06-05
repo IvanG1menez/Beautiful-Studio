@@ -204,6 +204,7 @@ class TelegramBotService:
                     turno=turno,
                     usuario=link.cliente.user,
                     motivo=motivo,
+                    origen="telegram",
                 )
             except ValueError as exc:
                 self.send_message(chat_id, f"No pude modificar el turno: {exc}")
@@ -853,6 +854,7 @@ class TelegramBotService:
                 usuario=link.cliente.user,
                 fecha_hora_nueva=fecha_hora,
                 motivo="Reprogramacion solicitada desde Telegram",
+                origen="telegram",
             )
         except ValueError as exc:
             self.send_message(chat_id, f"No pude reprogramar el turno: {exc}")
@@ -1138,6 +1140,7 @@ class TelegramBotService:
                 turno=turno,
                 usuario=link.cliente.user,
                 motivo=motivo,
+                origen="telegram",
             )
         except ValueError as exc:
             self.send_message(chat_id, f"No pude cancelar el turno: {exc}")

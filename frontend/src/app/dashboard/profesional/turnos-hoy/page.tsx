@@ -87,6 +87,7 @@ export default function TurnosHoyPage() {
 
   // Pago al finalizar turno
   const [showPagoDialog, setShowPagoDialog] = useState(false);
+  const [showPagoConfirmadoDialog, setShowPagoConfirmadoDialog] = useState(false);
   const [selectedMetodoPago, setSelectedMetodoPago] = useState<'efectivo' | 'mercadopago_qr' | 'transferencia'>('efectivo');
   const [isRegistrandoPago, setIsRegistrandoPago] = useState(false);
 
@@ -524,7 +525,7 @@ export default function TurnosHoyPage() {
     return 0;
   };
 
-  const completarTurnoEnBackend = async (turnoId: number, notasEmpleado: string) => {
+  const completarTurnoEnBackend = async (turnoId: number, notasEmpleado: string, mostrarConfirmacionPago = false) => {
     try {
       setLoadingAction(turnoId);
 
@@ -548,6 +549,9 @@ export default function TurnosHoyPage() {
       setNotas('');
       setSelectedTurno(null);
       await loadTurnosHoy();
+      if (mostrarConfirmacionPago) {
+        setShowPagoConfirmadoDialog(true);
+      }
     } catch (error: any) {
       console.error('Error completando turno:', error);
       alert(error.message || 'No se pudo completar el turno. Por favor, intenta de nuevo.');
@@ -799,7 +803,7 @@ export default function TurnosHoyPage() {
         throw new Error(errorMessage);
       }
 
-      await completarTurnoEnBackend(selectedTurno.id, notas || '');
+      await completarTurnoEnBackend(selectedTurno.id, notas || '', true);
     } catch (error: any) {
       console.error('Error en flujo de pago + finalización:', error);
       alert(error.message || 'No se pudo registrar el pago. Por favor, intenta de nuevo.');
@@ -964,6 +968,23 @@ export default function TurnosHoyPage() {
               ) : (
                 'Registrar pago y finalizar'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPagoConfirmadoDialog} onOpenChange={setShowPagoConfirmadoDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-700">
+              <CheckCircle className="h-5 w-5" />
+              Pago registrado y turno finalizado
+            </DialogTitle>
+            <DialogDescription>El cobro fue registrado correctamente.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => setShowPagoConfirmadoDialog(false)}>
+              Aceptar
             </Button>
           </DialogFooter>
         </DialogContent>

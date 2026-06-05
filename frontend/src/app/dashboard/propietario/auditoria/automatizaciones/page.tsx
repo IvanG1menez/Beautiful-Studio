@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getAuthHeaders } from '@/lib/auth-headers';
 import { Bot, Filter, Loader2, Search } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 interface ClienteOption {
@@ -41,6 +42,7 @@ const PA_OPTIONS = [
 ];
 
 export default function AuditoriaAutomatizacionesPage() {
+  const searchParams = useSearchParams();
   const today = new Date().toISOString().slice(0, 10);
   const past = new Date();
   past.setDate(past.getDate() - 30);
@@ -48,7 +50,7 @@ export default function AuditoriaAutomatizacionesPage() {
   const [loading, setLoading] = useState(true);
   const [clientes, setClientes] = useState<ClienteOption[]>([]);
   const [data, setData] = useState<AutomationData | null>(null);
-  const [pa, setPa] = useState('todos');
+  const [pa, setPa] = useState(searchParams?.get('pa') || 'todos');
   const [cliente, setCliente] = useState('todos');
   const [search, setSearch] = useState('');
   const [fechaDesde, setFechaDesde] = useState(past.toISOString().slice(0, 10));

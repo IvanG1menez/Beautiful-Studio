@@ -194,6 +194,7 @@ def reprogramar_turno(
     nuevo_empleado_id=None,
     aceptar_penalidad_fuera_rango: bool = False,
     motivo: str = "",
+    origen: str = "panel",
     reiniciar_pago_cliente: bool | None = None,
     permitir_sobreturno: bool = False,
 ) -> ReprogramacionTurnoResult:
@@ -289,7 +290,8 @@ def reprogramar_turno(
         nombre_usuario = getattr(usuario, "full_name", None) or str(usuario)
         observaciones = (
             f"Turno reprogramado de {fecha_hora_anterior.strftime('%d/%m/%Y %H:%M')} "
-            f"a {fecha_hora_nueva.strftime('%d/%m/%Y %H:%M')} por {nombre_usuario}."
+            f"a {fecha_hora_nueva.strftime('%d/%m/%Y %H:%M')} por {nombre_usuario}. "
+            f"Origen: {origen}."
         )
         if empleado_anterior.id != empleado_destino.id:
             observaciones += (
@@ -314,6 +316,7 @@ def reprogramar_turno(
             accion="Reprogramacion de turno",
             estado_anterior=turno.estado,
             estado_nuevo=turno.estado,
+            origen=origen,
             observaciones=observaciones,
         )
 

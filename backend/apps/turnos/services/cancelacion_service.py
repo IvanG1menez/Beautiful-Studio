@@ -17,7 +17,7 @@ class CancelacionTurnoResult:
     horas_antelacion_requerida: int
 
 
-def cancelar_turno_para_cliente(turno, usuario, motivo):
+def cancelar_turno_para_cliente(turno, usuario, motivo, origen="panel"):
     """Cancela un turno y aplica credito si corresponde segun reglas vigentes."""
     motivo = (motivo or "").strip()
     if not motivo:
@@ -96,8 +96,10 @@ def cancelar_turno_para_cliente(turno, usuario, motivo):
         accion="Turno cancelado",
         estado_anterior=estado_anterior,
         estado_nuevo="cancelado",
+        origen=origen,
         observaciones=(
             f"Turno cancelado por {nombre_usuario}. "
+            f"Origen: {origen}. "
             f"Motivo: {motivo}. "
             f"Credito {'aplicado' if credito_aplicado else f'no aplicado (menos de {min_horas_credito}hs)'}"
         ),

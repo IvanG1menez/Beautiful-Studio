@@ -7,6 +7,7 @@ from . import views_historial
 from . import views_reportes
 from . import views_oportunidades
 from . import views_diagnostico
+from . import views_comprobantes
 
 router = DefaultRouter()
 router.register(r"", views.TurnoViewSet, basename="turno")
@@ -14,6 +15,26 @@ router.register(r"", views.TurnoViewSet, basename="turno")
 urlpatterns = [
     path("", include(router.urls)),
     path("<int:turno_id>/historial/", views.historial_turno, name="historial-turno"),
+    path(
+        "<int:turno_id>/comprobante-pago/",
+        views_comprobantes.comprobante_pago_turno,
+        name="comprobante-pago-turno",
+    ),
+    path(
+        "<int:turno_id>/comprobante-pago/pdf/",
+        views_comprobantes.comprobante_pago_turno_pdf,
+        name="comprobante-pago-turno-pdf",
+    ),
+    path(
+        "<int:turno_id>/comprobante-final/",
+        views_comprobantes.comprobante_final_turno,
+        name="comprobante-final-turno",
+    ),
+    path(
+        "<int:turno_id>/comprobante-final/pdf/",
+        views_comprobantes.comprobante_final_turno_pdf,
+        name="comprobante-final-turno-pdf",
+    ),
     path(
         "reasignacion/<uuid:token>/",
         views.responder_reasignacion,
@@ -61,6 +82,11 @@ urlpatterns = [
         "reportes/profesionales/",
         views_reportes.reportes_profesionales,
         name="reportes-profesionales",
+    ),
+    path(
+        "reportes/auditoria-operativa/",
+        views_reportes.auditoria_operativa,
+        name="auditoria-operativa",
     ),
     # Oportunidades de Agenda
     path(

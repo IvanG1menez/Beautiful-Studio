@@ -8,19 +8,15 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  FileText,
-  History,
   LayoutDashboard,
   PieChart,
   Scissors,
   Settings,
   Target,
-  TrendingUp,
   Users,
-  Wallet,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function DashboardPropietarioLayout({
@@ -29,7 +25,6 @@ export default function DashboardPropietarioLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<string[]>([]);
@@ -58,18 +53,10 @@ export default function DashboardPropietarioLayout({
     pathname?.startsWith("/dashboard/propietario/oportunidades");
 
   const isReportesActive =
-    pathname?.startsWith("/dashboard/propietario/reportes/finanzas") ||
-    pathname?.startsWith("/dashboard/propietario/reportes/servicios") ||
-    pathname?.startsWith("/dashboard/propietario/reportes/clientes") ||
-    pathname?.startsWith("/dashboard/propietario/reportes/salas") ||
-    pathname?.startsWith("/dashboard/propietario/reportes/profesionales") ||
-    pathname?.startsWith("/dashboard/propietario/turnos");
-
-  const isAuditoriaActive =
+    pathname?.startsWith("/dashboard/propietario/reportes") ||
     pathname?.startsWith("/dashboard/propietario/historial") ||
-    pathname?.startsWith("/dashboard/propietario/reportes/billetera") ||
-    pathname?.startsWith("/dashboard/propietario/auditoria/automatizaciones");
-  const auditoriaSeccion = searchParams?.get("seccion") || "modelos";
+    pathname?.startsWith("/dashboard/propietario/auditoria") ||
+    pathname?.startsWith("/dashboard/propietario/turnos");
 
   const menuItems = [
     {
@@ -109,67 +96,10 @@ export default function DashboardPropietarioLayout({
       active: isReportesActive,
       submenu: [
         {
-          label: "Finanzas",
-          icon: TrendingUp,
-          href: "/dashboard/propietario/reportes/finanzas",
-          active: pathname === "/dashboard/propietario/reportes/finanzas",
-        },
-        {
-          label: "Turnos",
+          label: "Auditoría y Reportes",
           icon: CalendarDays,
-          href: "/dashboard/propietario/turnos",
-          active: pathname?.startsWith("/dashboard/propietario/turnos"),
-        },
-        {
-          label: "Servicios",
-          icon: FileText,
-          href: "/dashboard/propietario/reportes/servicios",
-          active: pathname === "/dashboard/propietario/reportes/servicios",
-        },
-        {
-          label: "Clientes",
-          icon: Users,
-          href: "/dashboard/propietario/reportes/clientes",
-          active: pathname === "/dashboard/propietario/reportes/clientes",
-        },
-        {
-          label: "Salas",
-          icon: FileText,
-          href: "/dashboard/propietario/reportes/salas",
-          active: pathname === "/dashboard/propietario/reportes/salas",
-        },
-        {
-          label: "Profesionales",
-          icon: Scissors,
-          href: "/dashboard/propietario/reportes/profesionales",
-          active: pathname === "/dashboard/propietario/reportes/profesionales",
-        },
-      ],
-    },
-    {
-      label: "Auditoría",
-      icon: History,
-      active: isAuditoriaActive,
-      submenu: [
-        {
-          label: "Cambios",
-          icon: History,
-          href: "/dashboard/propietario/historial?seccion=modelos",
-          active:
-            pathname?.startsWith("/dashboard/propietario/historial") &&
-            auditoriaSeccion === "modelos",
-        },
-        {
-          label: "Finanzas",
-          icon: Wallet,
-          href: "/dashboard/propietario/reportes/billetera",
-          active: pathname === "/dashboard/propietario/reportes/billetera",
-        },
-        {
-          label: "Automatizaciones",
-          icon: Settings,
-          href: "/dashboard/propietario/auditoria/automatizaciones",
-          active: pathname?.startsWith("/dashboard/propietario/auditoria/automatizaciones"),
+          href: "/dashboard/propietario/reportes",
+          active: isReportesActive,
         },
       ],
     },

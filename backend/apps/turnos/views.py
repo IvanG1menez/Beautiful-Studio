@@ -35,6 +35,7 @@ from apps.turnos.services.cancelacion_service import cancelar_turno_para_cliente
 from apps.turnos.services.reprogramacion_service import (
     reprogramar_turno,
 )
+from apps.turnos.services.pagos_service import registrar_movimiento_pago_turno
 
 logger = logging.getLogger(__name__)
 
@@ -1261,6 +1262,15 @@ class TurnoViewSet(viewsets.ModelViewSet):
         if calcular_monto_pendiente_turno(turno) <= Decimal("0.00"):
             turno.tipo_pago = "PAGO_COMPLETO"
         turno.save()
+
+        registrar_movimiento_pago_turno(
+            turno=turno,
+            monto=monto,
+            metodo=metodo_pago,
+            descripcion=f"Pago {metodo_pago} registrado manualmente",
+            origen="panel_turnos",
+            registrado_por=user,
+        )
 
         HistorialTurno.objects.create(
             turno=turno,

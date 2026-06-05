@@ -239,3 +239,97 @@ class AccessToken(models.Model):
 
     def __str__(self) -> str:
         return f"AccessToken({self.user.email}, {self.token})"
+
+
+class PromotionOffer(models.Model):
+    """Oferta pública enviada por email para tomar un turno promocional.
+
+    A diferencia de AccessToken, este token no autentica al usuario: solo
+    autoriza a ver/aceptar una oferta puntual.
+    """
+
+    class Status(models.TextChoices):
+        SENT = "sent", "Enviada"
+        ACCEPTED = "accepted", "Aceptada"
+        REJECTED = "rejected", "Rechazada"
+        PAYMENT_PENDING = "payment_pending", "Pago pendiente"
+        TAKEN_BY_OTHER = "taken_by_other", "Tomada por otro cliente"
+        EXPIRED = "expired", "Expirada"
+        CANCELLED = "cancelled", "Cancelada"
+
+    class ProcessType(models.TextChoices):
+        FIDELIZACION = "fidelizacion", "Fidelización"
+        REACOMODAMIENTO = "reacomodamiento", "Reacomodamiento"
+
+    class Benefit(models.TextChoices):
+        WALLET = "wallet", "Saldo en billetera"
+        DISCOUNT = "discount", "Descuento"
+
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True)
+    campaign_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    process_type = models.CharField(
+        max_length=30,
+        choices=ProcessType.choices,
+        default=ProcessType.FIDELIZACION,
+    )
+    cliente = models.ForeignKey(
+        "clientes.Cliente",
+        on_delete=models.CASCADE,
+        related_name="promotion_offers",
+    )
+    servicio = models.ForeignKey(
+        "servicios.Servicio",
+        on_delete=models.CASCADE,
+        related_name="promotion_offers",
+    )
+    empleado = models.ForeignKey(
+        "empleados.Empleado",
+        on_delete=models.CASCADE,
+        related_name="promotion_offers",
+    )
+    turno = models.ForeignKey(
+        "turnos.Turno",
+        on_delete=models.SET_NULL,
+        related_name="promotion_offers",
+        null=True,
+        blank=True,
+    )
+    reasignacion_log = models.ForeignKey(
+        "turnos.LogReasignacion",
+        on_delete=models.SET_NULL,
+        related_name="promotion_offers",
+        null=True,
+        blank=True,
+    )
+    fecha_hora = models.DateTimeField()
+    beneficio = models.CharField(max_length=20, choices=Benefit.choices)
+    saldo_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SENT)
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    payment_preference_id = models.CharField(max_length=120, blank=True, default="")
+    payment_tipo_pago = models.CharField(max_length=20, blank=True, default="")
+    payment_creditos_aplicados = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    payment_monto_mp = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "emails_promotionoffer"
+        verbose_name = "Oferta Promocional"
+        verbose_name_plural = "Ofertas Promocionales"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["token"]),
+            models.Index(fields=["campaign_id", "status"]),
+            models.Index(fields=["process_type", "status"]),
+            models.Index(fields=["cliente", "-created_at"]),
+        ]
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    def __str__(self) -> str:
+        return f"PromotionOffer({self.cliente_id}, {self.servicio_id}, {self.fecha_hora})"

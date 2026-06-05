@@ -561,6 +561,7 @@ def _format_turno_summary(turno):
         "servicio": turno.servicio.nombre if turno.servicio else "Sin servicio",
         "sala": turno.sala.nombre if turno.sala else "Sin sala",
         "metodo_pago": turno.get_metodo_pago_display() if turno.metodo_pago else "Sin pago",
+        "canal_reserva": turno.get_canal_reserva_display() if turno.canal_reserva else "Sin canal",
         "precio_final": float(turno.precio_final or 0),
     }
 
@@ -570,16 +571,40 @@ def _apply_turno_common_filters(qs, request):
     cliente_id = request.query_params.get("cliente")
     sala_id = request.query_params.get("sala")
     profesional_id = request.query_params.get("profesional")
+    servicio_id = request.query_params.get("servicio")
     search = (request.query_params.get("search") or "").strip()
 
     if estado and estado != "todos":
         qs = qs.filter(estado=estado)
     if cliente_id and cliente_id != "todos":
-        qs = qs.filter(cliente_id=cliente_id)
+        if str(cliente_id).isdigit():
+            qs = qs.filter(cliente_id=cliente_id)
+        else:
+            qs = qs.filter(
+                Q(cliente__user__first_name__icontains=cliente_id)
+                | Q(cliente__user__last_name__icontains=cliente_id)
+                | Q(cliente__user__email__icontains=cliente_id)
+                | Q(cliente__user__dni__icontains=cliente_id)
+            )
     if sala_id and sala_id != "todos":
-        qs = qs.filter(sala_id=sala_id)
+        if str(sala_id).isdigit():
+            qs = qs.filter(sala_id=sala_id)
+        else:
+            qs = qs.filter(sala__nombre__icontains=sala_id)
     if profesional_id and profesional_id != "todos":
-        qs = qs.filter(empleado_id=profesional_id)
+        if str(profesional_id).isdigit():
+            qs = qs.filter(empleado_id=profesional_id)
+        else:
+            qs = qs.filter(
+                Q(empleado__user__first_name__icontains=profesional_id)
+                | Q(empleado__user__last_name__icontains=profesional_id)
+                | Q(empleado__user__email__icontains=profesional_id)
+            )
+    if servicio_id and servicio_id != "todos":
+        if str(servicio_id).isdigit():
+            qs = qs.filter(servicio_id=servicio_id)
+        else:
+            qs = qs.filter(servicio__nombre__icontains=servicio_id)
     if search:
         qs = qs.filter(
             Q(cliente__user__first_name__icontains=search)
@@ -772,6 +797,7 @@ def reportes_clientes(request):
             "cancelados": cqs.filter(estado="cancelado").count(),
             "ingresos": float(cqs.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
             "ultimo_turno": _format_turno_summary(ultimo),
+            "telegram_vinculado": cliente.telegram_links.filter(is_verified=True).exists(),
         })
     rows = sorted(rows, key=lambda item: item["ultimo_turno"]["fecha_hora"] if item["ultimo_turno"] else "", reverse=True)
     return Response({"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta, "resumen": {"clientes": len(rows), "turnos": qs.count()}, "registros": rows})
@@ -845,3 +871,475 @@ def reportes_profesionales(request):
         })
     rows = sorted(rows, key=lambda item: item["total_turnos"], reverse=True)
     return Response({"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta, "resumen": {"profesionales": len(rows), "turnos": qs.count()}, "registros": rows})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def auditoria_operativa(request):
+    """Reporte operativo unificado basado en tablas y filtros globales."""
+    if request.user.role not in ["propietario", "superusuario"]:
+        return Response({"error": "No tienes permisos para ver este reporte"}, status=403)
+
+    from apps.clientes.models import Cliente, MovimientoBilletera
+    from apps.empleados.models import Empleado
+    from apps.emails.models import Notificacion
+    from apps.mercadopago.models import PagoMercadoPago
+    from apps.servicios.models import Sala, Servicio
+    from apps.turnos.models import HistorialTurno, LogReasignacion, StreakRewardEvent
+
+    fecha_desde, fecha_hasta, error = _parse_report_dates(request, default_days=90)
+    if error:
+        return error
+
+    desde_dt = datetime.combine(fecha_desde, time.min)
+    hasta_dt = datetime.combine(fecha_hasta, time.max)
+    search = (request.query_params.get("search") or "").strip()
+    cliente_id = request.query_params.get("cliente")
+    profesional_id = request.query_params.get("profesional")
+    servicio_id = request.query_params.get("servicio")
+    sala_id = request.query_params.get("sala")
+    estado = request.query_params.get("estado")
+    canal = request.query_params.get("canal")
+    tipo = request.query_params.get("tipo") or "todos"
+
+    turnos_qs = Turno.objects.filter(
+        fecha_hora__date__gte=fecha_desde,
+        fecha_hora__date__lte=fecha_hasta,
+    ).select_related("cliente__user", "empleado__user", "servicio__categoria", "sala")
+    turnos_qs = _apply_turno_common_filters(turnos_qs, request)
+    if canal and canal != "todos":
+        if canal == "telegram":
+            try:
+                turno_ids = HistorialTurno.objects.filter(origen="telegram").values("turno_id")
+                turnos_qs = turnos_qs.filter(id__in=turno_ids)
+            except Exception:
+                turnos_qs = turnos_qs.none()
+        elif canal == "web":
+            turnos_qs = turnos_qs.filter(canal_reserva="web_cliente")
+        elif canal == "panel":
+            turnos_qs = turnos_qs.filter(canal_reserva__in=["panel_profesional", "panel_propietario"])
+        elif canal == "sistema":
+            turnos_qs = turnos_qs.filter(canal_reserva__isnull=True)
+
+    turnos = []
+    for turno in turnos_qs.order_by("-fecha_hora")[:120]:
+        try:
+            ultimo_historial = (
+                HistorialTurno.objects.filter(turno=turno)
+                .values("accion", "origen", "created_at")
+                .order_by("-created_at")
+                .first()
+            )
+        except Exception:
+            ultimo_historial = None
+        try:
+            cambios_turno = list(
+                HistorialTurno.objects.filter(turno=turno)
+                .values("accion", "estado_anterior", "estado_nuevo", "observaciones", "origen", "created_at")
+                .order_by("-created_at")[:5]
+            )
+        except Exception:
+            cambios_turno = []
+        turnos.append({
+            "id": turno.id,
+            "fecha": turno.fecha_hora.isoformat() if turno.fecha_hora else None,
+            "cliente": turno.cliente.nombre_completo if turno.cliente else "Sin cliente",
+            "profesional": turno.empleado.nombre_completo if turno.empleado else "Sin profesional",
+            "servicio": turno.servicio.nombre if turno.servicio else "Sin servicio",
+            "sala": turno.sala.nombre if turno.sala else "Sin sala",
+            "estado": turno.get_estado_display(),
+            "metodo_pago": turno.get_metodo_pago_display() if turno.metodo_pago else "Sin pago",
+            "canal": (ultimo_historial or {}).get("origen") or turno.get_canal_reserva_display() if turno.canal_reserva else (ultimo_historial or {}).get("origen") or "panel",
+            "ultimo_cambio": (ultimo_historial or {}).get("accion") or "Sin historial operativo",
+            "monto": float(turno.precio_final or turno.servicio.precio or 0),
+            "cambios": [
+                {
+                    "accion": cambio.get("accion") or "Cambio",
+                    "estado_anterior": cambio.get("estado_anterior") or "-",
+                    "estado_nuevo": cambio.get("estado_nuevo") or "-",
+                    "observaciones": cambio.get("observaciones") or "Sin observaciones",
+                    "origen": cambio.get("origen") or "panel",
+                    "fecha": cambio.get("created_at").isoformat() if cambio.get("created_at") else None,
+                }
+                for cambio in cambios_turno
+            ],
+        })
+
+    clientes_base_qs = Cliente.objects.select_related("user").filter(
+        id__in=turnos_qs.values("cliente_id").distinct()
+    )
+    if cliente_id and cliente_id != "todos":
+        if str(cliente_id).isdigit():
+            clientes_base_qs = clientes_base_qs.filter(id=cliente_id)
+        else:
+            clientes_base_qs = clientes_base_qs.filter(
+                Q(user__first_name__icontains=cliente_id)
+                | Q(user__last_name__icontains=cliente_id)
+                | Q(user__email__icontains=cliente_id)
+                | Q(user__dni__icontains=cliente_id)
+            )
+    if search:
+        clientes_base_qs = clientes_base_qs.filter(
+            Q(user__first_name__icontains=search)
+            | Q(user__last_name__icontains=search)
+            | Q(user__email__icontains=search)
+            | Q(user__dni__icontains=search)
+        )
+    clientes = []
+    for cliente in clientes_base_qs[:120]:
+        c_turnos = turnos_qs.filter(cliente=cliente)
+        ultimo = c_turnos.order_by("-fecha_hora").first()
+        ofertas_count = Notificacion.objects.filter(tipo="fidelizacion", usuario=cliente.user).count()
+        clientes.append({
+            "id": cliente.id,
+            "nombre": cliente.nombre_completo,
+            "email": cliente.email,
+            "telefono": cliente.telefono,
+            "telegram": cliente.telegram_links.filter(is_verified=True).exists(),
+            "ultima_visita": ultimo.fecha_hora.isoformat() if ultimo and ultimo.fecha_hora else None,
+            "dias_sin_venir": (datetime.now().date() - ultimo.fecha_hora.date()).days if ultimo and ultimo.fecha_hora else None,
+            "turnos": c_turnos.count(),
+            "gasto_total": float(c_turnos.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+            "ofertas": ofertas_count,
+            "ultimo_estado": ultimo.get_estado_display() if ultimo else "Sin turnos",
+        })
+
+    ofertas = []
+    if tipo in ["todos", "ofertas", "automatizaciones"]:
+        notificaciones = Notificacion.objects.filter(
+            tipo="fidelizacion", created_at__gte=desde_dt, created_at__lte=hasta_dt
+        ).select_related("usuario")
+        if cliente_id and cliente_id != "todos":
+            if str(cliente_id).isdigit():
+                notificaciones = notificaciones.filter(usuario__cliente_profile__id=cliente_id)
+            else:
+                notificaciones = notificaciones.filter(
+                    Q(usuario__first_name__icontains=cliente_id)
+                    | Q(usuario__last_name__icontains=cliente_id)
+                    | Q(usuario__email__icontains=cliente_id)
+                    | Q(usuario__dni__icontains=cliente_id)
+                )
+        for item in notificaciones[:80]:
+            data = item.data or {}
+            ofertas.append({
+                "id": f"pa1-{item.id}",
+                "pa": "Oferta de fidelización",
+                "cliente": item.usuario.full_name,
+                "fecha": item.created_at.isoformat(),
+                "estado": "Leída" if item.leida else "Enviada",
+                "turno": data.get("turno_id") or "-",
+                "servicio": data.get("servicio_id") or "-",
+                "resultado": item.titulo,
+                "detalle": item.mensaje,
+            })
+
+        logs = LogReasignacion.objects.filter(fecha_envio__gte=desde_dt, fecha_envio__lte=hasta_dt).select_related("cliente_notificado__user", "turno_cancelado__servicio", "turno_ofrecido")
+        if servicio_id and servicio_id != "todos":
+            if str(servicio_id).isdigit():
+                logs = logs.filter(turno_cancelado__servicio_id=servicio_id)
+            else:
+                logs = logs.filter(turno_cancelado__servicio__nombre__icontains=servicio_id)
+        if profesional_id and profesional_id != "todos":
+            if str(profesional_id).isdigit():
+                logs = logs.filter(turno_cancelado__empleado_id=profesional_id)
+            else:
+                logs = logs.filter(
+                    Q(turno_cancelado__empleado__user__first_name__icontains=profesional_id)
+                    | Q(turno_cancelado__empleado__user__last_name__icontains=profesional_id)
+                    | Q(turno_cancelado__empleado__user__email__icontains=profesional_id)
+                )
+        if sala_id and sala_id != "todos":
+            if str(sala_id).isdigit():
+                logs = logs.filter(turno_cancelado__sala_id=sala_id)
+            else:
+                logs = logs.filter(turno_cancelado__sala__nombre__icontains=sala_id)
+        if cliente_id and cliente_id != "todos":
+            if str(cliente_id).isdigit():
+                logs = logs.filter(cliente_notificado_id=cliente_id)
+            else:
+                logs = logs.filter(
+                    Q(cliente_notificado__user__first_name__icontains=cliente_id)
+                    | Q(cliente_notificado__user__last_name__icontains=cliente_id)
+                    | Q(cliente_notificado__user__email__icontains=cliente_id)
+                    | Q(cliente_notificado__user__dni__icontains=cliente_id)
+                )
+        for item in logs[:80]:
+            ofertas.append({
+                "id": f"pa2-{item.id}",
+                "pa": "Reacomodamiento",
+                "cliente": item.cliente_notificado.nombre_completo,
+                "fecha": item.fecha_envio.isoformat(),
+                "estado": item.estado_final or "Pendiente",
+                "turno": item.turno_cancelado_id,
+                "servicio": item.turno_cancelado.servicio.nombre if item.turno_cancelado and item.turno_cancelado.servicio else "-",
+                "resultado": f"Ofrecido #{item.turno_ofrecido_id or '-'}",
+                "detalle": f"Descuento ${item.monto_descuento}",
+            })
+
+        rewards = StreakRewardEvent.objects.filter(created_at__gte=desde_dt, created_at__lte=hasta_dt).select_related("cliente__user", "turno__servicio")
+        if servicio_id and servicio_id != "todos":
+            if str(servicio_id).isdigit():
+                rewards = rewards.filter(turno__servicio_id=servicio_id)
+            else:
+                rewards = rewards.filter(turno__servicio__nombre__icontains=servicio_id)
+        if profesional_id and profesional_id != "todos":
+            if str(profesional_id).isdigit():
+                rewards = rewards.filter(turno__empleado_id=profesional_id)
+            else:
+                rewards = rewards.filter(
+                    Q(turno__empleado__user__first_name__icontains=profesional_id)
+                    | Q(turno__empleado__user__last_name__icontains=profesional_id)
+                    | Q(turno__empleado__user__email__icontains=profesional_id)
+                )
+        if sala_id and sala_id != "todos":
+            if str(sala_id).isdigit():
+                rewards = rewards.filter(turno__sala_id=sala_id)
+            else:
+                rewards = rewards.filter(turno__sala__nombre__icontains=sala_id)
+        if cliente_id and cliente_id != "todos":
+            if str(cliente_id).isdigit():
+                rewards = rewards.filter(cliente_id=cliente_id)
+            else:
+                rewards = rewards.filter(
+                    Q(cliente__user__first_name__icontains=cliente_id)
+                    | Q(cliente__user__last_name__icontains=cliente_id)
+                    | Q(cliente__user__email__icontains=cliente_id)
+                    | Q(cliente__user__dni__icontains=cliente_id)
+                )
+        for item in rewards[:80]:
+            ofertas.append({
+                "id": f"pa3-{item.id}",
+                "pa": "Bono por racha",
+                "cliente": item.cliente.nombre_completo,
+                "fecha": item.created_at.isoformat(),
+                "estado": item.get_status_display(),
+                "turno": item.turno_id,
+                "servicio": item.turno.servicio.nombre if item.turno and item.turno.servicio else "-",
+                "resultado": f"Hito {item.milestone_number}",
+                "detalle": f"Bono ${item.bonus_amount}",
+            })
+
+    profesionales = []
+    for profesional in Empleado.objects.select_related("user").filter(id__in=turnos_qs.values("empleado_id").distinct())[:120]:
+        p_turnos = turnos_qs.filter(empleado=profesional)
+        ultimo = p_turnos.order_by("-fecha_hora").first()
+        profesionales.append({
+            "id": profesional.id,
+            "nombre": profesional.nombre_completo,
+            "turnos": p_turnos.count(),
+            "completados": p_turnos.filter(estado="completado").count(),
+            "cancelados": p_turnos.filter(estado="cancelado").count(),
+            "ingresos": float(p_turnos.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+            "ultimo_turno": ultimo.fecha_hora.isoformat() if ultimo and ultimo.fecha_hora else None,
+            "estado": "Activo" if profesional.is_active and profesional.user.is_active else "Inactivo",
+        })
+
+    salas = []
+    for sala in Sala.objects.filter(id__in=turnos_qs.values("sala_id").distinct())[:120]:
+        s_turnos = turnos_qs.filter(sala=sala)
+        ultimo = s_turnos.order_by("-fecha_hora").first()
+        salas.append({
+            "id": sala.id,
+            "nombre": sala.nombre,
+            "capacidad": sala.capacidad_simultanea,
+            "turnos": s_turnos.count(),
+            "activos": s_turnos.filter(estado__in=["pendiente", "confirmado", "en_proceso"]).count(),
+            "ultimo_turno": ultimo.fecha_hora.isoformat() if ultimo and ultimo.fecha_hora else None,
+            "estado": "Activa" if sala.is_active else "Inactiva",
+        })
+
+    servicios = []
+    for servicio in Servicio.objects.select_related("categoria__sala").filter(id__in=turnos_qs.values("servicio_id").distinct())[:120]:
+        sv_turnos = turnos_qs.filter(servicio=servicio)
+        ultimo = sv_turnos.order_by("-fecha_hora").first()
+        servicios.append({
+            "id": servicio.id,
+            "nombre": servicio.nombre,
+            "categoria": servicio.categoria.nombre if servicio.categoria else "Sin categoría",
+            "sala": servicio.categoria.sala.nombre if servicio.categoria and servicio.categoria.sala else "Sin sala",
+            "turnos": sv_turnos.count(),
+            "ingresos": float(sv_turnos.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+            "clientes": sv_turnos.values("cliente_id").distinct().count(),
+            "ultima_reserva": ultimo.fecha_hora.isoformat() if ultimo and ultimo.fecha_hora else None,
+        })
+
+    finanzas = []
+    movimientos = MovimientoBilletera.objects.filter(created_at__date__gte=fecha_desde, created_at__date__lte=fecha_hasta).select_related("billetera__cliente__user")
+    if cliente_id and cliente_id != "todos":
+        if str(cliente_id).isdigit():
+            movimientos = movimientos.filter(billetera__cliente_id=cliente_id)
+        else:
+            movimientos = movimientos.filter(
+                Q(billetera__cliente__user__first_name__icontains=cliente_id)
+                | Q(billetera__cliente__user__last_name__icontains=cliente_id)
+                | Q(billetera__cliente__user__email__icontains=cliente_id)
+                | Q(billetera__cliente__user__dni__icontains=cliente_id)
+            )
+    if search:
+        movimientos = movimientos.filter(
+            Q(billetera__cliente__user__first_name__icontains=search)
+            | Q(billetera__cliente__user__last_name__icontains=search)
+            | Q(billetera__cliente__user__email__icontains=search)
+            | Q(descripcion__icontains=search)
+        )
+    for mov in movimientos[:80]:
+        finanzas.append({
+            "id": f"mov-{mov.id}",
+            "fecha": mov.created_at.isoformat(),
+            "entidad": "Billetera",
+            "actor": mov.billetera.cliente.nombre_completo,
+            "accion": mov.get_tipo_display(),
+            "monto": float(mov.monto),
+            "estado": "Aplicado",
+            "detalle": mov.descripcion or "Movimiento de billetera",
+        })
+    pagos = PagoMercadoPago.objects.filter(creado_en__date__gte=fecha_desde, creado_en__date__lte=fecha_hasta).select_related("cliente__user")
+    if cliente_id and cliente_id != "todos":
+        if str(cliente_id).isdigit():
+            pagos = pagos.filter(cliente_id=cliente_id)
+        else:
+            pagos = pagos.filter(
+                Q(cliente__user__first_name__icontains=cliente_id)
+                | Q(cliente__user__last_name__icontains=cliente_id)
+                | Q(cliente__user__email__icontains=cliente_id)
+                | Q(cliente__user__dni__icontains=cliente_id)
+            )
+    if search:
+        pagos = pagos.filter(
+            Q(cliente__user__first_name__icontains=search)
+            | Q(cliente__user__last_name__icontains=search)
+            | Q(cliente__user__email__icontains=search)
+            | Q(descripcion__icontains=search)
+            | Q(preference_id__icontains=search)
+        )
+    for pago in pagos[:80]:
+        finanzas.append({
+            "id": f"pago-{pago.id}",
+            "fecha": pago.creado_en.isoformat(),
+            "entidad": "Mercado Pago",
+            "actor": pago.cliente.nombre_completo if pago.cliente else "Sistema",
+            "accion": "Pago",
+            "monto": float(pago.monto or 0),
+            "estado": pago.get_estado_display(),
+            "detalle": f"Turno #{pago.turno_id}",
+        })
+
+    cambios = []
+    try:
+        telegram_turno_ids = set(HistorialTurno.objects.filter(origen="telegram").values_list("turno_id", flat=True))
+    except Exception:
+        telegram_turno_ids = set()
+    history_qs = Turno.history.model.objects.filter(history_date__gte=desde_dt, history_date__lte=hasta_dt).select_related("history_user", "cliente__user", "servicio")
+    if cliente_id and cliente_id != "todos":
+        if str(cliente_id).isdigit():
+            history_qs = history_qs.filter(cliente_id=cliente_id)
+        else:
+            history_qs = history_qs.filter(
+                Q(cliente__user__first_name__icontains=cliente_id)
+                | Q(cliente__user__last_name__icontains=cliente_id)
+                | Q(cliente__user__email__icontains=cliente_id)
+                | Q(cliente__user__dni__icontains=cliente_id)
+            )
+    if profesional_id and profesional_id != "todos":
+        if str(profesional_id).isdigit():
+            history_qs = history_qs.filter(empleado_id=profesional_id)
+        else:
+            history_qs = history_qs.filter(
+                Q(empleado__user__first_name__icontains=profesional_id)
+                | Q(empleado__user__last_name__icontains=profesional_id)
+                | Q(empleado__user__email__icontains=profesional_id)
+            )
+    if servicio_id and servicio_id != "todos":
+        if str(servicio_id).isdigit():
+            history_qs = history_qs.filter(servicio_id=servicio_id)
+        else:
+            history_qs = history_qs.filter(servicio__nombre__icontains=servicio_id)
+    if sala_id and sala_id != "todos":
+        if str(sala_id).isdigit():
+            history_qs = history_qs.filter(sala_id=sala_id)
+        else:
+            history_qs = history_qs.filter(sala__nombre__icontains=sala_id)
+    if estado and estado != "todos":
+        history_qs = history_qs.filter(estado=estado)
+    if canal and canal != "todos":
+        if canal == "telegram":
+            history_qs = history_qs.filter(id__in=telegram_turno_ids)
+        elif canal == "web":
+            history_qs = history_qs.filter(canal_reserva="web_cliente")
+        elif canal == "panel":
+            history_qs = history_qs.filter(canal_reserva__in=["panel_profesional", "panel_propietario"])
+        elif canal == "sistema":
+            history_qs = history_qs.filter(canal_reserva__isnull=True)
+    for record in history_qs.order_by("-history_date")[:120]:
+        previous = record.prev_record
+        changed = []
+        before_values = []
+        after_values = []
+        detail_changes = []
+        if previous:
+            for field in ["estado", "fecha_hora", "empleado_id", "servicio_id", "precio_final", "motivo_cancelacion"]:
+                previous_value = getattr(previous, field, None)
+                current_value = getattr(record, field, None)
+                if previous_value != current_value:
+                    changed.append(field)
+                    before_values.append(f"{field}: {previous_value or '-'}")
+                    after_values.append(f"{field}: {current_value or '-'}")
+                    detail_changes.append({
+                        "campo": field,
+                        "estado_anterior": str(previous_value or "-"),
+                        "estado_siguiente": str(current_value or "-"),
+                    })
+        cambios.append({
+            "id": record.history_id,
+            "fecha": record.history_date.isoformat(),
+            "entidad": "Turno",
+            "objeto_id": record.id,
+            "accion": record.get_history_type_display(),
+            "actor": record.history_user.full_name if record.history_user else "Sistema",
+            "canal": "telegram" if record.id in telegram_turno_ids else record.canal_reserva or "panel",
+            "motivo": record.history_change_reason or "Sin motivo registrado",
+            "campos": changed,
+            "antes": before_values[:4],
+            "despues": after_values[:4],
+            "detalle_cambios": detail_changes,
+        })
+
+    if tipo != "todos":
+        allowed = {
+            "turnos": ["turnos"],
+            "clientes": ["clientes"],
+            "ofertas": ["ofertas"],
+            "profesionales": ["profesionales"],
+            "salas": ["salas"],
+            "servicios": ["servicios"],
+            "finanzas": ["finanzas"],
+            "cambios": ["cambios"],
+        }.get(tipo, [])
+    else:
+        allowed = []
+
+    payload = {
+        "fecha_desde": fecha_desde.isoformat(),
+        "fecha_hasta": fecha_hasta.isoformat(),
+        "resumen": {
+            "turnos": turnos_qs.count(),
+            "clientes": len(clientes),
+            "ofertas": len(ofertas),
+            "ingresos": float(turnos_qs.filter(estado="completado").aggregate(total=Sum("precio_final"))["total"] or 0),
+        },
+        "turnos": turnos,
+        "clientes": clientes,
+        "ofertas": ofertas,
+        "profesionales": profesionales,
+        "salas": salas,
+        "servicios": servicios,
+        "finanzas": sorted(finanzas, key=lambda item: item["fecha"], reverse=True)[:120],
+        "cambios": cambios,
+    }
+
+    if allowed:
+        for key in ["turnos", "clientes", "ofertas", "profesionales", "salas", "servicios", "finanzas", "cambios"]:
+            if key not in allowed:
+                payload[key] = []
+
+    return Response(payload)

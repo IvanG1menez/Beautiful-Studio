@@ -127,24 +127,6 @@ export default function ConfiguracionNotificacionesPage() {
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label htmlFor="pago_turno" className="text-base cursor-pointer">
-                  Pago de turno
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Recibe notificaciones cuando se paga un turno
-                </p>
-              </div>
-              <Switch
-                id="pago_turno"
-                checked={config.notificar_pago_turno}
-                onCheckedChange={() => handleToggle('notificar_pago_turno')}
-              />
-            </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
                 <Label htmlFor="cancelacion_turno" className="text-base cursor-pointer">
                   Cancelación de turno
                 </Label>
@@ -159,23 +141,6 @@ export default function ConfiguracionNotificacionesPage() {
               />
             </div>
 
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="modificacion_turno" className="text-base cursor-pointer">
-                  Modificación de turno
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Recibe notificaciones cuando se modifica un turno
-                </p>
-              </div>
-              <Switch
-                id="modificacion_turno"
-                checked={config.notificar_modificacion_turno}
-                onCheckedChange={() => handleToggle('notificar_modificacion_turno')}
-              />
-            </div>
           </div>
 
           {/* Notificaciones administrativas */}

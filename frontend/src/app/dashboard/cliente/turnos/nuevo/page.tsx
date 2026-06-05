@@ -89,6 +89,13 @@ interface AppliedCoupon {
   usage_warning?: string;
 }
 
+interface StreakCoupon {
+  id: number;
+  code: string | null;
+  discount_amount: string;
+  status: 'pendiente' | 'reclamado' | 'usado' | 'vencido' | 'cancelado';
+}
+
 export default function NuevoTurnoPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -128,6 +135,7 @@ export default function NuevoTurnoPage() {
   const [pagarServicioCompleto, setPagarServicioCompleto] = useState(false);
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [claimedStreakCoupon, setClaimedStreakCoupon] = useState<StreakCoupon | null>(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
   const [couponError, setCouponError] = useState('');
 
@@ -222,6 +230,7 @@ export default function NuevoTurnoPage() {
     fetchCategorias();
     fetchCatalogoServicios();
     loadBilleteraData();
+    loadClaimedStreakCoupon();
   }, []);
 
   // Si venimos desde fidelización y tenemos un servicio en la URL, cargarlo directamente
@@ -355,6 +364,28 @@ export default function NuevoTurnoPage() {
     if (!servicioSeleccionado) return 0;
     const precioServicio = getPrecioServicioConCupon();
     return precioServicio * 0.5;
+  };
+
+  const loadClaimedStreakCoupon = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/clientes/me/streak/`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      const coupon = data.active_coupon as StreakCoupon | null | undefined;
+      if (coupon?.status === 'reclamado' && coupon.code) {
+        setClaimedStreakCoupon(coupon);
+        setCouponCode(coupon.code);
+      } else {
+        setClaimedStreakCoupon(null);
+        setCouponCode('');
+      }
+    } catch (error) {
+      console.error('Error loading streak coupon:', error);
+    }
   };
 
   const getDescuentoCupon = () => {
@@ -2086,43 +2117,45 @@ export default function NuevoTurnoPage() {
                 )}
               </div>
 
-              <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 space-y-3">
-                <div className="flex items-start gap-2">
-                  <Gift className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-violet-950 mb-1">Cupón de fidelidad</h4>
-                    <p className="text-sm text-violet-700">Si reclamaste un cupón de racha, aplicá el código antes de pagar.</p>
+              {claimedStreakCoupon && (
+                <div className="bg-violet-50 border border-violet-200 rounded-lg p-4 space-y-3">
+                  <div className="flex items-start gap-2">
+                    <Gift className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-violet-950 mb-1">Cupón de fidelidad disponible</h4>
+                      <p className="text-sm text-violet-700">Tenés un cupón de racha reclamado. Aplicalo antes de pagar.</p>
+                    </div>
                   </div>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    value={couponCode}
-                    onChange={(event) => {
-                      setCouponCode(event.target.value.toUpperCase());
-                      setCouponError('');
-                      if (appliedCoupon) setAppliedCoupon(null);
-                    }}
-                    placeholder="RACHA-ABC123"
-                    className="bg-white"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={validateCoupon}
-                    disabled={validatingCoupon || !couponCode.trim()}
-                    className="border-violet-300 text-violet-800 hover:bg-violet-100"
-                  >
-                    {validatingCoupon ? 'Validando...' : 'Aplicar'}
-                  </Button>
-                </div>
-                {couponError && <p className="text-sm text-red-600">{couponError}</p>}
-                {appliedCoupon && (
-                  <div className="space-y-1 text-sm font-medium text-violet-800">
-                    <p>Cupón aplicado: -{formatCurrency(getDescuentoCupon())}. La seña se recalcula sobre el total con descuento.</p>
-                    <p>{appliedCoupon.usage_warning || 'Es de uso único y al confirmar el pago tu contador de racha se reseteará.'}</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={couponCode}
+                      onChange={(event) => {
+                        setCouponCode(event.target.value.toUpperCase());
+                        setCouponError('');
+                        if (appliedCoupon) setAppliedCoupon(null);
+                      }}
+                      placeholder="RACHA-ABC123"
+                      className="bg-white"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={validateCoupon}
+                      disabled={validatingCoupon || !couponCode.trim()}
+                      className="border-violet-300 text-violet-800 hover:bg-violet-100"
+                    >
+                      {validatingCoupon ? 'Validando...' : 'Aplicar'}
+                    </Button>
                   </div>
-                )}
-              </div>
+                  {couponError && <p className="text-sm text-red-600">{couponError}</p>}
+                  {appliedCoupon && (
+                    <div className="space-y-1 text-sm font-medium text-violet-800">
+                      <p>Cupón aplicado: -{formatCurrency(getDescuentoCupon())}. La seña se recalcula sobre el total con descuento.</p>
+                      <p>{appliedCoupon.usage_warning || 'Es de uso único y al confirmar el pago tu contador de racha se reseteará.'}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Cálculo de monto a pagar ahora (seña o servicio completo) */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">

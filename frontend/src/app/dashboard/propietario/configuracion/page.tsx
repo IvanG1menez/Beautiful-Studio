@@ -104,9 +104,7 @@ export default function ConfiguracionGlobalPage() {
 
         const plataformaKeys: Array<keyof typeof configNotificaciones> = [
           'notificar_solicitud_turno',
-          'notificar_pago_turno',
           'notificar_cancelacion_turno',
-          'notificar_modificacion_turno',
           'notificar_nuevo_empleado',
           'notificar_nuevo_cliente',
           'notificar_reporte_diario',
@@ -114,10 +112,7 @@ export default function ConfiguracionGlobalPage() {
 
         const emailKeys: Array<keyof typeof configNotificaciones> = [
           'email_solicitud_turno',
-          'email_pago_turno',
           'email_cancelacion_turno',
-          'email_modificacion_turno',
-          'email_recordatorio_turno',
           'email_reporte_diario',
         ];
 

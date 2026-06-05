@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import NotificacionConfig, Notificacion, PasswordResetToken
+from .models import NotificacionConfig, Notificacion, PasswordResetToken, PromotionOffer
 
 
 @admin.register(NotificacionConfig)
@@ -56,3 +56,20 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # Los tokens se crean mediante la API
         return False
+
+
+@admin.register(PromotionOffer)
+class PromotionOfferAdmin(admin.ModelAdmin):
+    list_display = [
+        "cliente",
+        "servicio",
+        "empleado",
+        "fecha_hora",
+        "beneficio",
+        "status",
+        "expires_at",
+        "accepted_at",
+    ]
+    list_filter = ["status", "beneficio", "created_at", "expires_at"]
+    search_fields = ["cliente__user__email", "cliente__user__first_name", "cliente__user__last_name", "token", "campaign_id"]
+    readonly_fields = ["token", "campaign_id", "created_at", "updated_at", "accepted_at"]

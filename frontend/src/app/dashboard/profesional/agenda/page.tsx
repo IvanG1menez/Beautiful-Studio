@@ -118,7 +118,7 @@ export default function AgendaEmpleadoPage() {
   const [qrPaymentApproved, setQrPaymentApproved] = useState(false);
   const [qrNative, setQrNative] = useState(false);
   const [finalizacionExitosaOpen, setFinalizacionExitosaOpen] = useState(false);
-  const [finalizacionExitosaMessage, setFinalizacionExitosaMessage] = useState('Turno finalizado con éxito.');
+  const [finalizacionExitosaMessage, setFinalizacionExitosaMessage] = useState('El cobro fue registrado correctamente.');
   const qrPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -133,7 +133,7 @@ export default function AgendaEmpleadoPage() {
     }
 
     if (turnoFinalizado === '1') {
-      setFinalizacionExitosaMessage('Turno registrado con éxito.');
+      setFinalizacionExitosaMessage('El cobro fue registrado correctamente.');
       setFinalizacionExitosaOpen(true);
     }
   }, [searchParams]);
@@ -1032,7 +1032,7 @@ export default function AgendaEmpleadoPage() {
     setCobroDialogOpen(false);
     resetQrCobro();
     if (updated && updated.id) {
-      setFinalizacionExitosaMessage('Turno finalizado con éxito.');
+      setFinalizacionExitosaMessage('El cobro fue registrado correctamente.');
       setFinalizacionExitosaOpen(true);
     }
   };
@@ -1256,7 +1256,7 @@ export default function AgendaEmpleadoPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-emerald-700">
                 <Check className="h-5 w-5" />
-                Turno finalizado con éxito
+                Pago registrado y turno finalizado
               </DialogTitle>
               <DialogDescription>{finalizacionExitosaMessage}</DialogDescription>
             </DialogHeader>

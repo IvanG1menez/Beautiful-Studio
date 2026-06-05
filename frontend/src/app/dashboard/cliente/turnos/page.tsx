@@ -46,6 +46,7 @@ interface Turno {
   motivo_no_reprogramable?: string;
   reprogramacion_bloqueada_codigo?: string | null;
   tiene_pago_mp?: boolean;
+  tiene_comprobante_pago?: boolean;
   pagado_completo?: boolean;
   elegible_credito_cancelacion?: boolean;
   monto_credito_cancelacion?: string;
@@ -56,26 +57,66 @@ interface Turno {
 }
 
 interface ComprobanteData {
+  tipo?: 'pago' | 'final';
+  titulo?: string;
+  numero?: string;
+  emitido_en?: string;
+  estado_comprobante?: string;
+  subtitulo?: string;
+  fecha_principal?: string;
+  fecha_principal_label?: string;
+  monto_principal?: string;
+  mensaje?: string;
+  secciones?: {
+    principal?: string;
+    secundaria?: string;
+    movimientos?: string;
+  };
   empresa?: {
     nombre_empresa?: string;
+    nombre_comercial?: string;
     razon_social?: string;
     cuit?: string;
     fecha_fundacion?: string;
+    direccion?: string;
+    telefono?: string;
+    email?: string;
   };
   turno?: {
+    id?: number;
     cliente_nombre?: string;
     cliente_email?: string;
+    cliente_dni?: string;
     profesional_nombre?: string;
     servicio_nombre?: string;
     fecha_hora?: string;
+    fecha_hora_completado?: string;
+    duracion_minutos?: number;
     senia_pagada?: string;
     precio_final?: string;
+    monto_pendiente?: string;
   };
-  pago?: {
-    monto?: string | number;
-    moneda?: string;
-    payment_id?: string;
+  movimientos?: Array<{
+    id?: number;
+    monto: string;
+    metodo_display: string;
+    tipo_display: string;
+    referencia?: string;
+    creado_en?: string;
+  }>;
+  pago_principal?: {
+    monto: string;
+    metodo_display: string;
+    tipo_display: string;
+    referencia?: string;
+    creado_en?: string;
   };
+  resumen?: {
+    subtotal: string;
+    monto_abonado: string;
+    saldo_pendiente: string;
+  };
+  leyenda?: string;
 }
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -122,6 +163,7 @@ export default function TurnosClientePage() {
   // Estado para comprobante de pago
   const [comprobanteDialogOpen, setComprobanteDialogOpen] = useState(false);
   const [comprobanteData, setComprobanteData] = useState<ComprobanteData | null>(null);
+  const [comprobanteTipo, setComprobanteTipo] = useState<'pago' | 'final'>('pago');
 
   // Estado para cancelación con motivo
   const [turnoACancelar, setTurnoACancelar] = useState<Turno | null>(null);
@@ -195,56 +237,7 @@ export default function TurnosClientePage() {
 
   const handleDescargarComprobantePDF = () => {
     if (!comprobanteData) return;
-
-    const popup = window.open('', '_blank', 'width=900,height=1100');
-    if (!popup) return;
-
-    const html = `
-      <html>
-        <head>
-          <title>Comprobante de pago</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
-            h1 { margin: 0 0 12px 0; font-size: 24px; }
-            .box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-            .label { color: #6b7280; font-size: 12px; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
-            p { margin: 4px 0; }
-          </style>
-        </head>
-        <body>
-          <h1>Comprobante de pago</h1>
-          <div class="box">
-            <div class="label">Empresa</div>
-            <p><strong>${comprobanteData.empresa?.nombre_empresa || 'Beautiful Studio'}</strong></p>
-            ${comprobanteData.empresa?.razon_social ? `<p>Razón social: ${comprobanteData.empresa.razon_social}</p>` : ''}
-            ${comprobanteData.empresa?.cuit ? `<p>CUIT: ${comprobanteData.empresa.cuit}</p>` : ''}
-          </div>
-          <div class="box">
-            <div class="label">Detalle del turno</div>
-            <p>Cliente: ${comprobanteData.turno?.cliente_nombre || '-'}</p>
-            <p>Profesional: ${comprobanteData.turno?.profesional_nombre || '-'}</p>
-            <p>Servicio: ${comprobanteData.turno?.servicio_nombre || '-'}</p>
-            <p>Fecha y hora: ${comprobanteData.turno?.fecha_hora ? formatDateTimeReadable(comprobanteData.turno.fecha_hora) : '-'}</p>
-          </div>
-          <div class="box">
-            <div class="label">Pago</div>
-            <p>Monto cobrado: <strong>$${comprobanteData.pago?.monto || '-'}</strong> ${comprobanteData.pago?.moneda || ''}</p>
-            ${comprobanteData.turno?.senia_pagada ? `<p>Seña pagada: $${comprobanteData.turno.senia_pagada}</p>` : ''}
-            ${comprobanteData.turno?.precio_final ? `<p>Precio final turno: $${comprobanteData.turno.precio_final}</p>` : ''}
-            ${comprobanteData.pago?.payment_id ? `<p>ID de pago: ${comprobanteData.pago.payment_id}</p>` : ''}
-          </div>
-          <script>
-            window.onload = function () {
-              window.print();
-            };
-          </script>
-        </body>
-      </html>
-    `;
-
-    popup.document.open();
-    popup.document.write(html);
-    popup.document.close();
+    window.open(`/api/turnos/${comprobanteData.turno?.id}/comprobante-${comprobanteTipo}/pdf/`, '_blank');
   };
 
   // Función para abrir el diálogo de cancelación con mensaje según crédito
@@ -330,19 +323,20 @@ export default function TurnosClientePage() {
   };
 
   // Ver comprobante
-  const handleVerComprobante = async (turnoId: number) => {
+  const handleVerComprobante = async (turnoId: number, tipo: 'pago' | 'final' = 'pago') => {
     try {
-      const response = await fetch(`/api/mercadopago/comprobante/${turnoId}/`, {
+      const response = await fetch(`/api/turnos/${turnoId}/comprobante-${tipo}/`, {
         headers: getAuthHeaders()
       });
 
       if (response.ok) {
         const data = await response.json();
+        setComprobanteTipo(tipo);
         setComprobanteData(data);
         setComprobanteDialogOpen(true);
       } else {
         const errorData = await response.json().catch(() => ({}));
-        const msg = errorData.detail || 'No se pudo obtener el comprobante de pago';
+        const msg = errorData.detail || 'No se pudo obtener el comprobante';
         showNotification('Error al cargar comprobante', msg, 'error');
       }
     } catch (error) {
@@ -1005,13 +999,22 @@ export default function TurnosClientePage() {
                       <div className="border-t border-slate-200" />
 
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        {turno.tiene_pago_mp && (
+                        {(turno.tiene_comprobante_pago || turno.tiene_pago_mp || Number(turno.senia_pagada || 0) > 0) && (
                           <Button
                             variant="outline"
                             className="h-11 rounded-2xl border-emerald-300 bg-white text-base font-semibold text-emerald-700 hover:bg-emerald-50"
-                            onClick={() => handleVerComprobante(turno.id)}
+                            onClick={() => handleVerComprobante(turno.id, 'pago')}
                           >
-                            Ver comprobante
+                            Ver pagos
+                          </Button>
+                        )}
+                        {turno.estado === 'completado' && (
+                          <Button
+                            variant="outline"
+                            className="h-11 rounded-2xl border-purple-300 bg-white text-base font-semibold text-purple-700 hover:bg-purple-50"
+                            onClick={() => handleVerComprobante(turno.id, 'final')}
+                          >
+                            Comprobante final
                           </Button>
                         )}
                         <Button
@@ -1158,15 +1161,26 @@ export default function TurnosClientePage() {
 
                   {/* Botones de acción */}
                   <div className="flex gap-2 mt-4 md:mt-0 md:ml-4 md:flex-col md:justify-start">
-                    {turno.tiene_pago_mp && (
+                    {(turno.tiene_comprobante_pago || turno.tiene_pago_mp || Number(turno.senia_pagada || 0) > 0) && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleVerComprobante(turno.id)}
+                        onClick={() => handleVerComprobante(turno.id, 'pago')}
                         className="whitespace-nowrap"
                       >
                         <CheckCircle className="w-4 h-4 mr-1 text-green-600" />
-                        Ver comprobante
+                        Ver pagos
+                      </Button>
+                    )}
+                    {turno.estado === 'completado' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleVerComprobante(turno.id, 'final')}
+                        className="whitespace-nowrap border-purple-200 text-purple-700 hover:bg-purple-50"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-1 text-purple-600" />
+                        Comprobante final
                       </Button>
                     )}
                     {turno.estado === 'en_proceso' && (
@@ -1247,17 +1261,48 @@ export default function TurnosClientePage() {
         </CardContent>
       </Card>
 
-      {/* Modal de comprobante de pago */}
+      {/* Modal de comprobante */}
       <AlertDialog open={comprobanteDialogOpen} onOpenChange={setComprobanteDialogOpen}>
-        <AlertDialogContent className="max-w-xl">
+        <AlertDialogContent className="max-w-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>Comprobante de pago</AlertDialogTitle>
+            <AlertDialogTitle>{comprobanteData?.titulo || 'Comprobante'}</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-3 text-sm text-gray-800">
+              <div className="space-y-4 text-sm text-gray-800">
                 {comprobanteData ? (
                   <>
-                    <div>
-                      <p className="font-semibold">{comprobanteData.empresa?.nombre_empresa}</p>
+                    {comprobanteData.tipo === 'pago' ? (
+                      <div className="space-y-6 rounded-2xl border bg-white p-6 text-slate-950 shadow-sm">
+                        <div>
+                          <p className="text-3xl font-extrabold tracking-tight text-blue-700">Beautiful Pay</p>
+                          <p className="mt-1 text-xs uppercase tracking-[0.24em] text-slate-400">Comprobante de pago</p>
+                        </div>
+                        <div className="border-t border-slate-200 pt-5 text-lg font-medium">
+                          {comprobanteData.fecha_principal ? formatDateTimeReadable(comprobanteData.fecha_principal) : '-'}
+                        </div>
+                        <div className="border-t border-slate-200 pt-5">
+                          <p className="text-lg text-slate-500">Total</p>
+                          <p className="mt-2 text-5xl font-extrabold text-black">${comprobanteData.monto_principal || comprobanteData.resumen?.monto_abonado || '0.00'}</p>
+                        </div>
+                        <div className="space-y-3 text-lg">
+                          <p><span className="font-semibold text-slate-500">Servicio:</span> {comprobanteData.turno?.servicio_nombre}</p>
+                          <p><span className="font-semibold text-slate-500">Profesional:</span> {comprobanteData.turno?.profesional_nombre}</p>
+                          <p><span className="font-semibold text-slate-500">Tipo de pago:</span> {comprobanteData.pago_principal?.tipo_display || '-'}</p>
+                          {comprobanteData.pago_principal?.referencia && (
+                            <p className="text-sm text-slate-500">Operación: {comprobanteData.pago_principal.referencia}</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border bg-purple-950 p-5 text-white">
+                        <p className="text-xs uppercase tracking-[0.24em] text-purple-200">Servicio finalizado</p>
+                        <p className="mt-2 text-sm text-purple-100">Constancia de prestación del servicio</p>
+                        <p className="mt-3 text-3xl font-bold">${comprobanteData.monto_principal || comprobanteData.resumen?.subtotal || '0.00'}</p>
+                        <p className="mt-1 text-purple-200">Comprobante N° {comprobanteData.numero}</p>
+                      </div>
+                    )}
+
+                    {comprobanteData.tipo === 'final' && <div>
+                      <p className="font-semibold">{comprobanteData.empresa?.nombre_comercial || comprobanteData.empresa?.nombre_empresa}</p>
                       {comprobanteData.empresa?.razon_social && (
                         <p>Razón social: {comprobanteData.empresa.razon_social}</p>
                       )}
@@ -1267,42 +1312,75 @@ export default function TurnosClientePage() {
                       {comprobanteData.empresa?.fecha_fundacion && (
                         <p>Fecha de inicio: {formatDate(comprobanteData.empresa.fecha_fundacion)}</p>
                       )}
-                    </div>
+                    </div>}
 
-                    <div className="border-t pt-2">
+                    {comprobanteData.tipo === 'final' && <div className="border-t pt-2">
+                      <p className="mb-2 font-semibold">{comprobanteData.secciones?.principal || 'Detalle'}</p>
+                      <div className="grid grid-cols-1 gap-2 rounded-xl border bg-purple-50 p-3 sm:grid-cols-2">
+                        <p><span className="text-gray-500">{comprobanteData.fecha_principal_label || 'Finalizado'}:</span> {comprobanteData.fecha_principal ? formatDateTimeReadable(comprobanteData.fecha_principal) : '-'}</p>
+                        <p><span className="text-gray-500">Estado:</span> {comprobanteData.turno?.estado_display || 'Completado'}</p>
+                        <p><span className="text-gray-500">Servicio:</span> {comprobanteData.turno?.servicio_nombre}</p>
+                        <p><span className="text-gray-500">Profesional:</span> {comprobanteData.turno?.profesional_nombre}</p>
+                      </div>
+                    </div>}
+
+                    {comprobanteData.tipo === 'final' && <div className="border-t pt-2">
                       <p>
                         Cliente: <span className="font-medium">{comprobanteData.turno?.cliente_nombre}</span>
                       </p>
+                      {comprobanteData.turno?.cliente_dni && (
+                        <p>DNI: {comprobanteData.turno.cliente_dni}</p>
+                      )}
                       {comprobanteData.turno?.cliente_email && (
                         <p>Email: {comprobanteData.turno.cliente_email}</p>
                       )}
+                      <p>{comprobanteData.secciones?.secundaria || 'Turno'}: {comprobanteData.turno?.servicio_nombre}</p>
                       <p>Profesional: {comprobanteData.turno?.profesional_nombre}</p>
-                      <p>Servicio: {comprobanteData.turno?.servicio_nombre}</p>
                       {comprobanteData.turno?.fecha_hora && (
                         <p>
                           Fecha y hora: {formatDateTimeReadable(comprobanteData.turno.fecha_hora)}
                         </p>
                       )}
-                    </div>
+                      {comprobanteData.turno?.fecha_hora_completado && (
+                        <p>Finalizado: {formatDateTimeReadable(comprobanteData.turno.fecha_hora_completado)}</p>
+                      )}
+                    </div>}
 
-                    <div className="border-t pt-2">
-                      <p>
-                        Monto cobrado:{' '}
-                        <span className="font-semibold">
-                          ${comprobanteData.pago?.monto}
-                        </span>{' '}
-                        {comprobanteData.pago?.moneda}
-                      </p>
-                      {comprobanteData.turno?.senia_pagada && (
-                        <p>Seña pagada: ${comprobanteData.turno.senia_pagada}</p>
-                      )}
-                      {comprobanteData.turno?.precio_final && (
-                        <p>Precio final turno: ${comprobanteData.turno.precio_final}</p>
-                      )}
-                      {comprobanteData.pago?.payment_id && (
-                        <p>ID de pago: {comprobanteData.pago.payment_id}</p>
-                      )}
-                    </div>
+                    {comprobanteData.tipo === 'final' && <div className="border-t pt-2">
+                      <p className="mb-2 font-semibold">{comprobanteData.secciones?.movimientos || 'Pagos registrados'}</p>
+                      <div className="space-y-2">
+                        {(comprobanteData.movimientos || []).map((movimiento, index) => (
+                          <div key={`${movimiento.id || index}-${movimiento.referencia || ''}`} className="rounded-xl border bg-white p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-medium">{movimiento.tipo_display} · {movimiento.metodo_display}</p>
+                                {movimiento.creado_en && <p className="text-xs text-gray-500">{formatDateTimeReadable(movimiento.creado_en)}</p>}
+                                {movimiento.referencia && <p className="text-xs text-gray-500">Ref: {movimiento.referencia}</p>}
+                              </div>
+                              <p className="font-bold text-emerald-700">${movimiento.monto}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>}
+
+                    {comprobanteData.tipo === 'final' && <div className="grid grid-cols-3 gap-2 rounded-xl border bg-slate-50 p-3 text-center">
+                      <div>
+                        <p className="text-xs text-gray-500">Subtotal</p>
+                        <p className="font-semibold">${comprobanteData.resumen?.subtotal}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Abonado</p>
+                        <p className="font-semibold text-emerald-700">${comprobanteData.resumen?.monto_abonado}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Saldo</p>
+                        <p className="font-semibold">${comprobanteData.resumen?.saldo_pendiente}</p>
+                      </div>
+                    </div>}
+
+                    {comprobanteData.tipo === 'final' && comprobanteData.mensaje && <p className="rounded-xl border bg-white p-3 text-xs text-gray-700">{comprobanteData.mensaje}</p>}
+                    {comprobanteData.leyenda && <p className="text-xs text-gray-500">{comprobanteData.leyenda}</p>}
                   </>
                 ) : (
                   <p>No se pudo cargar el comprobante.</p>

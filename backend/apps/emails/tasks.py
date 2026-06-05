@@ -6,6 +6,7 @@ from django.core.mail import send_mail
 from django.utils import timezone
 from django.db.models import Count, Sum, Q
 from datetime import timedelta, datetime
+import uuid
 import logging
 
 logger = logging.getLogger(__name__)
@@ -328,7 +329,7 @@ def enviar_emails_fidelizacion_clientes(dias_por_defecto: int = 30):
 
     from apps.clientes.models import Billetera
     from apps.empleados.models import EmpleadoServicio
-    from apps.emails.models import Notificacion
+    from apps.emails.models import Notificacion, PromotionOffer
     from apps.emails.services import EmailService
     from apps.servicios.models import Servicio
     from apps.turnos.models import Turno
@@ -342,6 +343,7 @@ def enviar_emails_fidelizacion_clientes(dias_por_defecto: int = 30):
     total_candidatos = 0
     emails_enviados = 0
     emails_fallidos = 0
+    campaign_ids = {}
 
     for servicio in servicios:
         frecuencia_dias = servicio.frecuencia_recurrencia_dias or dias_por_defecto
@@ -418,25 +420,26 @@ def enviar_emails_fidelizacion_clientes(dias_por_defecto: int = 30):
             except Billetera.DoesNotExist:
                 tiene_saldo = False
 
-            # Construir URL de reserva para flujo específico de fidelización
-            # sin login automático por token.
-            # Agregamos el parámetro "beneficio" para que el frontend pueda
-            # distinguir entre clientes con saldo y con descuento y redirigir
-            # al flujo correspondiente (wizard normal vs pantalla de pago
-            # con descuento).
-            beneficio = "saldo" if tiene_saldo else "descuento"
+            beneficio = "wallet" if tiene_saldo else "discount"
 
             base_url = (
                 getattr(settings, "FRONTEND_URL", None)
                 or getattr(settings, "BACKEND_URL", None)
                 or "http://localhost:3000"
             )
-            url_reserva = (
-                f"{base_url}/fidelizacion/confirmar?beneficio={beneficio}&cliente={cliente.id}"
-                f"&servicio={servicio.id}&empleado={empleado.id}"
-                f"&fecha={fecha_sugerida.date().isoformat()}"
-                f"&hora={fecha_sugerida.strftime('%H:%M')}"
+            campaign_key = (servicio.id, empleado.id, fecha_sugerida.isoformat())
+            campaign_id = campaign_ids.setdefault(campaign_key, uuid.uuid4())
+            offer = PromotionOffer.objects.create(
+                campaign_id=campaign_id,
+                cliente=cliente,
+                servicio=servicio,
+                empleado=empleado,
+                fecha_hora=fecha_sugerida,
+                beneficio=beneficio,
+                saldo_snapshot=saldo,
+                expires_at=timezone.now() + timedelta(hours=48),
             )
+            url_reserva = f"{base_url}/promociones/confirmar?token={offer.token}"
 
             try:
                 if tiene_saldo:

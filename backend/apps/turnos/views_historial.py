@@ -1,6 +1,7 @@
 """Vistas para el historial consolidado del sistema."""
 
 from django.core.paginator import Paginator
+from django.db import OperationalError, ProgrammingError
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -13,6 +14,7 @@ from apps.emails.models import Notificacion
 from apps.empleados.models import Empleado
 from apps.servicios.models import Servicio
 from apps.turnos.models import LogReasignacion, Turno
+from apps.turnos.models import HistorialTurno
 
 
 def _serialize_history_user(history_user):
@@ -120,6 +122,16 @@ def _build_model_history(modelo_tipo=None, objeto_id=None):
             turno_history = turno_history.filter(id=objeto_id)
 
         for record in turno_history:
+            try:
+                historial_operativo = (
+                    HistorialTurno.objects.filter(turno_id=record.id)
+                    .values("origen")
+                    .order_by("-created_at")
+                    .first()
+                )
+                origen = (historial_operativo or {}).get("origen") or record.canal_reserva or "panel"
+            except (OperationalError, ProgrammingError):
+                origen = record.canal_reserva or "panel"
             registros.append(
                 {
                     "id": record.history_id,
@@ -130,6 +142,7 @@ def _build_model_history(modelo_tipo=None, objeto_id=None):
                     "usuario": _serialize_history_user(record.history_user),
                     "fecha": record.history_date.isoformat(),
                     "cambio_razon": record.history_change_reason or "",
+                    "origen": origen,
                     "datos": {
                         "cliente_id": record.cliente_id,
                         "empleado_id": record.empleado_id,
@@ -467,6 +480,16 @@ def detalle_historial(request, modelo, history_id):
             record = Turno.history.select_related("history_user").get(
                 history_id=history_id
             )
+            try:
+                historial_operativo = (
+                    HistorialTurno.objects.filter(turno_id=record.id)
+                    .values("origen")
+                    .order_by("-created_at")
+                    .first()
+                )
+                origen = (historial_operativo or {}).get("origen") or record.canal_reserva or "panel"
+            except (OperationalError, ProgrammingError):
+                origen = record.canal_reserva or "panel"
             datos = _serialize_turno_history(record)
             estado_anterior, estado_posterior, cambios = _build_history_states(
                 record, _serialize_turno_history
@@ -518,6 +541,7 @@ def detalle_historial(request, modelo, history_id):
                 ),
                 "fecha": record.history_date.isoformat(),
                 "cambio_razon": record.history_change_reason or "",
+                "origen": locals().get("origen", "panel"),
                 "datos": datos,
                 "estado_anterior": estado_anterior,
                 "estado_posterior": estado_posterior,

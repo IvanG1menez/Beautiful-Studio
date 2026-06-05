@@ -155,6 +155,15 @@ def manejar_modificacion_turno(sender, instance, created, **kwargs):
     """
     Detecta modificaciones en turnos existentes y envía notificaciones
     """
+    if getattr(instance, "_skip_generic_notifications", False):
+        _turno_anterior.pop(instance.pk, None)
+        logger.info(
+            "Notificaciones genericas omitidas para turno %s (contexto: %s)",
+            instance.pk,
+            getattr(instance, "_notification_context", "sin_contexto"),
+        )
+        return
+
     if not created and instance.pk in _turno_anterior:
         try:
             anterior = _turno_anterior[instance.pk]
@@ -281,6 +290,14 @@ def manejar_cancelacion_turno(turno):
     """
     Maneja la lógica cuando un turno es cancelado
     """
+    if getattr(turno, "_skip_generic_notifications", False):
+        logger.info(
+            "Cancelacion generica omitida para turno %s (contexto: %s)",
+            turno.pk,
+            getattr(turno, "_notification_context", "sin_contexto"),
+        )
+        return
+
     try:
         # Notificar al profesional
         config_profesional, _ = NotificacionConfig.objects.get_or_create(

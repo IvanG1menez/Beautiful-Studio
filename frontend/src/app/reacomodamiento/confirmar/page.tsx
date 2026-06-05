@@ -78,6 +78,7 @@ export default function ConfirmarReacomodamientoPage() {
     mensaje: string;
     accion?: 'aceptada' | 'rechazada';
   } | null>(null);
+  const [usarTokenLegacy, setUsarTokenLegacy] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -116,8 +117,16 @@ export default function ConfirmarReacomodamientoPage() {
       setError('');
       setEstadoEspecial(null);
 
-      const response = await fetch(`http://localhost:8000/api/turnos/reasignacion/${token}/`);
-      const data = await parsearRespuestaApi(response);
+      let response = await fetch(`/api/promociones/${token}/reacomodamiento/`);
+      let data = await parsearRespuestaApi(response);
+
+      if (response.status === 404) {
+        response = await fetch(`/api/turnos/reasignacion/${token}/`);
+        data = await parsearRespuestaApi(response);
+        if (response.ok) setUsarTokenLegacy(true);
+      } else {
+        setUsarTokenLegacy(false);
+      }
 
       if (response.ok && data.status === 'activa') {
         setOferta(data as unknown as OfertaDetalles);
@@ -149,13 +158,29 @@ export default function ConfirmarReacomodamientoPage() {
     setResultado(null);
 
     try {
-      const response = await fetch(`http://localhost:8000/api/turnos/reasignacion/${token}/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ accion }),
-      });
+      let response = await fetch(
+        usarTokenLegacy
+          ? `/api/turnos/reasignacion/${token}/`
+          : `/api/promociones/${token}/reacomodamiento/responder/`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ accion }),
+        }
+      );
+
+      if (!usarTokenLegacy && response.status === 404) {
+        response = await fetch(`/api/turnos/reasignacion/${token}/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ accion }),
+        });
+        setUsarTokenLegacy(true);
+      }
 
       const data = await parsearRespuestaApi(response);
 
