@@ -275,11 +275,11 @@ export default function ReportesFinanzasPage() {
                         style={{ fontSize: '12px' }}
                       />
                       <YAxis
-                        tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                        tickFormatter={(value: number) => `$${(value / 1000).toFixed(0)}k`}
                         style={{ fontSize: '12px' }}
                       />
                       <Tooltip
-                        formatter={(value: number | string) => formatCurrency(Number(value))}
+                        formatter={(value?: number | string) => formatCurrency(Number(value || 0))}
                         labelFormatter={(label) => formatMonth(String(label))}
                       />
                       <Legend />
@@ -309,7 +309,7 @@ export default function ReportesFinanzasPage() {
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }: { name: string; percent: number }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                         outerRadius={100}
                         fill="#8884d8"
                         dataKey="value"
@@ -318,7 +318,7 @@ export default function ReportesFinanzasPage() {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value: number | string) => `${value} turnos`} />
+                      <Tooltip formatter={(value?: number | string) => `${value || 0} turnos`} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>

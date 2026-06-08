@@ -1,5 +1,7 @@
 ﻿'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';

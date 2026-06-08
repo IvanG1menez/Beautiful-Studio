@@ -35,7 +35,7 @@ import {
   Zap
 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 // Interfaces
@@ -215,7 +215,7 @@ const getEstadoBadgeVariant = (estado: string): "default" | "secondary" | "destr
   }
 };
 
-export default function DashboardClientePage() {
+function ClienteDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isClient, setIsClient] = useState(false);
@@ -2690,5 +2690,13 @@ export default function DashboardClientePage() {
 
       </div>
     </div>
+  );
+}
+
+export default function DashboardClientePage() {
+  return (
+    <Suspense fallback={<BeautifulSpinner label="Cargando dashboard..." />}>
+      <ClienteDashboardContent />
+    </Suspense>
   );
 }

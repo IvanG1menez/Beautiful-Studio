@@ -4,6 +4,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { QueryProvider } from "@/contexts/QueryProvider";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,14 +32,16 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <QueryProvider>
-          <AuthProvider>
-            <FormEnterNavigation>
-              {children}
-            </FormEnterNavigation>
-            <Toaster />
-          </AuthProvider>
-        </QueryProvider>
+        <Suspense fallback={null}>
+          <QueryProvider>
+            <AuthProvider>
+              <FormEnterNavigation>
+                {children}
+              </FormEnterNavigation>
+              <Toaster />
+            </AuthProvider>
+          </QueryProvider>
+        </Suspense>
       </body>
     </html>
   );

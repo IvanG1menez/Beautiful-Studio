@@ -13,9 +13,9 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
-export default function DashboardClienteLayout({
+function DashboardClienteLayoutContent({
   children,
 }: {
   children: React.ReactNode;
@@ -166,5 +166,17 @@ export default function DashboardClienteLayout({
         )}
       </div>
     </div>
+  );
+}
+
+export default function DashboardClienteLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <Suspense fallback={<div className="h-screen bg-background" />}>
+      <DashboardClienteLayoutContent>{children}</DashboardClienteLayoutContent>
+    </Suspense>
   );
 }

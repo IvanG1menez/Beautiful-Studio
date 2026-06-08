@@ -1,5 +1,7 @@
 ﻿'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { getAuthHeaders, getJsonAuthHeaders } from '@/lib/auth-headers';
 import { AlertCircle, ArrowLeft, Calendar as CalendarIcon, Check, ChevronsUpDown, Clock, Gift, Loader2, MapPin, Search, User, Wallet } from 'lucide-react';

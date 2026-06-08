@@ -153,9 +153,9 @@ export default function ReportesServiciosPage() {
                     margin={{ top: 5, right: 30, left: 100, bottom: 5 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" tickFormatter={(value) => formatCurrency(value)} />
+                    <XAxis type="number" tickFormatter={(value: number) => formatCurrency(value)} />
                     <YAxis type="category" dataKey="servicio_nombre" width={90} />
-                    <Tooltip formatter={(value: number | string) => formatCurrency(Number(value))} />
+                    <Tooltip formatter={(value?: number | string) => formatCurrency(Number(value || 0))} />
                     <Legend />
                     <Bar dataKey="total" fill="#8b5cf6" name="Ingresos" radius={[0, 8, 8, 0]} />
                   </BarChart>

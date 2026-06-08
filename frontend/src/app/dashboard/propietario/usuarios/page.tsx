@@ -70,6 +70,7 @@ interface Empleado {
   horario_entrada: string;
   horario_salida: string;
   dias_trabajo: string;
+  servicios?: Array<{ id: number; nombre: string }>;
   created_at: string;
 }
 

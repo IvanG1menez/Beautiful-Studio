@@ -1521,41 +1521,40 @@ class TurnoViewSet(viewsets.ModelViewSet):
             or 0
         )
 
-        # Comisión pendiente (turnos completados sin marca de pago)
-        # Asumiendo que hay un campo 'pagado' o similar en el modelo
-        # Por ahora calculamos comisión como % de turnos completados
-        comision_pendiente = (
-            Turno.objects.filter(
-                estado="completado",
-                # Agregar filtro de pagado=False cuando exista el campo
-            ).aggregate(total=Sum("precio_final"))["total"]
-            or 0
-        )
+        def obtener_turnos_con_saldo_pendiente(queryset):
+            return [
+                turno
+                for turno in queryset
+                if calcular_monto_pendiente_turno(turno) > Decimal("0.00")
+            ]
 
-        comision_pendiente_prev = (
-            Turno.objects.filter(
-                estado="completado",
-                fecha_hora__date__gte=start_prev_month,
-                fecha_hora__date__lte=end_prev_month,
-            ).aggregate(total=Sum("precio_final"))["total"]
-            or 0
-        )
-
-        # Aplicar % de comisión (por ejemplo 30%)
-        porcentaje_comision = 0.30
-        comision_pendiente = float(comision_pendiente) * porcentaje_comision
-        comision_pendiente_prev = float(comision_pendiente_prev) * porcentaje_comision
-
-        # Turnos pendientes de pago (completados)
-        turnos_pendientes_pago = Turno.objects.filter(
-            estado="completado",
-            # Agregar filtro de pagado=False cuando exista el campo
-        ).count()
-
-        turnos_pendientes_pago_prev = Turno.objects.filter(
+        turnos_pago_pendiente_qs = Turno.objects.filter(
+            estado="completado"
+        ).select_related("servicio")
+        turnos_pago_pendiente_prev_qs = Turno.objects.filter(
             estado="completado",
             fecha_hora__date=yesterday,
-        ).count()
+        ).select_related("servicio")
+
+        turnos_pago_pendiente = obtener_turnos_con_saldo_pendiente(
+            turnos_pago_pendiente_qs
+        )
+        turnos_pago_pendiente_prev = obtener_turnos_con_saldo_pendiente(
+            turnos_pago_pendiente_prev_qs
+        )
+
+        turnos_pendientes_pago = len(turnos_pago_pendiente)
+        turnos_pendientes_pago_prev = len(turnos_pago_pendiente_prev)
+
+        # Estimación operativa sobre saldo pendiente real, no sobre todos los completados.
+        porcentaje_comision = Decimal("0.30")
+        comision_pendiente = sum(
+            calcular_monto_pendiente_turno(turno) for turno in turnos_pago_pendiente
+        ) * porcentaje_comision
+        comision_pendiente_prev = sum(
+            calcular_monto_pendiente_turno(turno)
+            for turno in turnos_pago_pendiente_prev
+        ) * porcentaje_comision
 
         # Turnos pendientes de aceptación
         turnos_pendientes_aceptacion = Turno.objects.filter(estado="pendiente").count()
@@ -1618,9 +1617,9 @@ class TurnoViewSet(viewsets.ModelViewSet):
                 "ingresos_mes_variacion": variacion_porcentual(
                     float(ingresos_mes), float(ingresos_mes_prev)
                 ),
-                "comision_pendiente": comision_pendiente,
+                "comision_pendiente": float(comision_pendiente),
                 "comision_pendiente_variacion": variacion_porcentual(
-                    comision_pendiente, comision_pendiente_prev
+                    float(comision_pendiente), float(comision_pendiente_prev)
                 ),
                 "turnos_pendientes_pago": turnos_pendientes_pago,
                 "turnos_pendientes_pago_variacion": variacion_porcentual(
@@ -1669,14 +1668,16 @@ class TurnoViewSet(viewsets.ModelViewSet):
             )
 
         elif tipo == "pendientes_pago":
-            turnos = (
-                Turno.objects.filter(
-                    estado="completado",
-                    # Agregar filtro de pagado=False cuando exista el campo
-                )
+            turnos_queryset = (
+                Turno.objects.filter(estado="completado")
                 .select_related("cliente__user", "empleado__user", "servicio")
-                .order_by("-fecha_hora")[:limit]
+                .order_by("-fecha_hora")
             )
+            turnos = [
+                turno
+                for turno in turnos_queryset
+                if calcular_monto_pendiente_turno(turno) > Decimal("0.00")
+            ][:limit]
 
         elif tipo == "pendientes_aceptacion":
             turnos = (
@@ -1694,9 +1695,9 @@ class TurnoViewSet(viewsets.ModelViewSet):
 
         serializer = TurnoListSerializer(turnos, many=True)
 
-        return Response(
-            {"tipo": tipo, "total": turnos.count(), "turnos": serializer.data}
-        )
+        total = len(turnos) if isinstance(turnos, list) else turnos.count()
+
+        return Response({"tipo": tipo, "total": total, "turnos": serializer.data})
 
     @action(detail=False, methods=["post"], url_path="completar-masivo")
     def completar_masivo(self, request):

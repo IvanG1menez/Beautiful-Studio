@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
 export default function DashboardProfesionalLayout({
   children,
@@ -138,7 +138,9 @@ export default function DashboardProfesionalLayout({
         </aside>
 
         <main className="flex-1 overflow-y-auto bg-background">
-          {children}
+          <Suspense fallback={<div className="min-h-screen bg-background" />}>
+            {children}
+          </Suspense>
         </main>
 
         {isMobile && sidebarOpen && (

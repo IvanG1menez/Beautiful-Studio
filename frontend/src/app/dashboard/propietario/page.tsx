@@ -4,9 +4,11 @@ import { Badge } from '@/components/ui/badge';
 import { BeautifulSpinner } from '@/components/ui/BeautifulSpinner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatDate, formatTime } from '@/lib/dateUtils';
+import { formatCurrency } from '@/lib/utils';
 import {
   AlertCircle,
   Calendar,
@@ -70,20 +72,40 @@ interface TurnoAdmin {
   precio_final: number;
   notas?: string;
   reacomodamiento_exitoso?: boolean;
+  senia_pagada?: number | string | null;
+  monto_pendiente?: number | string | null;
+  pagado_completo?: boolean;
+  metodo_pago?: string | null;
+  canal_reserva?: string | null;
+  notas_cliente?: string | null;
+  notas_empleado?: string | null;
 }
+
+type AccionTab = 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion';
+
+const ACCION_TABS: AccionTab[] = ['proximos_48h', 'pendientes_pago', 'pendientes_aceptacion'];
+
+const isAccionTab = (value: string): value is AccionTab => {
+  return ACCION_TABS.includes(value as AccionTab);
+};
+
+const createEmptyAccionState = (): Record<AccionTab, TurnoAdmin[]> => ({
+  proximos_48h: [],
+  pendientes_pago: [],
+  pendientes_aceptacion: []
+});
 
 export default function DashboardAdminPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [turnosRecientes, setTurnosRecientes] = useState<TurnoAdmin[]>([]);
-  const [turnosAccion, setTurnosAccion] = useState<TurnoAdmin[]>([]);
-  const [turnosHistorial, setTurnosHistorial] = useState<TurnoAdmin[]>([]);
-  const [loadingHistorial, setLoadingHistorial] = useState(false);
+  const [turnosAccion, setTurnosAccion] = useState<Record<AccionTab, TurnoAdmin[]>>(createEmptyAccionState);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
+  const [loadingAccionTab, setLoadingAccionTab] = useState<AccionTab | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [accionTab, setAccionTab] = useState<'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion'>('proximos_48h');
+  const [accionTab, setAccionTab] = useState<AccionTab>('proximos_48h');
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [selectedTurno, setSelectedTurno] = useState<TurnoAdmin | null>(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
   const { user } = useAuth();
   const router = useRouter();
@@ -183,42 +205,30 @@ export default function DashboardAdminPage() {
     }
   };
 
-  const loadHistorial = async () => {
-    try {
-      setLoadingHistorial(true);
-      const response = await authenticatedFetch('/turnos/historial/');
-
-      if (response.ok) {
-        const data = await response.json();
-        setTurnosHistorial(Array.isArray(data) ? data : []);
-      } else {
-        console.error('Error fetching historial:', response.status);
-      }
-    } catch (error) {
-      console.error('Error loading historial:', error);
-    } finally {
-      setLoadingHistorial(false);
-    }
-  };
-
   // Cargar turnos que requieren acción
-  const loadTurnosAccion = async (tipo: 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion') => {
+  const loadTurnosAccion = async (tipo: AccionTab) => {
     try {
+      setLoadingAccionTab(tipo);
       const response = await authenticatedFetch(`/turnos/turnos-accion/?tipo=${tipo}&limit=20`);
 
       if (response.ok) {
         const data = await response.json();
-        setTurnosAccion(data.turnos || []);
+        setTurnosAccion((prev) => ({
+          ...prev,
+          [tipo]: data.turnos || []
+        }));
       } else {
         console.error('Error fetching turnos acción:', response.status);
       }
     } catch (error) {
       console.error('Error loading turnos acción:', error);
+    } finally {
+      setLoadingAccionTab((current) => (current === tipo ? null : current));
     }
   };
 
   // Manejar cambio de pestaña de acción
-  const handleAccionTabChange = (tipo: 'proximos_48h' | 'pendientes_pago' | 'pendientes_aceptacion') => {
+  const handleAccionTabChange = (tipo: AccionTab) => {
     setAccionTab(tipo);
     loadTurnosAccion(tipo);
   };
@@ -278,30 +288,6 @@ export default function DashboardAdminPage() {
     );
   };
 
-  const getEstadoHistorialStyles = (estado: string) => {
-    switch (estado.toLowerCase()) {
-      case 'cancelado':
-        return 'bg-red-100 text-red-700 border-red-200';
-      case 'confirmado':
-        return 'bg-green-100 text-green-700 border-green-200';
-      case 'completado':
-        return 'bg-gray-100 text-gray-700 border-gray-200';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  };
-
-  const getEstadoHistorialLabel = (estado: string) => {
-    if (estado.toLowerCase() === 'completado') {
-      return 'Realizado';
-    }
-    return estado;
-  };
-
-  const historialCancelados = turnosHistorial.filter(
-    (turno) => turno.estado.toLowerCase() === 'cancelado'
-  ).length;
-
   const getServicioNombre = (turno: TurnoAdmin) => {
     return turno.servicio?.nombre || turno.servicio_nombre || 'Servicio';
   };
@@ -321,6 +307,25 @@ export default function DashboardAdminPage() {
     return turno.servicio?.precio || turno.servicio_precio || 0;
   };
 
+  const getMontoPendienteTurno = (turno: TurnoAdmin) => {
+    if (turno.monto_pendiente !== undefined && turno.monto_pendiente !== null) {
+      const montoPendiente = Number(turno.monto_pendiente);
+      if (!Number.isNaN(montoPendiente) && montoPendiente >= 0) {
+        return montoPendiente;
+      }
+    }
+
+    const precio = Number(getPrecioTurno(turno));
+    const senia = Number(turno.senia_pagada || 0);
+    const pendiente = precio - senia;
+    return pendiente > 0 ? pendiente : 0;
+  };
+
+  const openDetalleTurno = (turno: TurnoAdmin) => {
+    setSelectedTurno(turno);
+    setDetailDialogOpen(true);
+  };
+
   const changeTurnoEstado = async (turnoId: number, estado: string, observaciones?: string) => {
     try {
       setActionLoadingId(turnoId);
@@ -337,6 +342,44 @@ export default function DashboardAdminPage() {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.error || 'No se pudo actualizar el estado del turno.';
         setError(errorMessage);
+        return false;
+      }
+
+      await Promise.all([
+        loadTurnosAccion(accionTab),
+        loadStats()
+      ]);
+      return true;
+    } catch (error) {
+      console.error('Error cambiando estado del turno:', error);
+      setError('No se pudo actualizar el estado del turno. Por favor, intenta nuevamente.');
+      return false;
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const registrarPagoTurno = async (turno: TurnoAdmin) => {
+    const montoPendiente = getMontoPendienteTurno(turno);
+    if (montoPendiente <= 0.01) {
+      setError('Este turno no tiene saldo pendiente para registrar.');
+      return;
+    }
+
+    try {
+      setActionLoadingId(turno.id);
+      setError(null);
+      const response = await authenticatedFetch(`/turnos/${turno.id}/registrar-pago/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          monto: montoPendiente,
+          metodo_pago: 'efectivo'
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.error || errorData.detail || 'No se pudo registrar el pago.');
         return;
       }
 
@@ -344,13 +387,148 @@ export default function DashboardAdminPage() {
         loadTurnosAccion(accionTab),
         loadStats()
       ]);
+      setDetailDialogOpen(false);
+      setSelectedTurno(null);
     } catch (error) {
-      console.error('Error cambiando estado del turno:', error);
-      setError('No se pudo actualizar el estado del turno. Por favor, intenta nuevamente.');
+      console.error('Error registrando pago:', error);
+      setError('No se pudo registrar el pago. Por favor, intenta nuevamente.');
     } finally {
       setActionLoadingId(null);
     }
   };
+
+  const renderTurnoDetalleModal = () => {
+    if (!selectedTurno) return null;
+
+    const pendiente = getMontoPendienteTurno(selectedTurno);
+    const fecha = formatDate(selectedTurno.fecha_hora);
+    const hora = formatTime(selectedTurno.fecha_hora);
+    const isPendienteAceptacion = selectedTurno.estado.toLowerCase() === 'pendiente';
+    const isPagoPendiente = selectedTurno.estado.toLowerCase() === 'completado' && pendiente > 0.01;
+
+    return (
+      <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Detalle del turno</DialogTitle>
+            <DialogDescription>
+              Información operativa y acciones rápidas para resolver este turno.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-3 rounded-lg border p-4">
+              <h3 className="font-semibold text-sm text-muted-foreground">Turno</h3>
+              <div>
+                <p className="text-sm text-muted-foreground">Servicio</p>
+                <p className="font-medium">{getServicioNombre(selectedTurno)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Fecha y hora</p>
+                <p className="font-medium">{fecha} - {hora}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Estado</p>
+                <Badge variant={getEstadoBadgeVariant(selectedTurno.estado)}>{selectedTurno.estado}</Badge>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-4">
+              <h3 className="font-semibold text-sm text-muted-foreground">Personas</h3>
+              <div>
+                <p className="text-sm text-muted-foreground">Cliente</p>
+                <p className="font-medium">{getClienteNombre(selectedTurno)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Profesional</p>
+                <p className="font-medium">{getEmpleadoNombre(selectedTurno)}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-4 md:col-span-2">
+              <h3 className="font-semibold text-sm text-muted-foreground">Pago</h3>
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total</p>
+                  <p className="font-semibold">{formatCurrency(getPrecioTurno(selectedTurno))}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Seña</p>
+                  <p className="font-semibold">{formatCurrency(Number(selectedTurno.senia_pagada || 0))}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Saldo</p>
+                  <p className={pendiente > 0.01 ? 'font-semibold text-red-700' : 'font-semibold text-green-700'}>
+                    {formatCurrency(pendiente)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Método</p>
+                  <p className="font-semibold">{selectedTurno.metodo_pago || 'Sin informar'}</p>
+                </div>
+              </div>
+            </div>
+
+            {(selectedTurno.notas_cliente || selectedTurno.notas_empleado) && (
+              <div className="space-y-2 rounded-lg border p-4 md:col-span-2">
+                <h3 className="font-semibold text-sm text-muted-foreground">Notas</h3>
+                {selectedTurno.notas_cliente && <p className="text-sm">Cliente: {selectedTurno.notas_cliente}</p>}
+                {selectedTurno.notas_empleado && <p className="text-sm">Interna: {selectedTurno.notas_empleado}</p>}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => router.push(`/dashboard/propietario/turnos?turno=${selectedTurno.id}`)}
+            >
+              Ver en Turnos
+            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {isPagoPendiente && (
+                <Button
+                  className="bg-red-600 hover:bg-red-700"
+                  onClick={() => registrarPagoTurno(selectedTurno)}
+                  disabled={actionLoadingId === selectedTurno.id}
+                >
+                  {actionLoadingId === selectedTurno.id ? 'Procesando...' : 'Registrar pago'}
+                </Button>
+              )}
+              {isPendienteAceptacion && (
+                <>
+                  <Button
+                    className="bg-green-600 hover:bg-green-700"
+                    onClick={async () => {
+                      const ok = await changeTurnoEstado(selectedTurno.id, 'confirmado');
+                      if (ok) setDetailDialogOpen(false);
+                    }}
+                    disabled={actionLoadingId === selectedTurno.id}
+                  >
+                    {actionLoadingId === selectedTurno.id ? 'Procesando...' : 'Aceptar'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-red-600 border-red-600"
+                    onClick={async () => {
+                      const ok = await changeTurnoEstado(selectedTurno.id, 'cancelado');
+                      if (ok) setDetailDialogOpen(false);
+                    }}
+                    disabled={actionLoadingId === selectedTurno.id}
+                  >
+                    {actionLoadingId === selectedTurno.id ? 'Procesando...' : 'Rechazar'}
+                  </Button>
+                </>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
+  const turnosAccionActual = turnosAccion[accionTab];
+  const loadingAccionActual = loadingAccionTab === accionTab;
 
   // Mostrar loading mientras se verifica autenticación
   if (isLoading) {
@@ -402,7 +580,7 @@ export default function DashboardAdminPage() {
         )}
         <div className="space-y-6">
           {/* Tarjetas de estadísticas principales */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Ingresos del Mes</CardTitle>
@@ -416,29 +594,42 @@ export default function DashboardAdminPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-orange-200 bg-orange-50">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-orange-900">Comisión Pendiente</CardTitle>
-                <DollarSign className="h-4 w-4 text-orange-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-orange-700">
-                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : `$${stats?.comision_pendiente?.toFixed(2) || 0}`}
-                </div>
-                {renderDelta(stats?.comision_pendiente_variacion, 'vs mes pasado')}
-              </CardContent>
-            </Card>
-
             <Card className="border-blue-200 bg-blue-50">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-blue-900">Dinero Recuperado</CardTitle>
-                <Sparkles className="h-4 w-4 text-blue-600" />
+                <CardTitle className="text-sm font-medium text-blue-900">Turnos de Hoy</CardTitle>
+                <Calendar className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-blue-700">
-                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : `$${stats?.dinero_recuperado?.toFixed(2) || 0}`}
+                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : stats?.turnos_hoy || 0}
                 </div>
-                {renderDelta(stats?.dinero_recuperado_variacion, 'vs mes pasado')}
+                {renderDelta(stats?.turnos_hoy_variacion, 'vs ayer')}
+              </CardContent>
+            </Card>
+
+            <Card className="border-orange-200 bg-orange-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-orange-900">Solicitudes Pendientes</CardTitle>
+                <Clock className="h-4 w-4 text-orange-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-700">
+                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : stats?.turnos_pendientes_aceptacion || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">Turnos esperando aceptación</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-red-200 bg-red-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-red-900">Pagos Pendientes</CardTitle>
+                <DollarSign className="h-4 w-4 text-red-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-700">
+                  {loadingData ? <BeautifulSpinner label="" className="scale-75" /> : stats?.turnos_pendientes_pago || 0}
+                </div>
+                {renderDelta(stats?.turnos_pendientes_pago_variacion, 'vs ayer')}
               </CardContent>
             </Card>
           </div>
@@ -533,7 +724,14 @@ export default function DashboardAdminPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Tabs value={accionTab} onValueChange={(value) => handleAccionTabChange(value as any)}>
+              <Tabs
+                value={accionTab}
+                onValueChange={(value) => {
+                  if (isAccionTab(value)) {
+                    handleAccionTabChange(value);
+                  }
+                }}
+              >
                 <TabsList className="grid w-full grid-cols-3 mb-4">
                   <TabsTrigger value="proximos_48h" className="relative">
                     Próximos (48h)
@@ -556,13 +754,13 @@ export default function DashboardAdminPage() {
                 </TabsList>
 
                 <TabsContent value="proximos_48h">
-                  {loadingData ? (
+                  {loadingAccionActual ? (
                     <div className="flex flex-col items-center justify-center py-8 gap-3">
                       <BeautifulSpinner label="Cargando turnos..." />
                     </div>
-                  ) : turnosAccion.length > 0 ? (
+                  ) : turnosAccionActual.length > 0 ? (
                     <div className="space-y-4">
-                      {turnosAccion.map((turno) => {
+                      {turnosAccionActual.map((turno) => {
                         const dateFormatted = formatDate(turno.fecha_hora);
                         const timeFormatted = formatTime(turno.fecha_hora);
                         return (
@@ -595,10 +793,10 @@ export default function DashboardAdminPage() {
                                 ${getPrecioTurno(turno)}
                               </p>
                               <div className="flex space-x-1 mt-1">
-                                <Button size="sm" variant="ghost">
+                                <Button size="sm" variant="ghost" onClick={() => openDetalleTurno(turno)}>
                                   <Eye className="w-3 h-3" />
                                 </Button>
-                                <Button size="sm" variant="ghost">
+                                <Button size="sm" variant="ghost" onClick={() => openDetalleTurno(turno)}>
                                   <Edit className="w-3 h-3" />
                                 </Button>
                               </div>
@@ -616,13 +814,13 @@ export default function DashboardAdminPage() {
                 </TabsContent>
 
                 <TabsContent value="pendientes_pago">
-                  {loadingData ? (
+                  {loadingAccionActual ? (
                     <div className="flex flex-col items-center justify-center py-8 gap-3">
                       <BeautifulSpinner label="Cargando turnos pendientes de pago..." />
                     </div>
-                  ) : turnosAccion.length > 0 ? (
+                  ) : turnosAccionActual.length > 0 ? (
                     <div className="space-y-4">
-                      {turnosAccion.map((turno) => {
+                      {turnosAccionActual.map((turno) => {
                         const dateFormatted = formatDate(turno.fecha_hora);
                         const timeFormatted = formatTime(turno.fecha_hora);
                         return (
@@ -652,8 +850,13 @@ export default function DashboardAdminPage() {
                               <p className="font-bold text-red-700">
                                 ${getPrecioTurno(turno)}
                               </p>
-                              <Button size="sm" className="mt-2 bg-red-600 hover:bg-red-700">
-                                Marcar como Pagado
+                              <Button
+                                size="sm"
+                                className="mt-2 bg-red-600 hover:bg-red-700"
+                                onClick={() => registrarPagoTurno(turno)}
+                                disabled={actionLoadingId === turno.id}
+                              >
+                                {actionLoadingId === turno.id ? 'Procesando...' : 'Marcar como Pagado'}
                               </Button>
                             </div>
                           </div>
@@ -670,13 +873,13 @@ export default function DashboardAdminPage() {
                 </TabsContent>
 
                 <TabsContent value="pendientes_aceptacion">
-                  {loadingData ? (
+                  {loadingAccionActual ? (
                     <div className="flex flex-col items-center justify-center py-8 gap-3">
                       <BeautifulSpinner label="Cargando turnos pendientes de aceptación..." />
                     </div>
-                  ) : turnosAccion.length > 0 ? (
+                  ) : turnosAccionActual.length > 0 ? (
                     <div className="space-y-4">
-                      {turnosAccion.map((turno) => {
+                      {turnosAccionActual.map((turno) => {
                         const dateFormatted = formatDate(turno.fecha_hora);
                         const timeFormatted = formatTime(turno.fecha_hora);
                         return (
@@ -707,6 +910,9 @@ export default function DashboardAdminPage() {
                                 ${getPrecioTurno(turno)}
                               </p>
                               <div className="flex space-x-2 mt-2">
+                                <Button size="sm" variant="ghost" onClick={() => openDetalleTurno(turno)}>
+                                  <Eye className="w-3 h-3" />
+                                </Button>
                                 <Button
                                   size="sm"
                                   className="bg-green-600 hover:bg-green-700"
@@ -743,6 +949,7 @@ export default function DashboardAdminPage() {
           </Card>
         </div>
       </div>
+      {renderTurnoDetalleModal()}
     </div>
   );
 }

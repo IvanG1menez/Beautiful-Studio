@@ -91,6 +91,7 @@ interface ComprobanteData {
     servicio_nombre?: string;
     fecha_hora?: string;
     fecha_hora_completado?: string;
+    estado_display?: string;
     duracion_minutos?: number;
     senia_pagada?: string;
     precio_final?: string;
